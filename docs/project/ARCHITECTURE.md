@@ -13,10 +13,10 @@
 
 核心判断：
 
-- 产品不是网页生图工具，而是图片资产生成、登记、审核、复用和交付能力平台。
+- 产品不是网页生图工具，而是图片资产生成、登记、轻量选优、复用和交付能力平台。
 - MCP、REST API、CLI、Web UI 都必须进入同一套 application core，不能各自实现业务规则。
 - 生图必须异步执行，API 不同步等待 provider 完整生成。
-- 生成任务状态、资产审核状态、文件版本状态必须拆开建模。
+- 生成任务状态、资产选优/使用状态、文件版本状态必须拆开建模。
 - PostgreSQL 记录事实、索引、状态和审计；图片文件进入本地文件系统，后续扩展 MinIO/S3。
 - 第一版保持模块化单体和少量进程，不拆微服务。
 - 第一条 vertical slice 优先打通内容账号 campaign 封面图生成闭环。
@@ -32,7 +32,7 @@
   -> 保存原图
   -> 生成缩略图
   -> 写入 asset / asset_version / metadata
-  -> 人工审核
+  -> 轻量选优或状态标记
   -> 按 asset_id 获取原图、缩略图、metadata 和交付信息
 ```
 
@@ -41,7 +41,7 @@
 - 结构化图片任务。
 - 生图 provider 适配。
 - 文件落盘和 metadata 登记。
-- 任务状态、资产状态、审核事件。
+- 任务状态、资产状态、选优/状态事件。
 - MCP / REST / CLI / Web UI 多入口。
 - 本地文件获取和 JSON metadata 交付。
 
@@ -72,7 +72,7 @@ Codex / Claude / Cursor     CMS / n8n / SaaS      CLI / CI       Web Console
                 |                                     |
                 v                                     v
           PostgreSQL                           Redis Queue
-  Task / Asset / Version / Review                  |
+  Task / Asset / Version / Selection               |
                 ^                                  v
                 |                                Worker
                 |                                  |
@@ -92,8 +92,8 @@ Codex / Claude / Cursor     CMS / n8n / SaaS      CLI / CI       Web Console
 ## Architecture Principles
 
 1. 多入口，一套核心逻辑。
-2. 生成、审核、交付三件事分层处理。
-3. `ImageTask.status` 只描述生成执行；`Asset.status` 只描述审核和使用；`AssetVersion.status` 只描述文件是否可用。
+2. 生成、选优、交付三件事分层处理。
+3. `ImageTask.status` 只描述生成执行；`Asset.status` 只描述候选图选择、推荐和使用；`AssetVersion.status` 只描述文件是否可用。
 4. 图片文件不进数据库，数据库只保存事实记录、索引、状态和路径。
 5. Provider、Storage、Delivery 都通过 adapter 扩展，业务核心不依赖具体实现。
 6. `workspace_id`、`project_id`、`campaign_id` 从第一天贯穿任务、资产、文件路径、查询和交付。
@@ -124,7 +124,7 @@ cli
   CI helper
 
 postgres
-  task / asset / version / review / delivery facts
+  task / asset / version / selection / delivery facts
 
 redis
   queue
@@ -168,7 +168,7 @@ storage
 createImageTask()
 getImageTask()
 listImageAssets()
-approveAsset()
+selectAsset()
 rejectAsset()
 getAssetDeliveryInfo()
 getAssetFile()
@@ -187,7 +187,7 @@ ImageTask
 TaskAttempt
 Asset
 AssetVersion
-ReviewEvent
+SelectionEvent
 DeliveryEvent
 DeliveryInfo
 ```
@@ -198,7 +198,7 @@ DeliveryInfo
 - 创建和查询任务。
 - 维护任务状态机。
 - 维护资产状态机。
-- 写审核事件和交付事件。
+- 写选优/状态事件和交付事件。
 - 生成交付信息。
 - 屏蔽 provider、queue、storage 的实现细节。
 
@@ -251,7 +251,7 @@ cost_json
 
 Provider adapter 只负责生图和返回结果，不负责：
 
-- 审核状态。
+- 选优状态。
 - 业务隔离。
 - 文件最终落盘路径。
 - 资产登记。
@@ -277,7 +277,7 @@ Provider adapter 只负责生图和返回结果，不负责：
 5. 写 metadata JSON。
 6. 原子移动到正式路径。
 7. 写入 `asset` 和 `asset_version`。
-8. 将资产初始状态设置为 `draft`。
+8. 将资产初始状态设置为 `generated`。
 
 如果任一步失败：
 
@@ -365,15 +365,15 @@ enqueue_failed -> queued
 - `partially_completed`：部分生成结果成功登记，部分失败。
 - `failed`：没有可用资产或不可恢复错误。
 - `enqueue_failed`：数据库任务已创建，但入队失败，等待补偿或重入队。
-- `review_pending` 不作为任务状态，它是 UI 可以根据 draft assets 推导出的视图状态。
+- `selection_pending` 不作为任务状态，它是 UI 可以根据 generated assets 推导出的视图状态。
 
 ### Asset.status
 
-`Asset.status` 只回答“这张图片资产是否能被使用或交付”。
+`Asset.status` 只回答“这张图片资产在候选、推荐、弃用和交付中的位置”。
 
 ```text
-draft
-approved
+generated
+selected
 rejected
 published
 deprecated
@@ -382,21 +382,24 @@ deprecated
 推荐流转：
 
 ```text
-draft -> approved
-draft -> rejected
-approved -> published
-approved -> deprecated
+generated -> selected
+generated -> rejected
+selected -> published
+generated -> deprecated
+selected -> deprecated
 published -> deprecated
 rejected -> deprecated
 ```
 
 说明：
 
-- Worker 新生成资产默认是 `draft`。
-- `approved` 代表人工或调用方明确通过，可以交付。
+- Worker 新生成资产默认是 `generated`。
+- `selected` 代表人工、调用方或自动策略认为它是推荐候选，不是强制交付闸门。
+- 小团队/单体平台第一版不要求每张图都经过人工审核；`generated` 资产可以用于预览和内部交付，调用方可按需要标记 `selected` 或 `rejected`。
 - `published` 代表已经被某个外部目标使用或发布。
 - `deprecated` 代表不再推荐使用，但记录保留。
 - regenerate 应创建新任务、新资产或新版本，不应把旧 rejected 资产直接改写成新图片。
+- 当前服务端代码里的 `draft` / `approved` 是第一条 vertical slice 的兼容命名，产品语义上分别映射为 `generated` / `selected`；后续 MCP、Web managed mode 和数据库迁移应优先采用新语义。
 
 ### AssetVersion.status
 
@@ -521,12 +524,12 @@ asset_version:
 - cost_json
 - created_at
 
-review_event:
+selection_event:
 - id
 - asset_id
 - version_id
 - action
-- reviewer
+- actor
 - note
 - created_at
 
@@ -583,20 +586,20 @@ Worker -> consume task_id
   -> mark task completed / partially_completed / failed
 ```
 
-### Review Asset
+### Select / Reject Asset
 
 ```text
-Caller -> approve/reject asset_id
+Caller -> select/reject asset_id
   -> load asset and current ready version
   -> check workspace/project/campaign
   -> apply state transition
-  -> insert review_event
+  -> insert selection_event
   -> return updated asset
 ```
 
-Review 操作必须幂等：
+选择/拒绝操作必须幂等：
 
-- 已 `approved` 再 approve 返回当前状态。
+- 已 `selected` 再 select 返回当前状态。
 - 已 `rejected` 再 reject 返回当前状态。
 - 非法状态转换返回明确错误，不静默吞掉。
 
@@ -611,7 +614,7 @@ Caller -> get_asset_delivery_info(asset_id)
   -> return structured JSON
 ```
 
-第一版可以允许 `draft` 资产被内部预览接口读取，但正式交付默认只允许 `approved`、`published`。
+第一版默认允许 `generated`、`selected`、`published` 资产返回交付信息；`selected` 只是推荐优先级，不是唯一可交付条件。后续如果出现强合规或多人审核场景，再通过项目级策略开启强审核闸门。
 
 ## Idempotency and Retry
 
@@ -641,7 +644,7 @@ Redis queue 和 Worker 重启可能导致重复消费。第一版必须具备：
 - `task_attempt` 记录。
 - `asset_version.hash` 去重策略。
 - 文件写入临时目录后原子移动。
-- approve / reject 幂等。
+- select / reject 幂等。当前 `approve / reject` 接口保留为兼容别名。
 
 ## Consistency Boundaries
 
@@ -699,8 +702,8 @@ vag repair verify-asset <asset_id>
 文件状态规则：
 
 - 只有 `AssetVersion.status=ready` 的文件可被正式读取。
-- 正式交付默认要求 `Asset.status in (approved, published)`。
-- 审核台预览 draft 资产时，应走内部预览权限和相同归属校验。
+- 正式交付默认允许 `Asset.status in (generated, selected, published)`。
+- 选优视图预览 generated 资产时，应走内部预览权限和相同归属校验。
 
 ## Provider Failure Model
 
@@ -759,7 +762,7 @@ Provider adapter 必须把失败结构化，而不是只返回自然语言错误
 - file processing started
 - asset version ready
 - task completed / partially_completed / failed
-- review event created
+- selection event created
 - delivery info requested
 
 避免：
@@ -777,11 +780,13 @@ POST /api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id
 GET  /api/tasks/{task_id}
 GET  /api/projects/{project_id}/campaigns/{campaign_id}/assets
 GET  /api/assets/{asset_id}
-POST /api/assets/{asset_id}/approve
+POST /api/assets/{asset_id}/select
 POST /api/assets/{asset_id}/reject
 GET  /api/assets/{asset_id}/original
 GET  /api/assets/{asset_id}/thumbnail
 ```
+
+当前实现中的 `POST /api/assets/{asset_id}/approve` 保留为兼容别名，语义等价于 `select`。
 
 ### MCP Tools
 
@@ -789,7 +794,7 @@ GET  /api/assets/{asset_id}/thumbnail
 create_image_task
 get_image_task
 list_image_assets
-approve_image_asset
+select_image_asset
 reject_image_asset
 get_asset_delivery_info
 ```
@@ -800,14 +805,14 @@ get_asset_delivery_info
 vag task create --file task.json
 vag task get <task_id>
 vag asset list
-vag asset approve <asset_id>
+vag asset select <asset_id>
 vag asset reject <asset_id>
 vag asset file <asset_id> --kind original
 vag asset file <asset_id> --kind thumbnail
 vag repair scan
 ```
 
-CLI 在第一版可以作为 smoke test 工具，不要求完整交互体验。
+CLI 在第一版可以作为 smoke test 工具，不要求完整交互体验。当前 `vag asset approve` 是兼容命令，后续可补 `select` 别名。
 
 ## Configuration
 
@@ -842,18 +847,18 @@ THUMBNAIL_MAX_HEIGHT
   -> 保存 original
   -> 生成 thumbnail
   -> 写 asset metadata
-  -> approve asset
+  -> select asset or use generated asset directly
   -> GET original / thumbnail / metadata / delivery info
 ```
 
 实现顺序：
 
-1. 用 mock provider 跑通 create task -> queue -> worker -> local files -> asset metadata -> approve -> delivery。
-2. 加入 `ImageTask.status`、`Asset.status`、`AssetVersion.status` 和 `review_event`。
+1. 用 mock provider 跑通 create task -> queue -> worker -> local files -> asset metadata -> select/reject -> delivery。
+2. 加入 `ImageTask.status`、`Asset.status`、`AssetVersion.status` 和 `selection_event`。当前实现可继续用 `review_event` 表名作为兼容承载。
 3. 加入缩略图、hash、metadata JSON。
 4. 加入 `idempotency_key`、task attempt 和 Worker 重试。
 5. 接入第一个云端 API provider。
-6. 增加 Web 审核台和 MCP stdio server。
+6. 增加 Web 候选图选优视图和 MCP stdio server。
 7. 再考虑 MinIO/S3、webhook、多 provider 和成本统计增强。
 
 第一版不要求：
@@ -875,7 +880,7 @@ THUMBNAIL_MAX_HEIGHT
 | 单 provider 失败影响所有任务 | 引入第二 provider 和 provider routing |
 | Worker 队列长期积压 | 独立扩容 Worker，增加 provider 并发控制 |
 | 文件与数据库不一致频繁出现 | 引入 outbox / repair job / 更严格状态机 |
-| Web UI 审核量上升 | 增加审核筛选、批量审核、状态视图 |
+| 候选图数量或选优量上升 | 增加候选筛选、批量选优、状态视图和自动选优策略 |
 | 多业务方接入 | 增加项目级 API key、限流、审计日志 |
 | provider 成本不可控 | 增加成本预算、模型路由、任务配额 |
 | 任务链路排障困难 | 接入集中日志、metrics 和 tracing |
@@ -902,7 +907,7 @@ THUMBNAIL_MAX_HEIGHT
 - Worker 能生成或模拟生成图片。
 - 原图、缩略图、metadata 能按 workspace / project / campaign 隔离落盘。
 - 数据库中能查到 `asset_id`、`asset_version`、hash、provider、prompt 和状态。
-- `draft` 资产 approve 后可返回稳定交付信息。
+- `generated` 资产可返回稳定交付信息；标记为 `selected` 后可作为推荐交付结果优先返回。
 - 重复提交同一 `idempotency_key` 不会创建不可控重复任务。
 - Worker 重复消费同一任务不会产生不可控重复资产。
 - provider 失败时任务有明确 `error_code` 和 `error_message`。

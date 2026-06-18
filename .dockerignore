@@ -1,0 +1,13 @@
+.git/
+storage/
+tmp/
+dist/
+build/
+coverage/
+node_modules/
+web/node_modules/
+web/dist/
+web/.wrangler/
+.env
+.env.*
+

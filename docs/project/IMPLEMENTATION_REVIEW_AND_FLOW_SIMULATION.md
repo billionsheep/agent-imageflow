@@ -8,7 +8,7 @@
 
 原因：
 
-- 产品边界已明确：不是网页生图工具，而是图片资产生成、登记、审核、复用和交付平台。
+- 产品边界已明确：不是网页生图工具，而是图片资产生成、登记、轻量选优、复用和交付平台。
 - 输入输出已冻结：MCP、REST API、CLI、Web UI 统一归一到 `ImageTask`。
 - 业务隔离已冻结：`Workspace -> Project -> Campaign -> ImageTask -> Asset`。
 - 架构已收敛：模块化单体、API/Worker/CLI、多入口同一核心、PostgreSQL、Redis、本地文件系统、provider adapter。
@@ -22,7 +22,7 @@
 | Provider | `mock` | 先跑通闭环，真实 provider 后接。 |
 | Dev storage root | `./storage` | 开发环境避免直接写 `/data`；部署环境映射到 `/data/agent-imageflow`。 |
 | Delivery | 本地下载 URL + metadata URL | 不直接推 Notion、CMS、小红书或对象存储。 |
-| First entry | REST API + CLI smoke test | MCP 和 Web UI 在核心闭环后接入。 |
+| First entry | Web foundation first, then REST API / CLI / MCP | Web 基于 `gpt_image_playground` 二开，服务端资产闭环随后接入。 |
 | Tech stack | Go + PostgreSQL + Redis + Docker Compose | 与 `TECH_SPEC.md` 和 `ARCHITECTURE.md` 保持一致。 |
 
 ## Reference Project Review
@@ -40,7 +40,7 @@
 不建议直接作为底座：
 
 - 它是浏览器前端应用，事实源是 IndexedDB 和 data URL。
-- Agent ImageFlow 需要服务端事实源、PostgreSQL、Redis、文件系统、审核状态和交付接口。
+- Agent ImageFlow 需要服务端事实源、PostgreSQL、Redis、文件系统、候选图选优状态和交付接口。
 - 它的 CORS、前端 API key、多配置 UI 逻辑不应直接进入第一版服务端核心。
 
 结论：参考项目适合作为 provider adapter、mock 场景和未来 Web UI 的经验来源，不适合作为 Agent ImageFlow 的直接 fork 基础。
@@ -56,7 +56,7 @@ Campaign: cmp_7day_cover
 Scenario: 小红书 AI 动漫账号，7 天封面图计划
 Provider: mock
 Requested count: 3
-Review required: true
+Selection mode: manual_optional
 Storage root: ./storage
 Public base URL: http://localhost:8080
 ```
@@ -94,7 +94,7 @@ flowchart TD
   O -- "yes" --> P["Atomic move to final path"]
   P --> Q["Insert asset + asset_version ready"]
   Q --> R["Mark task completed"]
-  R --> S["Reviewer approves one asset"]
+  R --> S["Caller or strategy selects one candidate"]
   S --> T["Delivery info returns URLs and metadata"]
 ```
 
@@ -131,9 +131,9 @@ sequenceDiagram
   API->>DB: load task + assets
   API-->>Caller: completed with asset_ids
 
-  Caller->>API: approve asset_001
-  API->>DB: update asset approved + review_event
-  API-->>Caller: asset approved
+  Caller->>API: select asset_001
+  API->>DB: update asset selected + selection_event
+  API-->>Caller: asset selected
 
   Caller->>API: get delivery info
   API->>DB: load asset + current ready version
@@ -155,11 +155,11 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
-  [*] --> draft: worker creates asset
-  draft --> approved: reviewer approves
-  draft --> rejected: reviewer rejects
-  approved --> published: external delivery recorded
-  approved --> deprecated: no longer recommended
+  [*] --> generated: worker creates asset
+  generated --> selected: caller or strategy selects
+  generated --> rejected: caller or strategy rejects
+  selected --> published: external delivery recorded
+  selected --> deprecated: no longer recommended
   rejected --> deprecated: archive rejected candidate
 ```
 
@@ -211,7 +211,8 @@ Request:
   "output_format": "png",
   "requested_count": 3,
   "provider": "mock",
-  "review_required": true,
+  "selection_mode": "manual_optional",
+  "review_required": false,
   "metadata_json": {
     "channel": "xiaohongshu",
     "content_day": 1,
@@ -368,7 +369,7 @@ Database facts:
 asset:
   id = ast_day1_001
   task_id = task_20260618_001
-  status = draft
+  status = generated
   current_version_id = ver_day1_001_1
 
 asset_version:
@@ -417,19 +418,19 @@ Expected response:
   "assets": [
     {
       "asset_id": "ast_day1_001",
-      "status": "draft",
+      "status": "generated",
       "thumbnail_url": "http://localhost:8080/api/assets/ast_day1_001/thumbnail",
       "metadata_url": "http://localhost:8080/api/assets/ast_day1_001"
     },
     {
       "asset_id": "ast_day1_002",
-      "status": "draft",
+      "status": "generated",
       "thumbnail_url": "http://localhost:8080/api/assets/ast_day1_002/thumbnail",
       "metadata_url": "http://localhost:8080/api/assets/ast_day1_002"
     },
     {
       "asset_id": "ast_day1_003",
-      "status": "draft",
+      "status": "generated",
       "thumbnail_url": "http://localhost:8080/api/assets/ast_day1_003/thumbnail",
       "metadata_url": "http://localhost:8080/api/assets/ast_day1_003"
     }
@@ -437,12 +438,12 @@ Expected response:
 }
 ```
 
-### Step 6: Reviewer Chooses One Candidate
+### Step 6: Caller Or Strategy Chooses One Candidate
 
-Reviewer decision:
+Selection decision:
 
 ```text
-approve ast_day1_002
+select ast_day1_002
 reject ast_day1_001
 reject ast_day1_003
 ```
@@ -450,21 +451,21 @@ reject ast_day1_003
 Requests:
 
 ```text
-POST /api/assets/ast_day1_002/approve
+POST /api/assets/ast_day1_002/select
 POST /api/assets/ast_day1_001/reject
 POST /api/assets/ast_day1_003/reject
 ```
 
-Expected `approve` response:
+Expected `select` response:
 
 ```json
 {
   "asset_id": "ast_day1_002",
-  "status": "approved",
+  "status": "selected",
   "current_version": 1,
-  "review_event": {
-    "action": "approve",
-    "reviewer": "local-user",
+  "selection_event": {
+    "action": "select",
+    "actor": "local-user",
     "created_at": "2026-06-18T10:05:00Z"
   }
 }
@@ -473,14 +474,14 @@ Expected `approve` response:
 Database facts:
 
 ```text
-asset ast_day1_002.status = approved
+asset ast_day1_002.status = selected
 asset ast_day1_001.status = rejected
 asset ast_day1_003.status = rejected
 
-review_event:
+selection_event:
   asset_id = ast_day1_002
   version_id = ver_day1_002_1
-  action = approve
+  action = select
 ```
 
 ### Step 7: Caller Gets Delivery Info
@@ -501,7 +502,7 @@ Expected response:
   "campaign_id": "cmp_7day_cover",
   "task_id": "task_20260618_001",
   "current_version": 1,
-  "status": "approved",
+  "status": "selected",
   "hash": "sha256:mock_hash_002",
   "provider": "mock",
   "model": "mock-image-v1",
@@ -659,26 +660,31 @@ Docker Compose
   -> create task
   -> worker generates mock image files
   -> asset/version records
-  -> approve asset
+  -> select asset or use generated asset directly
   -> get original / thumbnail / metadata
 ```
 
 Do not implement yet:
 
 - Real provider credentials.
-- Web UI.
 - MCP server.
 - S3 / MinIO.
 - Webhook.
 - User/team permission system.
 - Complex content calendar.
 
+Current implementation status:
+
+- 2026-06-18: This recommended slice has been implemented with Go API / Worker / CLI, PostgreSQL, Redis, local storage, Docker Compose and mock provider.
+- Verification evidence is recorded in `docs/project/stories/slice-002-server-asset-loop.md`.
+- Remaining gaps are MCP server, Web managed task flow, real cloud provider and production hardening.
+
 ## Review Questions For User
 
 The implementation can start with these accepted defaults:
 
 1. 第一版开发存储根目录采用项目内 `./storage`，部署时映射 `/data/agent-imageflow`。
-2. 第一版 REST API + CLI 先跑通，MCP 和 Web UI 后接。
+2. 第一版 Web 基于 `gpt_image_playground` 二开先跑通，REST API / CLI / MCP 随后接入服务端资产核心。
 3. 第一版真实云端 provider 延后，先只用 mock provider 验证资产闭环。
 4. 后端采用 Go。
 5. 最终自托管部署默认采用 Docker Compose。

@@ -4,7 +4,13 @@
 
 - Decision: 项目定位从 DiagramOps / 技术图示网关调整为 Agent ImageFlow / AI 图片资产生成与管理平台。
 - Reason: 用户明确表示不希望第一版重点做 SVG、Mermaid 或技术图示，因为 Codex 已能完成部分图示生成；更想解决生图自动化、海报设计、小说配图和其他图片资产场景。
-- Impact: 第一版优先验证生图、落盘、审核、复用、MCP/API 调用闭环；暂不优先做技术图示 DSL。
+- Impact: 第一版优先验证生图、落盘、轻量选优、复用、MCP/API 调用闭环；暂不优先做技术图示 DSL。
+
+## 2026-06-18: 降级人工审核为轻量选优/状态标记
+
+- Decision: 第一版不把“每张图片必须人工审核通过”作为默认流程，改为 `generated -> selected/rejected/published` 的轻量选优和状态标记。当前代码中的 `draft/approved`、`approve/reject` 保留为兼容命名，产品语义上分别映射为 `generated/selected`、`select/reject`。
+- Reason: 项目当前面向单体平台或小团队，强人工审核会增加使用成本；质量优先通过 prompt 优化、style preset、参考图、模板复用和多候选 best-of 逻辑保证。
+- Impact: 后续 MCP、Web managed mode 和计划文档优先使用 `select_image_asset`、候选图选优视图和自动选优策略；强审核只作为未来项目级可选策略，不进入 MVP 默认路径。
 
 ## 2026-06-18: 当前阶段只写项目文档，不实现代码
 
@@ -15,7 +21,7 @@
 ## 2026-06-18: 能力平台而非网页生图工具
 
 - Decision: 产品应作为 MCP/API/CLI 能力平台，而不是只面向人工点击的网页工具。
-- Reason: 核心痛点是 AI 和自动化系统无法稳定拿到图片资产句柄、元数据、审核状态和交付路径。
+- Reason: 核心痛点是 AI 和自动化系统无法稳定拿到图片资产句柄、元数据、候选图状态和交付路径。
 - Impact: 未来接口设计优先考虑结构化输入输出、任务状态和资产登记。
 
 ## 2026-06-18: 冻结输入与输出 v0.1
@@ -33,8 +39,8 @@
 ## 2026-06-18: 选择内容系统批量封面图作为核心业务流程
 
 - Decision: 第一版核心业务流程选定为“内容系统批量生成封面图”，demo 方向使用小红书/内容账号 campaign 素材生产。
-- Reason: 这个流程最能验证批量任务、业务隔离、候选图、缩略图、审核、文件获取和 metadata 交付，同时比小说角色一致性和电商商品海报更轻。
-- Impact: 首个 vertical slice 围绕内容账号 project、7 天封面图 campaign、批量 ImageTask、候选 Asset 和审核交付展开。
+- Reason: 这个流程最能验证批量任务、业务隔离、候选图、缩略图、选优、文件获取和 metadata 交付，同时比小说角色一致性和电商商品海报更轻。
+- Impact: 首个 vertical slice 围绕内容账号 project、7 天封面图 campaign、批量 ImageTask、候选 Asset 和选优交付展开。
 
 ## 2026-06-18: 冻结第一版架构方向
 
@@ -53,3 +59,22 @@
 - Decision: 第一阶段采用 Go + PostgreSQL + Redis + 本地文件系统 + Docker Compose；先实现 mock provider 闭环，后续再接一个云端 API provider；MVP 不考虑本地 GPU 或 ComfyUI。
 - Reason: 用户明确希望只用 API、不考虑 GPU；Go 适合 API、Worker、CLI、MCP 共享 domain code；Docker Compose 能覆盖本地开发和第一版自托管部署。
 - Impact: 下一步直接进入实施骨架：Docker Compose、Go API、Go Worker、CLI smoke test、PostgreSQL schema、Redis queue、local storage 和 mock provider。
+
+## 2026-06-18: 回退低保真 Web，改为基于 GPT Image Playground 二开
+
+- Decision: 撤回自写低保真 Web/API/Worker 实现，当前前端改为直接导入 `/Users/moon/Workspace/tools/gpt_image_playground` 到 `web/` 并二开。
+- Reason: 用户明确反馈自写 Web 质量不足，且参考项目已经具备成熟的生图工作台、设置页、Base URL/API Key、多 provider、画廊、参考图、遮罩和 Agent 模式。
+- Impact: 第一实现步骤改为先稳定 Web 底座，再把 Agent ImageFlow 的服务端资产登记、轻量选优、MCP 和交付模型接入进去；原架构方向保留，但实施顺序调整为 Web-first。
+
+## 2026-06-18: 完成第一条服务端 mock 资产闭环
+
+- Decision: 在当前 Web 底座之外新增 Go API、Worker、CLI、PostgreSQL、Redis、本地文件系统和 Docker Compose 骨架，并用 mock provider 跑通 `ImageTask -> Asset -> AssetVersion -> 状态事件 -> DeliveryInfo`。
+- Reason: 产品核心价值必须来自稳定 `task_id`、`asset_id`、落盘文件、metadata、候选图状态和交付 URL，而不是浏览器端临时图片结果。
+- Impact: 第一版已有 REST/CLI smoke 能力；Web 后续应通过新增的服务端 API client 进入托管模式。MCP、真实云端 provider、MinIO/S3、权限计费仍保持 out of scope。
+- Implementation note: Go 依赖 `pgx` 和 `go-redis` 作为 PostgreSQL/Redis 驱动；API 默认监听 `http://localhost:8081`；Docker volume 挂载到 `/data/agent-imageflow`。
+
+## 2026-06-18: Web 和服务端最终收敛到同一资产核心
+
+- Decision: `web/`、MCP、REST API 和 CLI 最终都应作为入口调用同一个服务端 application core；不长期维护“浏览器直连 provider”和“服务端 Worker provider”两套正式生图系统。
+- Reason: Agent ImageFlow 的产品定义是可追踪、可选优、可交付的图片资产平台。浏览器直连 provider 可以提供成熟交互和迁移经验，但不能作为 MCP/自动化系统的正式事实源。
+- Impact: 后续优先补 MCP stdio server 和服务端真实 provider adapter；Web 再进入服务端托管模式。原 Web 的 OpenAI-compatible、fal.ai、自定义 HTTP provider 逻辑作为服务端 provider adapter 的参考来源。

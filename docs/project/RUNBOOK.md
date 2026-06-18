@@ -1,15 +1,24 @@
 # Runbook
 
-当前项目进入实施准备阶段，暂无应用代码、运行命令或测试命令。
+当前项目已导入 `web/` 前端底座，基于 `GPT Image Playground` 二开。
 
 ## Current Commands
 
 ```bash
-# 查看项目文档
-find docs/project -maxdepth 2 -type f -print
+# Web 开发
+npm --prefix web install
+npm --prefix web run dev -- --host 0.0.0.0 --port 8080
 
-# 查看 Git remote
-git remote -v
+# Web 验证
+npm --prefix web test -- --run
+npm --prefix web run build
+
+# 服务端开发 / smoke
+docker compose build
+docker compose up
+docker compose exec api /app/vag task create --file /app/examples/tasks/sample-image-task.json
+docker compose exec api /app/vag task get <task_id>
+docker compose exec api /app/vag asset approve <asset_id> # 兼容命令，产品语义等价于 select
 
 # 查看本地变更
 git status --short
@@ -21,9 +30,9 @@ git status --short
 - Local branch: `main`
 - Initial commit 已推送，`main` 跟踪 `origin/main`。
 
-## Future Local Run Target
+## Local Run Target
 
-实现阶段建议优先提供：
+服务端当前可通过 Docker Compose 启动：
 
 ```bash
 docker compose up
@@ -40,19 +49,32 @@ Docker Compose
   storage volume -> /data/agent-imageflow
 ```
 
-以及至少一个 smoke test：
+最小 smoke test：
 
 ```bash
-vag task create --file examples/tasks/sample-image-task.json
-vag task get <task_id>
+docker compose exec api /app/vag task create --file /app/examples/tasks/sample-image-task.json
+docker compose exec api /app/vag task get <task_id>
+docker compose exec api /app/vag asset approve <asset_id> # 兼容命令，产品语义等价于 select
+curl http://localhost:8081/api/assets/<asset_id>
 ```
+
+后续新增 MCP 和 Web managed mode 时优先使用 `select_image_asset` / `select` 命名；当前 Runbook 保留 `approve` 是为了匹配已实现 CLI。
 
 ## Ports
 
-未定。进入实现阶段后记录 API、Web UI、MinIO 等端口。
+- Web dev server: `http://localhost:8080`
+- API: `http://localhost:8081`
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- Worker: 无 HTTP 端口，消费 Redis 队列 `queue:image_generation`。
 
 ## Debug Notes
 
 - 如果接云端 provider，必须避免提交 API key。
 - 如果未来接 ComfyUI，需记录本地 ComfyUI URL、模型要求和输出目录；MVP 不接本地 GPU。
 - 如果接 MCP，优先从 stdio 本地模式开始。
+- 本机 shell 当前没有 `go` 命令；Go 测试和格式化可通过 Docker 执行：
+
+```bash
+docker run --rm -v "$PWD":/src -w /src golang:1.25.3-alpine sh -lc '/usr/local/go/bin/gofmt -w cmd internal && /usr/local/go/bin/go test ./...'
+```
