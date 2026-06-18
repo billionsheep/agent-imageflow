@@ -1,0 +1,23 @@
+.DS_Store
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+
+# Local runtime data
+storage/
+tmp/
+*.db
+*.sqlite
+*.sqlite3
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Dependency caches
+node_modules/
+.cache/
+
