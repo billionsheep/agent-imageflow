@@ -33,6 +33,6 @@
 - 2026-06-18: 根据用户讨论，项目从知识库图示生产系统收敛/转向更通用的生图自动化资产平台。
 - 2026-06-18: 输入/输出和业务隔离 v0.1 已冻结，保留未来业务扩展点但不扩大 MVP。
 - 2026-06-18: 已将架构评审合并进 `ARCHITECTURE.md`，补齐状态模型、幂等重试、一致性边界、文件访问隔离、provider 失败模型和演进触发条件。
-- 2026-06-18: 已初始化 Git 仓库并绑定 `git@github.com:billionsheep/agent-imageflow.git`；未提交、未推送。
+- 2026-06-18: 已初始化 Git 仓库，绑定并推送到 `git@github.com:billionsheep/agent-imageflow.git`。
 - 2026-06-18: 已新增 `IMPLEMENTATION_REVIEW_AND_FLOW_SIMULATION.md`，模拟内容账号 campaign 封面图生成、审核、交付和失败路径。
 - 2026-06-18: 已确认进入实施准备阶段；第一阶段使用 Go、PostgreSQL、Redis、本地文件系统、Docker Compose 和 mock provider，不考虑本地 GPU。

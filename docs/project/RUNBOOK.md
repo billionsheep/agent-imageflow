@@ -19,7 +19,7 @@ git status --short
 
 - Remote: `git@github.com:billionsheep/agent-imageflow.git`
 - Local branch: `main`
-- 当前准备进行 initial commit 并推送。
+- Initial commit 已推送，`main` 跟踪 `origin/main`。
 
 ## Future Local Run Target
 
