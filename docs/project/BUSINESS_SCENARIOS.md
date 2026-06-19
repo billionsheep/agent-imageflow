@@ -147,3 +147,75 @@
 - Publishing Status: 未使用、已用于某篇内容、已发布。
 - Usage Tracking: 一张图被哪些内容使用。
 - Export Pack: 按 campaign 导出素材包。
+
+## Scenario Clarifications After MVP Trial
+
+以下内容记录真实试用后的后续澄清，不改变第一版核心流程。
+
+### 小红书萌宠账号
+
+如果用户后续运营一个关于萌宠的小红书账号，建议把它作为独立 project，而不是和其他账号混在一起。
+
+建议空间：
+
+```text
+Workspace: personal_creator
+Project: xhs_cute_pet_account
+Campaign:
+  - avatar_and_mascot_design
+  - 2026_07_daily_posts
+  - sticker_pack_v1
+  - campaign_summer_pet_care
+```
+
+这个场景需要重点保留：
+
+- 账号主形象，例如固定猫/狗/兔子角色。
+- 原始参考图和后续修改图。
+- prompt recipe 和 prompt 修改历史。
+- 每次 edit/mask 的 lineage。
+- selected / rejected 候选状态。
+- 图片被哪篇小红书笔记使用的 usage tracking。
+
+当前产品可以完成：
+
+- project / campaign 隔离。
+- Web / MCP / REST / CLI 创建图片任务。
+- 生成、落盘、缩略图、metadata、selected/rejected。
+- reference image、mask/edit descriptor 和真实 provider 输入复用。
+
+当前还不完整：
+
+- Web 不能统一显示 MCP / REST / CLI 创建的全部资产。
+- 没有正式 Reference Library、Mascot Profile、Prompt Recipe 和 edit lineage 视图。
+- 没有 session/run/source_thread 隔离。
+- 没有发布使用记录、存储占用和过期策略。
+
+### 嵌入式项目架构图账号
+
+如果另一个账号专门做嵌入式项目架构图，也建议作为独立 project。它和萌宠账号共享平台能力，但业务资产、prompt、参考图和交付目标不同，不能混在同一个 project。
+
+建议空间：
+
+```text
+Workspace: engineering_docs 或 personal_creator
+Project: embedded_architecture_diagrams
+Campaign:
+  - product_a_board_architecture
+  - rtos_data_flow
+  - sensor_pipeline_article_series
+  - release_notes_diagrams
+```
+
+需要澄清：
+
+- 如果只是生成“图片风格的技术架构图封面/插图”，当前图片资产闭环可以承接。
+- 如果需要可编辑、可 diff、可长期维护的 Mermaid / D2 / SVG / draw.io 源文件，当前产品还不完整。
+- 嵌入式架构图对事实准确性、模块命名、连线方向和接口关系要求更高，不能只依赖生图模型自由发挥。
+
+后续如果确认要支持该方向，应补：
+
+- Diagram source retention：保存 Mermaid / D2 / SVG / draw.io 等源文件。
+- Rendered asset：把图示源渲染成图片资产并进入 Asset Registry。
+- Prompt + source 双轨：prompt 用于辅助生成，正式交付以结构化 source 为准。
+- 技术图示 review：对标签、连线和模块关系做校验。

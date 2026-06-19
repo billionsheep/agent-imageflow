@@ -167,6 +167,8 @@ storage
 ```text
 createImageTask()
 getImageTask()
+getProjectQualityProfile()
+updateProjectQualityProfile()
 listImageAssets()
 selectAsset()
 rejectAsset()
@@ -673,7 +675,7 @@ Redis queue 和 Worker 重启可能导致重复消费。第一版必须具备：
 
 ### Reconcile
 
-第一版应预留 repair/reconcile 命令：
+第一版已接入本地 repair/reconcile smoke 命令：
 
 ```text
 vag repair scan
@@ -831,9 +833,13 @@ TASK_TIMEOUT_SECONDS
 MAX_TASK_RETRIES
 THUMBNAIL_MAX_WIDTH
 THUMBNAIL_MAX_HEIGHT
+OPENAI_COMPATIBLE_BASE_URL
+OPENAI_COMPATIBLE_API_KEY
+OPENAI_COMPATIBLE_MODEL
+PROVIDER_TIMEOUT_SECONDS
 ```
 
-真实云端 provider 配置后续按所选 provider 增加，但不得提交密钥。
+OpenAI-compatible provider 已作为第一版真实 provider adapter 接入。不得提交真实密钥；真实 smoke 需要通过本地环境变量注入。
 
 ## First Vertical Slice
 
@@ -857,9 +863,10 @@ THUMBNAIL_MAX_HEIGHT
 2. 加入 `ImageTask.status`、`Asset.status`、`AssetVersion.status` 和 `selection_event`。当前实现可继续用 `review_event` 表名作为兼容承载。
 3. 加入缩略图、hash、metadata JSON。
 4. 加入 `idempotency_key`、task attempt 和 Worker 重试。
-5. 接入第一个云端 API provider。
-6. 增加 Web 候选图选优视图和 MCP stdio server。
-7. 再考虑 MinIO/S3、webhook、多 provider 和成本统计增强。
+5. 增加 MCP stdio server。
+6. 接入第一个云端 API provider。
+7. 增加 Web 候选图选优视图。
+8. 再考虑 MinIO/S3、webhook、多 provider 和成本统计增强。
 
 第一版不要求：
 

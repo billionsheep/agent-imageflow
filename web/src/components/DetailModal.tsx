@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, showCodexCliPrompt, getCodexCliPromptKey, retryTask } from '../store'
+import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, showCodexCliPrompt, getCodexCliPromptKey, retryTask, selectImageflowAsset, rejectImageflowAsset } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { useTooltip } from '../hooks/useTooltip'
@@ -63,6 +63,8 @@ export default function DetailModal() {
     () => tasks.find((t) => t.id === detailTaskId) ?? null,
     [tasks, detailTaskId],
   )
+  const isManagedImageflowTask = task?.managedBy === 'agent-imageflow'
+  const managedAssets = isManagedImageflowTask ? task?.imageflowAssets ?? [] : []
   const streamPreviewItems = useMemo(() => {
     const slotEntries = streamPreviewSlots
       ? Object.entries(streamPreviewSlots)
@@ -150,6 +152,14 @@ export default function DetailModal() {
   const allInputImageIds = task?.inputImageIds ?? []
   const outputSlots = useMemo(() => {
     if (!task) return []
+    if (task.managedBy === 'agent-imageflow') {
+      return (task.imageflowAssets ?? []).map((asset, index) => ({
+        requestIndex: index,
+        outputImageIndex: index,
+        imageId: asset.assetId,
+        error: '',
+      }))
+    }
     const outputErrors = task.outputErrors ?? []
     if (outputErrors.length === 0) {
       return task.outputImages.map((imageId, outputImageIndex) => ({
@@ -176,10 +186,21 @@ export default function DetailModal() {
   const currentOutputImageId = currentOutputSlot?.imageId || ''
   const currentOutputImageIndex = currentOutputSlot?.outputImageIndex ?? -1
   const currentOutputError = currentOutputSlot?.error || ''
+  const currentManagedAsset = isManagedImageflowTask ? managedAssets[imageIndex] ?? null : null
   const currentOriginalOutputImageId = currentOutputImageIndex >= 0 ? task?.transparentOriginalImages?.[currentOutputImageIndex] || '' : ''
   const currentOutputPreviewSrc = currentOutputImageId ? outputPreviewSrcs[currentOutputImageId] || '' : ''
 
   useEffect(() => {
+    if (isManagedImageflowTask) {
+      const next: Record<string, string> = {}
+      for (const asset of managedAssets) {
+        const src = asset.downloadUrl || asset.thumbnailUrl
+        if (src) next[asset.assetId] = src
+      }
+      setOutputPreviewSrcs(next)
+      return
+    }
+
     const outputImageIds = task?.outputImages ?? []
     if (outputImageIds.length === 0) {
       setOutputPreviewSrcs({})
@@ -207,7 +228,7 @@ export default function DetailModal() {
     return () => {
       cancelled = true
     }
-  }, [task?.outputImages])
+  }, [isManagedImageflowTask, managedAssets, task?.outputImages])
 
   useEffect(() => {
     let cancelled = false
@@ -256,7 +277,7 @@ export default function DetailModal() {
   const taskProvider = task.apiProvider
   const isOpenAiTask = (taskProvider ?? 'openai') === 'openai'
   const showPromptWarning = Boolean(isOpenAiTask && task.apiMode === 'responses' && currentOutputImageId && (!currentRevisedPrompt || showRevisedPrompt) && !hasHandledPromptWarning)
-  const taskProviderName = taskProvider === 'fal' ? 'fal.ai' : taskProvider ? 'OpenAI' : '未知'
+  const taskProviderName = taskProvider === 'fal' ? 'fal.ai' : taskProvider === 'agent-imageflow' ? 'Agent ImageFlow' : taskProvider ? 'OpenAI' : '未知'
   const taskProfileName = task.apiProfileName || '未知'
   const taskModel = task.apiModel || '未知'
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
@@ -313,6 +334,21 @@ export default function DetailModal() {
     openFavoritePicker([task.id])
   }
 
+  const handleSelectManagedAsset = () => {
+    if (!currentManagedAsset || !task) return
+    void selectImageflowAsset(task.id, currentManagedAsset.assetId)
+  }
+
+  const handleRejectManagedAsset = () => {
+    if (!currentManagedAsset || !task) return
+    void rejectImageflowAsset(task.id, currentManagedAsset.assetId)
+  }
+
+  const handleOpenManagedUrl = (url?: string) => {
+    if (!url) return
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   const handleCopyError = async () => {
     const errorText = task.error || '生成失败'
     try {
@@ -356,6 +392,11 @@ export default function DetailModal() {
   const handleDownloadCurrentOutput = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (!currentOutputImageId || !task) return
+    if (currentManagedAsset?.downloadUrl) {
+      window.open(currentManagedAsset.downloadUrl, '_blank', 'noopener,noreferrer')
+      showToast('已打开服务端原图', 'success')
+      return
+    }
 
     try {
       const result = await downloadImageIds([currentOutputImageId], `task-${task.id}`)
@@ -389,7 +430,17 @@ export default function DetailModal() {
 
   const handleDownloadAllOutputs = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!task?.outputImages?.length) return
+    if (!task || outputLen === 0) return
+    if (isManagedImageflowTask) {
+      const urls = managedAssets.map((asset) => asset.downloadUrl).filter((url): url is string => Boolean(url))
+      if (!urls.length) {
+        showToast('没有可打开的服务端原图 URL', 'error')
+        return
+      }
+      for (const url of urls) window.open(url, '_blank', 'noopener,noreferrer')
+      showToast(`已打开 ${urls.length} 张服务端原图`, 'success')
+      return
+    }
 
     try {
       const fileNameBase = `task-${task.id}`
@@ -480,7 +531,7 @@ export default function DetailModal() {
                   </ViewportTooltip>
                 </div>
               )}
-              {task.outputImages.length > 1 && (
+              {outputLen > 1 && (
                 <div className="relative group flex">
                   <button
                     type="button"
@@ -521,9 +572,13 @@ export default function DetailModal() {
                     }))
                   }
                 }}
-                onClick={() =>
+                onClick={() => {
+                  if (currentManagedAsset?.downloadUrl) {
+                    window.open(currentManagedAsset.downloadUrl, '_blank', 'noopener,noreferrer')
+                    return
+                  }
                   setLightboxImageId(currentOutputImageId, task.outputImages)
-                }
+                }}
                 alt=""
               />
               <div data-selectable-text className="absolute left-4 top-[15px] flex items-center gap-1.5">
@@ -810,25 +865,27 @@ export default function DetailModal() {
                     </ViewportTooltip>
                   </div>
                 )}
-                <div className="relative group">
-                  <button
-                    type="button"
-                    {...retryTooltip.handlers}
-                    onClick={() => {
-                      retryTooltip.handlers.onClick()
-                      handleRetry()
-                    }}
-                    className="inline-flex items-center justify-center rounded-full border border-blue-200/80 bg-white/80 px-3 py-1.5 text-blue-500 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-white/[0.04] dark:hover:bg-blue-500/10"
-                    aria-label="重试任务"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </button>
-                  <ViewportTooltip visible={retryTooltip.visible} className="whitespace-nowrap">
-                    重试任务
-                  </ViewportTooltip>
-                </div>
+                {!isManagedImageflowTask && (
+                  <div className="relative group">
+                    <button
+                      type="button"
+                      {...retryTooltip.handlers}
+                      onClick={() => {
+                        retryTooltip.handlers.onClick()
+                        handleRetry()
+                      }}
+                      className="inline-flex items-center justify-center rounded-full border border-blue-200/80 bg-white/80 px-3 py-1.5 text-blue-500 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-white/[0.04] dark:hover:bg-blue-500/10"
+                      aria-label="重试任务"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                    <ViewportTooltip visible={retryTooltip.visible} className="whitespace-nowrap">
+                      重试任务
+                    </ViewportTooltip>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1036,6 +1093,66 @@ export default function DetailModal() {
               <span>创建于 {formatTime(task.createdAt)}</span>
               {formatDuration() && <span> · 耗时 {formatDuration()}</span>}
             </div>
+
+            {isManagedImageflowTask && (
+              <div className="mb-4 rounded-xl border border-gray-100 bg-gray-50/80 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">服务端资产</div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-gray-500 dark:text-gray-400" title={currentManagedAsset?.assetId || task.imageflowTaskId}>
+                      {currentManagedAsset?.assetId || task.imageflowTaskId || task.imageflowStatus || 'pending'}
+                    </div>
+                  </div>
+                  <span className={`shrink-0 rounded px-2 py-1 text-xs font-semibold ${
+                    currentManagedAsset?.status === 'selected'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                      : currentManagedAsset?.status === 'rejected'
+                      ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+                      : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                  }`}>
+                    {currentManagedAsset?.status || task.imageflowStatus || 'running'}
+                  </span>
+                </div>
+                {currentManagedAsset ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSelectManagedAsset}
+                      disabled={currentManagedAsset.status === 'selected'}
+                      className="rounded-lg bg-green-50 px-3 py-2 text-xs font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-500/10 dark:text-green-300 dark:hover:bg-green-500/20"
+                    >
+                      Select
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRejectManagedAsset}
+                      disabled={currentManagedAsset.status === 'rejected'}
+                      className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenManagedUrl(currentManagedAsset.downloadUrl)}
+                      disabled={!currentManagedAsset.downloadUrl}
+                      className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]"
+                    >
+                      Original
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenManagedUrl(currentManagedAsset.metadataUrl)}
+                      disabled={!currentManagedAsset.metadataUrl}
+                      className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]"
+                    >
+                      Metadata
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500 dark:text-gray-400">等待服务端返回候选资产。</div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 操作按钮 */}
@@ -1051,7 +1168,7 @@ export default function DetailModal() {
             </button>
             <button
               onClick={handleEdit}
-              disabled={!outputLen}
+              disabled={!outputLen || isManagedImageflowTask}
               className="col-span-2 sm:flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-500/10 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition text-sm font-medium whitespace-nowrap"
             >
               <EditIcon className="w-4 h-4 flex-shrink-0" />

@@ -13,6 +13,8 @@ import type {
   MaskDraft,
   TaskRecord,
   FavoriteCollection,
+  AgentImageflowManagedAsset,
+  AgentImageflowManagedScope,
   ExportData,
   ResponsesApiResponse,
   ResponsesOutputItem,
@@ -49,10 +51,25 @@ import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
 import { getCustomQueuedImageResult } from './lib/openaiCompatibleImageApi'
-import { validateMaskMatchesImage } from './lib/canvasImage'
+import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob, validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
 import { createTransparentOutputMeta, getTransparentRequestParams, removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
+import {
+  type AgentImageflowAuth,
+  type AgentImageflowInputFileResponse,
+  createAgentImageflowTask,
+  getAgentImageflowAsset,
+  getAgentImageflowTask,
+  normalizeAgentImageflowApiBaseUrl,
+  rejectAgentImageflowAsset,
+  selectAgentImageflowAsset,
+  uploadAgentImageflowInputFile,
+  type AgentImageflowAssetResponse,
+  type AgentImageflowMaskImage,
+  type AgentImageflowReferenceImage,
+  type AgentImageflowTaskResponse,
+} from './lib/agentImageflowApi'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
@@ -73,11 +90,14 @@ const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
 const FAL_RECOVERY_POLL_MS = 10_000
 const CUSTOM_RECOVERY_POLL_MS = 10_000
+const IMAGEFLOW_POLL_MS = 1_500
+const IMAGEFLOW_MAX_POLL_ATTEMPTS = 120
 const SUPPORT_PROMPT_IMAGE_THRESHOLD = 50
 const AGENT_INPUT_DRAFT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000
 const AGENT_ROUND_IMAGE_MENTION_RE = /@(?:第)?(\d+)轮图(\d+)/g
 const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const customRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const imageflowPollTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const agentRoundControllers = new Map<string, AbortController>()
 let agentConversationPersistenceReady = false
@@ -883,8 +903,10 @@ interface AppState {
   lightboxImageList: string[]
   setLightboxImageId: (id: string | null, list?: string[]) => void
   showSettings: boolean
+  showScopeManager: boolean
   settingsTabRequest: SettingsTab | null
   setShowSettings: (v: boolean, tab?: SettingsTab) => void
+  setShowScopeManager: (v: boolean) => void
   supportPromptOpen: boolean
   supportPromptDismissed: boolean
   supportPromptSkippedForImportedData: boolean
@@ -1569,6 +1591,7 @@ export const useStore = create<AppState>()(
         set({ lightboxImageId, lightboxImageList: list ?? (lightboxImageId ? [lightboxImageId] : []) })
       },
       showSettings: false,
+      showScopeManager: false,
       settingsTabRequest: null,
       setShowSettings: (showSettings, settingsTabRequest) => {
         if (showSettings) dismissAllTooltips()
@@ -1577,6 +1600,10 @@ export const useStore = create<AppState>()(
           ...(settingsTabRequest ? { settingsTabRequest } : {}),
           ...(!showSettings ? { settingsTabRequest: null } : {}),
         })
+      },
+      setShowScopeManager: (showScopeManager) => {
+        if (showScopeManager) dismissAllTooltips()
+        set({ showScopeManager })
       },
       supportPromptOpen: false,
       supportPromptDismissed: false,
@@ -1672,6 +1699,303 @@ function getPersistableTask(task: TaskRecord): TaskRecord {
 
 function putTask(task: TaskRecord): Promise<IDBValidKey> {
   return dbPutTask(getPersistableTask(task))
+}
+
+function getImageflowScope(settings: AppSettings): AgentImageflowManagedScope {
+  const normalized = normalizeSettings(settings)
+  return {
+    workspaceId: normalized.imageflowWorkspaceId,
+    projectId: normalized.imageflowProjectId,
+    campaignId: normalized.imageflowCampaignId,
+  }
+}
+
+function getImageflowAuth(settings: AppSettings): AgentImageflowAuth {
+  const normalized = normalizeSettings(settings)
+  return {
+    apiKey: normalized.imageflowApiKey,
+    basicUsername: normalized.imageflowBasicUsername,
+    basicPassword: normalized.imageflowBasicPassword,
+  }
+}
+
+function getImageflowAspectRatio(size: string): string {
+  const normalized = size.trim().toLowerCase()
+  if (normalized.includes('x')) {
+    const [rawWidth, rawHeight] = normalized.split('x')
+    const width = Number(rawWidth)
+    const height = Number(rawHeight)
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      if (height > width) return '3:4'
+      if (width > height) return '4:3'
+      return '1:1'
+    }
+  }
+  if (normalized === 'portrait') return '3:4'
+  if (normalized === 'landscape') return '4:3'
+  return '1:1'
+}
+
+function getImageflowTaskTitle(prompt: string): string {
+  const firstLine = prompt.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''
+  if (!firstLine) return 'Web image task'
+  const chars = Array.from(firstLine)
+  return chars.length > 60 ? `${chars.slice(0, 57).join('')}...` : firstLine
+}
+
+function getDataUrlMimeType(dataUrl: string): string | undefined {
+  return dataUrl.match(/^data:([^;,]+)[;,]/)?.[1]
+}
+
+function getMimeExtension(mimeType?: string): string {
+  switch ((mimeType || '').toLowerCase()) {
+    case 'image/jpeg':
+      return 'jpg'
+    case 'image/webp':
+      return 'webp'
+    case 'image/gif':
+      return 'gif'
+    default:
+      return 'png'
+  }
+}
+
+function createUploadedImageflowReference(upload: AgentImageflowInputFileResponse, image: InputImage, isEditTarget: boolean): AgentImageflowReferenceImage {
+  return {
+    id: image.id,
+    input_file_id: upload.input_file_id,
+    url: upload.download_url,
+    role: isEditTarget ? 'edit_target' : 'reference',
+    source: 'agent-imageflow-upload',
+    mime_type: upload.mime_type,
+    ...(upload.width ? { width: upload.width } : {}),
+    ...(upload.height ? { height: upload.height } : {}),
+  }
+}
+
+function createUploadedImageflowMask(upload: AgentImageflowInputFileResponse, maskDraft: MaskDraft, maskImageId: string | null): AgentImageflowMaskImage {
+  return {
+    ...(maskImageId ? { id: maskImageId } : {}),
+    input_file_id: upload.input_file_id,
+    url: upload.download_url,
+    target_image_id: maskDraft.targetImageId,
+    source: 'agent-imageflow-upload',
+    mime_type: upload.mime_type,
+    ...(upload.width ? { width: upload.width } : {}),
+    ...(upload.height ? { height: upload.height } : {}),
+    has_mask: true,
+  }
+}
+
+async function uploadManagedImageflowInputs(
+  baseUrl: string,
+  scope: AgentImageflowManagedScope,
+  inputImages: InputImage[],
+  maskDraft: MaskDraft | null,
+  maskImageId: string | null,
+  auth?: AgentImageflowAuth,
+): Promise<{
+  referenceImages?: AgentImageflowReferenceImage[]
+  maskImage?: AgentImageflowMaskImage
+  uploadedInputFileIds: string[]
+  uploadedMaskInputFileId: string | null
+  advancedInputMode: 'none' | 'uploaded_files'
+}> {
+  if (!inputImages.length && !maskDraft) {
+    return {
+      uploadedInputFileIds: [],
+      uploadedMaskInputFileId: null,
+      advancedInputMode: 'none',
+    }
+  }
+
+  const referenceImages: AgentImageflowReferenceImage[] = []
+  const uploadedInputFileIds: string[] = []
+
+  for (const image of inputImages) {
+    const mimeType = getDataUrlMimeType(image.dataUrl)
+    const isEditTarget = maskDraft?.targetImageId === image.id
+    const blob = isEditTarget && maskDraft ? await imageDataUrlToPngBlob(image.dataUrl) : await dataUrlToBlob(image.dataUrl)
+    const upload = await uploadAgentImageflowInputFile(baseUrl, scope, {
+      kind: 'reference',
+      file: blob,
+      filename: `${isEditTarget ? 'edit-target' : 'reference'}-${image.id}.${getMimeExtension(blob.type || mimeType)}`,
+      mimeType: blob.type || mimeType,
+    }, auth)
+    uploadedInputFileIds.push(upload.input_file_id)
+    referenceImages.push(createUploadedImageflowReference(upload, image, isEditTarget))
+  }
+
+  let uploadedMaskInputFileId: string | null = null
+  let maskImage: AgentImageflowMaskImage | undefined
+  if (maskDraft) {
+    const maskBlob = await maskDataUrlToPngBlob(maskDraft.maskDataUrl)
+    const upload = await uploadAgentImageflowInputFile(baseUrl, scope, {
+      kind: 'mask',
+      file: maskBlob,
+      filename: `mask-${maskDraft.targetImageId}.png`,
+      mimeType: maskBlob.type || 'image/png',
+    }, auth)
+    uploadedMaskInputFileId = upload.input_file_id
+    maskImage = createUploadedImageflowMask(upload, maskDraft, maskImageId)
+  }
+
+  return {
+    referenceImages: referenceImages.length ? referenceImages : undefined,
+    maskImage,
+    uploadedInputFileIds,
+    uploadedMaskInputFileId,
+    advancedInputMode: 'uploaded_files',
+  }
+}
+
+function mapImageflowAssetResponse(asset: AgentImageflowAssetResponse): AgentImageflowManagedAsset {
+  const metadata = asset.metadata_json ?? {}
+  return {
+    assetId: asset.asset_id,
+    status: asset.status,
+    thumbnailUrl: asset.delivery.thumbnail_url,
+    metadataUrl: asset.delivery.metadata_url,
+    downloadUrl: asset.delivery.download_url,
+    localPath: asset.delivery.local_path,
+    workspaceId: asset.workspace_id,
+    projectId: asset.project_id,
+    campaignId: asset.campaign_id,
+    taskId: asset.task_id,
+    currentVersion: asset.current_version,
+    provider: asset.provider,
+    model: asset.model,
+    prompt: asset.prompt,
+    hash: asset.hash,
+    parametersJson: asset.parameters_json,
+    metadataJson: metadata,
+    source: typeof metadata.source === 'string' ? metadata.source : undefined,
+    sessionId: typeof metadata.session_id === 'string' ? metadata.session_id : undefined,
+    batchId: typeof metadata.batch_id === 'string' ? metadata.batch_id : undefined,
+    storyId: typeof metadata.story_id === 'string' ? metadata.story_id : undefined,
+    sceneId: typeof metadata.scene_id === 'string' ? metadata.scene_id : undefined,
+    targetPath: typeof metadata.target_path === 'string' ? metadata.target_path : undefined,
+    createdAt: asset.created_at,
+  }
+}
+
+async function mapImageflowTaskAssets(baseUrl: string, response: AgentImageflowTaskResponse, auth?: AgentImageflowAuth): Promise<AgentImageflowManagedAsset[]> {
+  const entries = response.assets ?? []
+  const fallbackAssets = entries.map((asset) => ({
+    assetId: asset.asset_id,
+    status: asset.status,
+    thumbnailUrl: asset.thumbnail_url,
+    metadataUrl: asset.metadata_url,
+  }))
+  if (!entries.length) return fallbackAssets
+
+  const hydrated = await Promise.all(entries.map(async (asset, index) => {
+    try {
+      return mapImageflowAssetResponse(await getAgentImageflowAsset(baseUrl, asset.asset_id, auth))
+    } catch {
+      return fallbackAssets[index]
+    }
+  }))
+  return hydrated.filter((asset): asset is AgentImageflowManagedAsset => Boolean(asset))
+}
+
+function patchImageflowAsset(task: TaskRecord, nextAsset: AgentImageflowManagedAsset): AgentImageflowManagedAsset[] {
+  const currentAssets = task.imageflowAssets ?? []
+  let replaced = false
+  const assets = currentAssets.map((asset) => {
+    if (asset.assetId !== nextAsset.assetId) return asset
+    replaced = true
+    return { ...asset, ...nextAsset }
+  })
+  return replaced ? assets : [...assets, nextAsset]
+}
+
+function clearImageflowPollTimer(taskId: string) {
+  const timer = imageflowPollTimers.get(taskId)
+  if (!timer) return
+  window.clearTimeout(timer)
+  imageflowPollTimers.delete(taskId)
+}
+
+function scheduleImageflowPoll(taskId: string, baseUrl: string, serviceTaskId: string, attempt: number) {
+  clearImageflowPollTimer(taskId)
+  const timer = window.setTimeout(() => {
+    imageflowPollTimers.delete(taskId)
+    void pollImageflowTask(taskId, baseUrl, serviceTaskId, attempt)
+  }, IMAGEFLOW_POLL_MS)
+  imageflowPollTimers.set(taskId, timer)
+}
+
+function getImageflowTaskError(response: AgentImageflowTaskResponse) {
+  return response.error_message || response.error_code || '服务端任务失败'
+}
+
+async function pollImageflowTask(taskId: string, baseUrl: string, serviceTaskId: string, attempt = 1): Promise<void> {
+  const latest = useStore.getState().tasks.find((task) => task.id === taskId)
+  if (!latest || latest.status !== 'running' || latest.managedBy !== 'agent-imageflow') {
+    clearImageflowPollTimer(taskId)
+    return
+  }
+
+  if (attempt > IMAGEFLOW_MAX_POLL_ATTEMPTS) {
+    updateTaskInStore(taskId, {
+      status: 'error',
+      error: '服务端任务轮询超时',
+      finishedAt: Date.now(),
+      elapsed: Date.now() - latest.createdAt,
+    })
+    return
+  }
+
+  try {
+    const auth = getImageflowAuth(useStore.getState().settings)
+    const response = await getAgentImageflowTask(baseUrl, serviceTaskId, auth)
+    const assets = await mapImageflowTaskAssets(baseUrl, response, auth)
+    const status = response.status
+
+    if (status === 'completed' || status === 'partially_completed') {
+      updateTaskInStore(taskId, {
+        status: assets.length ? 'done' : 'error',
+        error: assets.length ? null : '服务端任务完成但没有返回资产',
+        imageflowStatus: status,
+        imageflowErrorCode: response.error_code ?? null,
+        imageflowAssets: assets,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - latest.createdAt,
+      })
+      useStore.getState().showToast(assets.length ? `服务端生成完成，共 ${assets.length} 张候选图` : '服务端任务没有返回资产', assets.length ? 'success' : 'error')
+      return
+    }
+
+    if (status === 'failed' || status === 'enqueue_failed' || status === 'canceled') {
+      updateTaskInStore(taskId, {
+        status: 'error',
+        error: getImageflowTaskError(response),
+        imageflowStatus: status,
+        imageflowErrorCode: response.error_code ?? null,
+        imageflowAssets: assets,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - latest.createdAt,
+      })
+      useStore.getState().setDetailTaskId(taskId)
+      return
+    }
+
+    updateTaskInStore(taskId, {
+      imageflowStatus: status,
+      imageflowErrorCode: response.error_code ?? null,
+      imageflowAssets: assets,
+    })
+    scheduleImageflowPoll(taskId, baseUrl, serviceTaskId, attempt + 1)
+  } catch (err) {
+    updateTaskInStore(taskId, {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+      finishedAt: Date.now(),
+      elapsed: Date.now() - latest.createdAt,
+    })
+    useStore.getState().setDetailTaskId(taskId)
+  }
 }
 
 export function getCodexCliPromptKey(settings: AppSettings): string {
@@ -2283,11 +2607,153 @@ export async function initStore() {
 }
 
 /** 提交新任务 */
+async function submitManagedImageflowTask() {
+  const state = useStore.getState()
+  const { settings, prompt, inputImages, maskDraft, params, showToast } = state
+  const normalizedSettings = normalizeSettings(settings)
+  const trimmedPrompt = prompt.trim()
+
+  if (!trimmedPrompt) {
+    showToast('请输入提示词', 'error')
+    return
+  }
+
+  let orderedInputImages = inputImages
+  let maskImageId: string | null = null
+  let maskTargetImageId: string | null = null
+
+  if (maskDraft) {
+    try {
+      orderedInputImages = orderInputImagesForMask(inputImages, maskDraft.targetImageId)
+      maskImageId = await storeImage(maskDraft.maskDataUrl, 'mask')
+      cacheImage(maskImageId, maskDraft.maskDataUrl)
+      maskTargetImageId = maskDraft.targetImageId
+    } catch (err) {
+      if (!inputImages.some((img) => img.id === maskDraft.targetImageId)) {
+        useStore.getState().clearMaskDraft()
+      }
+      showToast(err instanceof Error ? err.message : String(err), 'error')
+      return
+    }
+  }
+
+  for (const image of orderedInputImages) {
+    await storeImage(image.dataUrl)
+  }
+
+  const taskId = genId()
+  const baseUrl = normalizeAgentImageflowApiBaseUrl(normalizedSettings.imageflowApiBaseUrl)
+  const auth = getImageflowAuth(normalizedSettings)
+  const scope = getImageflowScope(normalizedSettings)
+  const provider = normalizedSettings.imageflowProvider || 'mock'
+  const taskParams = {
+    ...params,
+    n: Math.min(4, Math.max(1, Math.trunc(params.n || 1))),
+  }
+  const inputImageIds = uniqueIds(orderedInputImages.map((image) => image.id))
+  const now = Date.now()
+  const task: TaskRecord = {
+    id: taskId,
+    prompt: trimmedPrompt,
+    params: taskParams,
+    apiProvider: 'agent-imageflow',
+    apiProfileName: 'Server managed',
+    apiModel: provider,
+    inputImageIds,
+    maskTargetImageId,
+    maskImageId,
+    outputImages: [],
+    status: 'running',
+    error: null,
+    createdAt: now,
+    finishedAt: null,
+    elapsed: null,
+    sourceMode: state.appMode,
+    managedBy: 'agent-imageflow',
+    imageflowBaseUrl: baseUrl,
+    imageflowScope: scope,
+    imageflowStatus: 'creating',
+    imageflowProvider: provider,
+    imageflowAssets: [],
+  }
+
+  useStore.getState().setTasks([task, ...useStore.getState().tasks])
+  await putTask(task)
+  showToast('服务端托管任务已提交', 'success')
+
+  if (normalizedSettings.clearInputAfterSubmit) {
+    useStore.getState().setPrompt('')
+    useStore.getState().clearInputImages()
+  }
+
+  try {
+    const uploadedInputs = await uploadManagedImageflowInputs(baseUrl, scope, orderedInputImages, maskDraft, maskImageId, auth)
+    const response = await createAgentImageflowTask(baseUrl, scope, {
+      idempotency_key: `web-${taskId}`,
+      title: getImageflowTaskTitle(trimmedPrompt),
+      purpose: 'web-managed-mode',
+      prompt: trimmedPrompt,
+      aspect_ratio: getImageflowAspectRatio(taskParams.size),
+      output_format: taskParams.output_format,
+      requested_count: taskParams.n,
+      provider,
+      reference_images: uploadedInputs.referenceImages,
+      mask_image: uploadedInputs.maskImage,
+      generation_config: {
+        quality: taskParams.quality,
+        output_compression: taskParams.output_compression,
+        moderation: taskParams.moderation,
+        transparent_output: taskParams.transparent_output,
+        web_params: taskParams,
+      },
+      selection_mode: 'auto',
+      use_project_quality_profile: normalizedSettings.imageflowUseProjectQualityProfile,
+      review_required: false,
+      metadata_json: {
+        source: 'web',
+        source_agent: 'agent-imageflow-web',
+        web_task_id: taskId,
+        params: taskParams,
+        input_image_ids: inputImageIds,
+        uploaded_input_file_ids: uploadedInputs.uploadedInputFileIds,
+        mask_target_image_id: maskTargetImageId,
+        mask_image_id: maskImageId,
+        uploaded_mask_input_file_id: uploadedInputs.uploadedMaskInputFileId,
+        has_mask: Boolean(maskDraft),
+        advanced_input_mode: uploadedInputs.advancedInputMode,
+        selection_mode: 'auto',
+        use_project_quality_profile: normalizedSettings.imageflowUseProjectQualityProfile,
+      },
+    }, auth)
+    const assets = await mapImageflowTaskAssets(baseUrl, response, auth)
+    updateTaskInStore(taskId, {
+      imageflowTaskId: response.task_id,
+      imageflowStatus: response.status,
+      imageflowErrorCode: response.error_code ?? null,
+      imageflowAssets: assets,
+    })
+    scheduleImageflowPoll(taskId, baseUrl, response.task_id, 1)
+  } catch (err) {
+    updateTaskInStore(taskId, {
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+      finishedAt: Date.now(),
+      elapsed: Date.now() - now,
+    })
+    useStore.getState().setDetailTaskId(taskId)
+  }
+}
+
 export async function submitTask(options: { allowFullMask?: boolean; useCurrentApiProfileWhenReusedMissing?: boolean } = {}) {
   const { settings, prompt, inputImages, maskDraft, params, reusedTaskApiProfileId, reusedTaskApiProfileName, reusedTaskApiProfileMissing, showToast, setConfirmDialog } =
     useStore.getState()
 
   const normalizedSettings = normalizeSettings(settings)
+  if (normalizedSettings.imageflowManagedMode) {
+    await submitManagedImageflowTask()
+    return
+  }
+
   let activeProfile = getActiveApiProfile(settings)
   let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
   if (normalizedSettings.reuseTaskApiProfileTemporarily && (reusedTaskApiProfileId || reusedTaskApiProfileMissing)) {
@@ -4365,6 +4831,36 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   if (task) putTask(task)
 }
 
+export async function selectImageflowAsset(taskId: string, assetId: string) {
+  const state = useStore.getState()
+  const task = state.tasks.find((item) => item.id === taskId)
+  if (!task?.imageflowBaseUrl || task.managedBy !== 'agent-imageflow') return
+
+  try {
+    const auth = getImageflowAuth(state.settings)
+    const asset = mapImageflowAssetResponse(await selectAgentImageflowAsset(task.imageflowBaseUrl, assetId, auth))
+    updateTaskInStore(taskId, { imageflowAssets: patchImageflowAsset(task, asset) })
+    useStore.getState().showToast('已标记为 selected', 'success')
+  } catch (err) {
+    useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
+export async function rejectImageflowAsset(taskId: string, assetId: string) {
+  const state = useStore.getState()
+  const task = state.tasks.find((item) => item.id === taskId)
+  if (!task?.imageflowBaseUrl || task.managedBy !== 'agent-imageflow') return
+
+  try {
+    const auth = getImageflowAuth(state.settings)
+    const asset = mapImageflowAssetResponse(await rejectAgentImageflowAsset(task.imageflowBaseUrl, assetId, auth))
+    updateTaskInStore(taskId, { imageflowAssets: patchImageflowAsset(task, asset) })
+    useStore.getState().showToast('已标记为 rejected', 'success')
+  } catch (err) {
+    useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
 function normalizeFavoriteCollectionIds(ids: unknown) {
   if (!Array.isArray(ids)) return []
   return Array.from(new Set(ids.map(String).filter((id) => id && id !== ALL_FAVORITES_COLLECTION_ID)))
@@ -4662,6 +5158,7 @@ export async function removeMultipleTasks(taskIds: string[]) {
   for (const t of tasks) {
     if (toDelete.has(t.id)) {
       addTaskReferencedImageIds(deletedImageIds, t)
+      clearImageflowPollTimer(t.id)
     }
   }
 
@@ -4726,6 +5223,7 @@ export async function clearFailedTasks(taskIds?: string[]) {
 /** 删除单条任务 */
 export async function removeTask(task: TaskRecord) {
   const { tasks, setTasks, inputImages, galleryInputDraft, showToast } = useStore.getState()
+  clearImageflowPollTimer(task.id)
 
   // 收集此任务关联的图片
   const taskImageIds = new Set([
@@ -4773,6 +5271,9 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
   const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, showToast } = useStore.getState()
 
   if (options.clearTasks) {
+    for (const task of useStore.getState().tasks) {
+      clearImageflowPollTimer(task.id)
+    }
     await dbClearTasks()
     await dbClearAgentConversations()
     await clearImages()

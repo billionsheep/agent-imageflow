@@ -10,9 +10,11 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/api ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/worker ./cmd/worker
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/vag ./cmd/vag
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/mcp ./cmd/mcp
 
 FROM alpine:3.20
 
+RUN apk add --no-cache libwebp-tools
 RUN adduser -D -u 10001 appuser
 WORKDIR /app
 RUN mkdir -p /data/agent-imageflow && chown -R appuser:appuser /data
@@ -20,6 +22,7 @@ RUN mkdir -p /data/agent-imageflow && chown -R appuser:appuser /data
 COPY --from=build /out/api /app/api
 COPY --from=build /out/worker /app/worker
 COPY --from=build /out/vag /app/vag
+COPY --from=build /out/mcp /app/mcp
 COPY examples /app/examples
 
 USER appuser

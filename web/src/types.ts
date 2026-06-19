@@ -108,6 +108,16 @@ export interface AppSettings {
   agentMaxToolRounds: number
   agentWebSearch: boolean
   agentMathFormattingPrompt: boolean
+  imageflowManagedMode: boolean
+  imageflowApiBaseUrl: string
+  imageflowApiKey: string
+  imageflowBasicUsername: string
+  imageflowBasicPassword: string
+  imageflowWorkspaceId: string
+  imageflowProjectId: string
+  imageflowCampaignId: string
+  imageflowProvider: string
+  imageflowUseProjectQualityProfile: boolean
   profiles: ApiProfile[]
   activeProfileId: string
 }
@@ -227,6 +237,55 @@ export interface TaskRecord {
   agentBatchCallId?: string
   /** Agent 图像工具实际动作 */
   agentToolAction?: 'generate' | 'edit' | 'auto' | string
+  /** 任务是否由 Agent ImageFlow 服务端托管 */
+  managedBy?: 'agent-imageflow'
+  /** 服务端 ImageTask ID */
+  imageflowTaskId?: string
+  /** 服务端 API Base URL */
+  imageflowBaseUrl?: string
+  /** 服务端业务隔离范围 */
+  imageflowScope?: AgentImageflowManagedScope
+  /** 服务端任务状态 */
+  imageflowStatus?: string
+  /** 服务端 provider ID */
+  imageflowProvider?: string
+  /** 服务端错误代码 */
+  imageflowErrorCode?: string | null
+  /** 服务端候选资产 */
+  imageflowAssets?: AgentImageflowManagedAsset[]
+}
+
+export interface AgentImageflowManagedScope {
+  workspaceId: string
+  projectId: string
+  campaignId: string
+}
+
+export interface AgentImageflowManagedAsset {
+  assetId: string
+  status: string
+  thumbnailUrl: string
+  metadataUrl: string
+  downloadUrl?: string
+  localPath?: string
+  workspaceId?: string
+  projectId?: string
+  campaignId?: string
+  taskId?: string
+  currentVersion?: number
+  provider?: string
+  model?: string
+  prompt?: string
+  hash?: string
+  parametersJson?: Record<string, unknown>
+  metadataJson?: Record<string, unknown>
+  source?: string
+  sessionId?: string
+  batchId?: string
+  storyId?: string
+  sceneId?: string
+  targetPath?: string
+  createdAt?: string
 }
 
 export interface FavoriteCollection {

@@ -16,6 +16,15 @@ export function TrashIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+export function ArchiveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" {...props}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M5 7l1 11a2 2 0 002 2h8a2 2 0 002-2l1-11M9 11h6" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h18v2H3z" />
+    </svg>
+  )
+}
+
 export function PlusIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" {...props}>
@@ -216,4 +225,3 @@ export function TransparentBgIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
-

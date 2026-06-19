@@ -2,12 +2,16 @@ package queue
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-const listName = "queue:image_generation"
+const (
+	listName          = "queue:image_generation"
+	scheduledListName = "queue:image_generation:scheduled"
+)
 
 type RedisQueue struct {
 	client *redis.Client
@@ -31,6 +35,53 @@ func (q *RedisQueue) Ping(ctx context.Context) error {
 
 func (q *RedisQueue) Enqueue(ctx context.Context, taskID string) error {
 	return q.client.RPush(ctx, listName, taskID).Err()
+}
+
+func (q *RedisQueue) EnqueueAfter(ctx context.Context, taskID string, delay time.Duration) error {
+	if delay <= 0 {
+		return q.Enqueue(ctx, taskID)
+	}
+	readyAt := time.Now().UTC().Add(delay).UnixMilli()
+	return q.client.ZAdd(ctx, scheduledListName, redis.Z{
+		Score:  float64(readyAt),
+		Member: taskID,
+	}).Err()
+}
+
+func (q *RedisQueue) PromoteScheduled(ctx context.Context, limit int) (int, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	result, err := q.client.Eval(ctx, `
+local scheduled = KEYS[1]
+local queue = KEYS[2]
+local now = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local promoted = redis.call("ZRANGEBYSCORE", scheduled, "-inf", now, "LIMIT", 0, limit)
+if #promoted == 0 then
+	return 0
+end
+for _, taskId in ipairs(promoted) do
+	redis.call("ZREM", scheduled, taskId)
+	redis.call("RPUSH", queue, taskId)
+end
+return #promoted
+`, []string{scheduledListName, listName}, time.Now().UTC().UnixMilli(), limit).Result()
+	if err != nil {
+		return 0, err
+	}
+	switch value := result.(type) {
+	case int64:
+		return int(value), nil
+	case string:
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			return 0, parseErr
+		}
+		return parsed, nil
+	default:
+		return 0, nil
+	}
 }
 
 func (q *RedisQueue) Dequeue(ctx context.Context, timeout time.Duration) (string, error) {

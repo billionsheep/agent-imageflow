@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { normalizeBaseUrl } from '../lib/api'
+import {
+  createAgentImageflowCampaign,
+  createAgentImageflowProject,
+  createAgentImageflowWorkspace,
+  listAgentImageflowCampaigns,
+  listAgentImageflowProjects,
+  listAgentImageflowWorkspaces,
+  normalizeAgentImageflowApiBaseUrl,
+  type AgentImageflowAuth,
+  type AgentImageflowCampaign,
+  type AgentImageflowProject,
+  type AgentImageflowWorkspace,
+} from '../lib/agentImageflowApi'
 import { isApiProxyAvailable, isApiProxyLocked, readClientDevProxyConfig } from '../lib/devProxy'
 import { useStore, exportData, importData, clearData, type SettingsTab } from '../store'
 import {
@@ -33,7 +46,7 @@ import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdo
 import Select from './Select'
 import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
-import { ChevronDownIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon, GithubIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon } from './icons'
+import { ChevronDownIcon, CloseIcon, CollectionManageIcon, CopyIcon, PlusIcon, TrashIcon, GithubIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon, RefreshIcon } from './icons'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -50,6 +63,59 @@ const DEFAULT_COPY_IMPORT_URL_OPTIONS = {
 }
 
 type CopyImportUrlOptions = typeof DEFAULT_COPY_IMPORT_URL_OPTIONS
+
+type ManagedScopeSnapshot = {
+  workspaces: AgentImageflowWorkspace[]
+  projects: AgentImageflowProject[]
+  campaigns: AgentImageflowCampaign[]
+}
+
+type ManagedScopeCreateForm = {
+  id: string
+  name: string
+  description: string
+}
+
+const EMPTY_MANAGED_SCOPE_SNAPSHOT: ManagedScopeSnapshot = {
+  workspaces: [],
+  projects: [],
+  campaigns: [],
+}
+
+function createEmptyManagedScopeForm(): ManagedScopeCreateForm {
+  return {
+    id: '',
+    name: '',
+    description: '',
+  }
+}
+
+function buildManagedScopeAuth(settings: Pick<AppSettings, 'imageflowApiKey' | 'imageflowBasicUsername' | 'imageflowBasicPassword'>): AgentImageflowAuth {
+  return {
+    apiKey: settings.imageflowApiKey,
+    basicUsername: settings.imageflowBasicUsername,
+    basicPassword: settings.imageflowBasicPassword,
+  }
+}
+
+function slugifyManagedScopeId(name: string, prefix: string) {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (!slug) return `${prefix}_${Date.now().toString(36)}`
+  return `${prefix}_${slug}`
+}
+
+function ensureCurrentManagedScopeOption(options: Array<{ label: string, value: string }>, currentValue: string, emptyLabel: string) {
+  const trimmed = currentValue.trim()
+  if (!trimmed) {
+    return options.length ? options : [{ label: emptyLabel, value: '' }]
+  }
+  if (options.some((option) => option.value === trimmed)) return options
+  return [{ label: trimmed, value: trimmed }, ...options]
+}
 
 const ZIP_DOWNLOAD_ROUTE_OPTIONS: Array<{ route: ZipDownloadRoute; label: string; description: string }> = [
   { route: 'task-selection', label: '任务列表 > 多选', description: '主页或收藏夹详情中框选、Ctrl/⌘ 点选或移动端滑动选中任务后的“下载选中”。' },
@@ -296,6 +362,7 @@ export default function SettingsModal() {
   const showSettings = useStore((s) => s.showSettings)
   const settingsTabRequest = useStore((s) => s.settingsTabRequest)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const setShowScopeManager = useStore((s) => s.setShowScopeManager)
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
   const reusedTaskApiProfileId = useStore((s) => s.reusedTaskApiProfileId)
@@ -352,6 +419,17 @@ export default function SettingsModal() {
   const profileTouchDragRef = useRef<{ id: string, startX: number, startY: number, moved: boolean } | null>(null)
   const [copyImportUrlProfile, setCopyImportUrlProfile] = useState<ApiProfile | null>(null)
   const [copyImportUrlOptions, setCopyImportUrlOptions] = useState<CopyImportUrlOptions>(readCopyImportUrlOptions)
+  const [managedScopeSnapshot, setManagedScopeSnapshot] = useState<ManagedScopeSnapshot>(EMPTY_MANAGED_SCOPE_SNAPSHOT)
+  const [managedScopeLoading, setManagedScopeLoading] = useState(false)
+  const [managedScopeError, setManagedScopeError] = useState<string | null>(null)
+  const [showWorkspaceCreateForm, setShowWorkspaceCreateForm] = useState(false)
+  const [showProjectCreateForm, setShowProjectCreateForm] = useState(false)
+  const [showCampaignCreateForm, setShowCampaignCreateForm] = useState(false)
+  const [workspaceCreateForm, setWorkspaceCreateForm] = useState<ManagedScopeCreateForm>(createEmptyManagedScopeForm())
+  const [projectCreateForm, setProjectCreateForm] = useState<ManagedScopeCreateForm>(createEmptyManagedScopeForm())
+  const [campaignCreateForm, setCampaignCreateForm] = useState<ManagedScopeCreateForm>(createEmptyManagedScopeForm())
+  const managedScopeLoadKeyRef = useRef<string>('')
+  const persistedManagedSettings = normalizeSettings(settings)
 
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
@@ -408,6 +486,33 @@ export default function SettingsModal() {
     ? `已开启 ${enabledZipDownloadRouteCount} 项使用压缩包进行批量下载的途径`
     : '未开启任何使用压缩包进行批量下载的途径'
 
+  const workspaceScopeOptions = ensureCurrentManagedScopeOption(
+    managedScopeSnapshot.workspaces.filter((workspace) => !workspace.archived).map((workspace) => ({
+      label: workspace.name || workspace.workspace_id,
+      value: workspace.workspace_id,
+    })),
+    draft.imageflowWorkspaceId,
+    '暂无 workspace',
+  )
+
+  const projectScopeOptions = ensureCurrentManagedScopeOption(
+    managedScopeSnapshot.projects.filter((project) => !project.archived).map((project) => ({
+      label: project.name || project.project_id,
+      value: project.project_id,
+    })),
+    draft.imageflowProjectId,
+    '暂无 project',
+  )
+
+  const campaignScopeOptions = ensureCurrentManagedScopeOption(
+    managedScopeSnapshot.campaigns.filter((campaign) => !campaign.archived).map((campaign) => ({
+      label: campaign.name || campaign.campaign_id,
+      value: campaign.campaign_id,
+    })),
+    draft.imageflowCampaignId,
+    '暂无 campaign',
+  )
+
   const wasSettingsOpenRef = useRef(false)
 
   useEffect(() => {
@@ -443,6 +548,37 @@ export default function SettingsModal() {
   useEffect(() => {
     if (showSettings && settingsTabRequest) setActiveTab(settingsTabRequest)
   }, [settingsTabRequest, showSettings])
+
+  useEffect(() => {
+    if (!showSettings || activeTab !== 'general' || !persistedManagedSettings.imageflowManagedMode) {
+      managedScopeLoadKeyRef.current = ''
+      return
+    }
+
+    const loadKey = JSON.stringify([
+      normalizeAgentImageflowApiBaseUrl(persistedManagedSettings.imageflowApiBaseUrl),
+      persistedManagedSettings.imageflowApiKey,
+      persistedManagedSettings.imageflowBasicUsername,
+      persistedManagedSettings.imageflowBasicPassword,
+      persistedManagedSettings.imageflowWorkspaceId,
+      persistedManagedSettings.imageflowProjectId,
+    ])
+    if (managedScopeLoadKeyRef.current === loadKey) return
+
+    managedScopeLoadKeyRef.current = loadKey
+    void loadManagedScopes(persistedManagedSettings)
+  }, [
+    activeTab,
+    persistedManagedSettings.imageflowApiBaseUrl,
+    persistedManagedSettings.imageflowApiKey,
+    persistedManagedSettings.imageflowBasicPassword,
+    persistedManagedSettings.imageflowBasicUsername,
+    persistedManagedSettings.imageflowManagedMode,
+    persistedManagedSettings.imageflowProjectId,
+    persistedManagedSettings.imageflowWorkspaceId,
+    settings,
+    showSettings,
+  ])
 
   const updateProfileMenuMaxHeight = useCallback(() => {
     if (!profileMenuTriggerRef.current) return
@@ -550,6 +686,199 @@ export default function SettingsModal() {
     })
     setDraft(normalizedDraft)
     setSettings(normalizedDraft)
+  }
+
+  const loadManagedScopes = async (baseSettings: AppSettings = persistedManagedSettings) => {
+    if (!baseSettings.imageflowManagedMode) return
+
+    const baseUrl = normalizeAgentImageflowApiBaseUrl(baseSettings.imageflowApiBaseUrl)
+    const auth = buildManagedScopeAuth(baseSettings)
+
+    setManagedScopeLoading(true)
+    setManagedScopeError(null)
+
+    try {
+      const workspaceResponse = await listAgentImageflowWorkspaces(baseUrl, auth)
+      const workspaces = workspaceResponse.workspaces
+      const activeWorkspaces = workspaces.filter((workspace) => !workspace.archived)
+
+      let nextDraft = normalizeSettings(baseSettings)
+      if (!activeWorkspaces.some((workspace) => workspace.workspace_id === nextDraft.imageflowWorkspaceId)) {
+        nextDraft = {
+          ...nextDraft,
+          imageflowWorkspaceId: activeWorkspaces[0]?.workspace_id ?? '',
+          imageflowProjectId: '',
+          imageflowCampaignId: '',
+        }
+      }
+
+      const workspaceId = nextDraft.imageflowWorkspaceId.trim()
+      const projectResponse = workspaceId
+        ? await listAgentImageflowProjects(baseUrl, workspaceId, auth)
+        : { workspace_id: workspaceId, projects: [] }
+      const projects = projectResponse.projects
+      const activeProjects = projects.filter((project) => !project.archived)
+
+      if (!activeProjects.some((project) => project.project_id === nextDraft.imageflowProjectId)) {
+        nextDraft = {
+          ...nextDraft,
+          imageflowProjectId: activeProjects[0]?.project_id ?? '',
+          imageflowCampaignId: '',
+        }
+      }
+
+      const projectId = nextDraft.imageflowProjectId.trim()
+      const campaignResponse = workspaceId && projectId
+        ? await listAgentImageflowCampaigns(baseUrl, { workspaceId, projectId }, auth)
+        : { workspace_id: workspaceId, project_id: projectId, campaigns: [] }
+      const campaigns = campaignResponse.campaigns
+      const activeCampaigns = campaigns.filter((campaign) => !campaign.archived)
+
+      if (!activeCampaigns.some((campaign) => campaign.campaign_id === nextDraft.imageflowCampaignId)) {
+        nextDraft = { ...nextDraft, imageflowCampaignId: activeCampaigns[0]?.campaign_id ?? '' }
+      }
+
+      setManagedScopeSnapshot({
+        workspaces,
+        projects,
+        campaigns,
+      })
+
+      if (
+        nextDraft.imageflowWorkspaceId !== baseSettings.imageflowWorkspaceId ||
+        nextDraft.imageflowProjectId !== baseSettings.imageflowProjectId ||
+        nextDraft.imageflowCampaignId !== baseSettings.imageflowCampaignId
+      ) {
+        commitSettings(nextDraft)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setManagedScopeError(message)
+    } finally {
+      setManagedScopeLoading(false)
+    }
+  }
+
+  const refreshManagedScopes = async () => {
+    managedScopeLoadKeyRef.current = ''
+    await loadManagedScopes(normalizeSettings(draft))
+  }
+
+  const createManagedWorkspace = async () => {
+    const baseUrl = normalizeAgentImageflowApiBaseUrl(draft.imageflowApiBaseUrl)
+    const auth = buildManagedScopeAuth(draft)
+    const name = workspaceCreateForm.name.trim()
+    const workspaceId = workspaceCreateForm.id.trim() || slugifyManagedScopeId(name, 'ws')
+
+    if (!name) {
+      showToast('请输入 workspace 名称', 'error')
+      return
+    }
+
+    try {
+      await createAgentImageflowWorkspace(baseUrl, {
+        workspace_id: workspaceId,
+        name,
+      }, auth)
+      showToast(`已创建 workspace「${name}」`, 'success')
+      setShowWorkspaceCreateForm(false)
+      setWorkspaceCreateForm(createEmptyManagedScopeForm())
+      const nextDraft = normalizeSettings({
+        ...draft,
+        imageflowWorkspaceId: workspaceId,
+        imageflowProjectId: '',
+        imageflowCampaignId: '',
+      })
+      commitSettings(nextDraft)
+      managedScopeLoadKeyRef.current = ''
+      await loadManagedScopes(nextDraft)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const createManagedProject = async () => {
+    const workspaceId = draft.imageflowWorkspaceId.trim()
+    if (!workspaceId) {
+      showToast('请先选择 workspace', 'error')
+      return
+    }
+
+    const baseUrl = normalizeAgentImageflowApiBaseUrl(draft.imageflowApiBaseUrl)
+    const auth = buildManagedScopeAuth(draft)
+    const name = projectCreateForm.name.trim()
+    const projectId = projectCreateForm.id.trim() || slugifyManagedScopeId(name, 'prj')
+
+    if (!name) {
+      showToast('请输入 project 名称', 'error')
+      return
+    }
+
+    try {
+      await createAgentImageflowProject(baseUrl, workspaceId, {
+        project_id: projectId,
+        name,
+        description: projectCreateForm.description.trim(),
+      }, auth)
+      showToast(`已创建 project「${name}」`, 'success')
+      setShowProjectCreateForm(false)
+      setProjectCreateForm(createEmptyManagedScopeForm())
+      const nextDraft = normalizeSettings({
+        ...draft,
+        imageflowWorkspaceId: workspaceId,
+        imageflowProjectId: projectId,
+        imageflowCampaignId: '',
+      })
+      commitSettings(nextDraft)
+      managedScopeLoadKeyRef.current = ''
+      await loadManagedScopes(nextDraft)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const createManagedCampaign = async () => {
+    const workspaceId = draft.imageflowWorkspaceId.trim()
+    const projectId = draft.imageflowProjectId.trim()
+    if (!workspaceId || !projectId) {
+      showToast('请先选择 project', 'error')
+      return
+    }
+
+    const baseUrl = normalizeAgentImageflowApiBaseUrl(draft.imageflowApiBaseUrl)
+    const auth = buildManagedScopeAuth(draft)
+    const name = campaignCreateForm.name.trim()
+    const campaignId = campaignCreateForm.id.trim() || slugifyManagedScopeId(name, 'cmp')
+
+    if (!name) {
+      showToast('请输入 campaign 名称', 'error')
+      return
+    }
+
+    try {
+      await createAgentImageflowCampaign(baseUrl, {
+        workspaceId,
+        projectId,
+      }, {
+        campaign_id: campaignId,
+        name,
+        description: campaignCreateForm.description.trim(),
+      }, auth)
+      showToast(`已创建 campaign「${name}」`, 'success')
+      setShowCampaignCreateForm(false)
+      setCampaignCreateForm(createEmptyManagedScopeForm())
+      const nextDraft = normalizeSettings({
+        ...draft,
+        imageflowWorkspaceId: workspaceId,
+        imageflowProjectId: projectId,
+        imageflowCampaignId: campaignId,
+      })
+      commitSettings(nextDraft)
+      managedScopeLoadKeyRef.current = ''
+      await loadManagedScopes(nextDraft)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
   }
 
   const setZipDownloadRouteEnabled = (route: ZipDownloadRoute, enabled: boolean) => {
@@ -1215,6 +1544,404 @@ export default function SettingsModal() {
             <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar p-5 sm:p-6">
             {activeTab === 'general' && (
               <div className="space-y-4">
+                <div className="block rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">服务端托管模式</span>
+                    <button
+                      type="button"
+                      onClick={() => commitSettings({ ...draft, imageflowManagedMode: !draft.imageflowManagedMode })}
+                      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${draft.imageflowManagedMode ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      role="switch"
+                      aria-checked={draft.imageflowManagedMode}
+                      aria-label="服务端托管模式"
+                    >
+                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.imageflowManagedMode ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                    </button>
+                  </div>
+                  <div data-selectable-text className="mb-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    开启后，提交会创建服务端 ImageTask，由 Worker 生成并登记 Asset；关闭后继续使用浏览器直连 provider。
+                  </div>
+                  <div className={`grid gap-3 ${draft.imageflowManagedMode ? '' : 'opacity-60'}`}>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务端 API URL</span>
+                      <input
+                        value={draft.imageflowApiBaseUrl}
+                        onChange={(e) => setDraft({ ...draft, imageflowApiBaseUrl: e.target.value })}
+                        onBlur={(e) => commitSettings({ ...draft, imageflowApiBaseUrl: e.target.value })}
+                        type="text"
+                        disabled={!draft.imageflowManagedMode}
+                        className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Project API Key</span>
+                      <input
+                        value={draft.imageflowApiKey}
+                        onChange={(e) => setDraft({ ...draft, imageflowApiKey: e.target.value })}
+                        onBlur={(e) => commitSettings({ ...draft, imageflowApiKey: e.target.value })}
+                        type="password"
+                        autoComplete="off"
+                        disabled={!draft.imageflowManagedMode}
+                        className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                      />
+                    </label>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Basic 用户名</span>
+                        <input
+                          value={draft.imageflowBasicUsername}
+                          onChange={(e) => setDraft({ ...draft, imageflowBasicUsername: e.target.value })}
+                          onBlur={(e) => commitSettings({ ...draft, imageflowBasicUsername: e.target.value })}
+                          type="text"
+                          autoComplete="off"
+                          disabled={!draft.imageflowManagedMode}
+                          className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Basic 密码</span>
+                        <input
+                          value={draft.imageflowBasicPassword}
+                          onChange={(e) => setDraft({ ...draft, imageflowBasicPassword: e.target.value })}
+                          onBlur={(e) => commitSettings({ ...draft, imageflowBasicPassword: e.target.value })}
+                          type="password"
+                          autoComplete="off"
+                          disabled={!draft.imageflowManagedMode}
+                          className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+                    </div>
+                    <div className="rounded-xl border border-gray-200/70 bg-white/70 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-medium text-gray-700 dark:text-gray-200">服务端 Scope</div>
+                          <div className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                            从服务端读取已有 workspace / project / campaign，并在这里直接创建新的业务空间。
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSettings(false)
+                              setShowScopeManager(true)
+                            }}
+                            disabled={!draft.imageflowManagedMode}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200/70 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-400"
+                          >
+                            <CollectionManageIcon className="h-3.5 w-3.5" />
+                            管理页
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void refreshManagedScopes()}
+                            disabled={!draft.imageflowManagedMode || managedScopeLoading}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200/70 bg-white text-gray-500 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-400"
+                            aria-label="刷新服务端 Scope"
+                            title="刷新服务端 Scope"
+                          >
+                            <RefreshIcon className={`h-4 w-4 ${managedScopeLoading ? 'animate-spin' : ''}`} />
+                          </button>
+                        </div>
+                      </div>
+                      {managedScopeError && (
+                        <div className="mb-3 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-2 text-[11px] text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                          {managedScopeError}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div className="min-w-0">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="block text-xs text-gray-500 dark:text-gray-400">Workspace</span>
+                            <button
+                              type="button"
+                              onClick={() => setShowWorkspaceCreateForm((current) => !current)}
+                              disabled={!draft.imageflowManagedMode}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/[0.06] dark:hover:text-blue-400"
+                              aria-label="新建 Workspace"
+                              title="新建 Workspace"
+                            >
+                              <PlusIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <Select
+                            value={draft.imageflowWorkspaceId}
+                            onChange={(value) => {
+                              const workspaceId = String(value || '').trim()
+                              if (!workspaceId) return
+                              commitSettings({
+                                ...draft,
+                                imageflowWorkspaceId: workspaceId,
+                                imageflowProjectId: '',
+                                imageflowCampaignId: '',
+                              })
+                            }}
+                            options={workspaceScopeOptions}
+                            disabled={!draft.imageflowManagedMode}
+                            className="w-full px-2.5 py-2 rounded-lg border border-gray-200/70 bg-white/70 text-xs text-gray-700 outline-none transition hover:bg-white focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus:border-blue-500/50"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="block text-xs text-gray-500 dark:text-gray-400">Project</span>
+                            <button
+                              type="button"
+                              onClick={() => setShowProjectCreateForm((current) => !current)}
+                              disabled={!draft.imageflowManagedMode || !draft.imageflowWorkspaceId.trim()}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/[0.06] dark:hover:text-blue-400"
+                              aria-label="新建 Project"
+                              title="新建 Project"
+                            >
+                              <PlusIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <Select
+                            value={draft.imageflowProjectId}
+                            onChange={(value) => {
+                              const projectId = String(value || '').trim()
+                              if (!projectId) return
+                              commitSettings({
+                                ...draft,
+                                imageflowProjectId: projectId,
+                                imageflowCampaignId: '',
+                              })
+                            }}
+                            options={projectScopeOptions}
+                            disabled={!draft.imageflowManagedMode || !draft.imageflowWorkspaceId.trim()}
+                            className="w-full px-2.5 py-2 rounded-lg border border-gray-200/70 bg-white/70 text-xs text-gray-700 outline-none transition hover:bg-white focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus:border-blue-500/50"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="block text-xs text-gray-500 dark:text-gray-400">Campaign</span>
+                            <button
+                              type="button"
+                              onClick={() => setShowCampaignCreateForm((current) => !current)}
+                              disabled={!draft.imageflowManagedMode || !draft.imageflowWorkspaceId.trim() || !draft.imageflowProjectId.trim()}
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/[0.06] dark:hover:text-blue-400"
+                              aria-label="新建 Campaign"
+                              title="新建 Campaign"
+                            >
+                              <PlusIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <Select
+                            value={draft.imageflowCampaignId}
+                            onChange={(value) => {
+                              const campaignId = String(value || '').trim()
+                              if (!campaignId) return
+                              commitSettings({
+                                ...draft,
+                                imageflowCampaignId: campaignId,
+                              })
+                            }}
+                            options={campaignScopeOptions}
+                            disabled={!draft.imageflowManagedMode || !draft.imageflowWorkspaceId.trim() || !draft.imageflowProjectId.trim()}
+                            className="w-full px-2.5 py-2 rounded-lg border border-gray-200/70 bg-white/70 text-xs text-gray-700 outline-none transition hover:bg-white focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus:border-blue-500/50"
+                          />
+                        </div>
+                      </div>
+                      {(showWorkspaceCreateForm || showProjectCreateForm || showCampaignCreateForm) && (
+                        <div className="mt-3 space-y-3">
+                          {showWorkspaceCreateForm && (
+                            <div className="rounded-lg border border-gray-200/70 bg-gray-50/70 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                              <div className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">新建 Workspace</div>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                <input
+                                  value={workspaceCreateForm.name}
+                                  onChange={(e) => setWorkspaceCreateForm({ ...workspaceCreateForm, name: e.target.value })}
+                                  placeholder="名称"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <input
+                                  value={workspaceCreateForm.id}
+                                  onChange={(e) => setWorkspaceCreateForm({ ...workspaceCreateForm, id: e.target.value })}
+                                  placeholder="ID（留空自动生成）"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void createManagedWorkspace()}
+                                    className="inline-flex items-center justify-center rounded-lg bg-blue-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-600"
+                                  >
+                                    创建
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setShowWorkspaceCreateForm(false)
+                                      setWorkspaceCreateForm(createEmptyManagedScopeForm())
+                                    }}
+                                    className="inline-flex items-center justify-center rounded-lg border border-gray-200/70 bg-white px-3 py-2 text-xs text-gray-600 transition hover:border-gray-300 hover:text-gray-800 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:text-gray-100"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {showProjectCreateForm && (
+                            <div className="rounded-lg border border-gray-200/70 bg-gray-50/70 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                              <div className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">新建 Project</div>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                                <input
+                                  value={projectCreateForm.name}
+                                  onChange={(e) => setProjectCreateForm({ ...projectCreateForm, name: e.target.value })}
+                                  placeholder="名称"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <input
+                                  value={projectCreateForm.id}
+                                  onChange={(e) => setProjectCreateForm({ ...projectCreateForm, id: e.target.value })}
+                                  placeholder="ID（留空自动生成）"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <input
+                                  value={projectCreateForm.description}
+                                  onChange={(e) => setProjectCreateForm({ ...projectCreateForm, description: e.target.value })}
+                                  placeholder="描述（可选）"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void createManagedProject()}
+                                    className="inline-flex items-center justify-center rounded-lg bg-blue-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-600"
+                                  >
+                                    创建
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setShowProjectCreateForm(false)
+                                      setProjectCreateForm(createEmptyManagedScopeForm())
+                                    }}
+                                    className="inline-flex items-center justify-center rounded-lg border border-gray-200/70 bg-white px-3 py-2 text-xs text-gray-600 transition hover:border-gray-300 hover:text-gray-800 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:text-gray-100"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {showCampaignCreateForm && (
+                            <div className="rounded-lg border border-gray-200/70 bg-gray-50/70 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                              <div className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">新建 Campaign</div>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                                <input
+                                  value={campaignCreateForm.name}
+                                  onChange={(e) => setCampaignCreateForm({ ...campaignCreateForm, name: e.target.value })}
+                                  placeholder="名称"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <input
+                                  value={campaignCreateForm.id}
+                                  onChange={(e) => setCampaignCreateForm({ ...campaignCreateForm, id: e.target.value })}
+                                  placeholder="ID（留空自动生成）"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <input
+                                  value={campaignCreateForm.description}
+                                  onChange={(e) => setCampaignCreateForm({ ...campaignCreateForm, description: e.target.value })}
+                                  placeholder="描述（可选）"
+                                  type="text"
+                                  className="rounded-lg border border-gray-200/70 bg-white/80 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                                />
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void createManagedCampaign()}
+                                    className="inline-flex items-center justify-center rounded-lg bg-blue-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-600"
+                                  >
+                                    创建
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setShowCampaignCreateForm(false)
+                                      setCampaignCreateForm(createEmptyManagedScopeForm())
+                                    }}
+                                    className="inline-flex items-center justify-center rounded-lg border border-gray-200/70 bg-white px-3 py-2 text-xs text-gray-600 transition hover:border-gray-300 hover:text-gray-800 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:text-gray-100"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Workspace ID（手动兜底）</span>
+                        <input
+                          value={draft.imageflowWorkspaceId}
+                          onChange={(e) => setDraft({ ...draft, imageflowWorkspaceId: e.target.value })}
+                          onBlur={(e) => commitSettings({ ...draft, imageflowWorkspaceId: e.target.value })}
+                          type="text"
+                          disabled={!draft.imageflowManagedMode}
+                          className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Project ID（手动兜底）</span>
+                        <input
+                          value={draft.imageflowProjectId}
+                          onChange={(e) => setDraft({ ...draft, imageflowProjectId: e.target.value })}
+                          onBlur={(e) => commitSettings({ ...draft, imageflowProjectId: e.target.value })}
+                          type="text"
+                          disabled={!draft.imageflowManagedMode}
+                          className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Campaign ID（手动兜底）</span>
+                        <input
+                          value={draft.imageflowCampaignId}
+                          onChange={(e) => setDraft({ ...draft, imageflowCampaignId: e.target.value })}
+                          onBlur={(e) => commitSettings({ ...draft, imageflowCampaignId: e.target.value })}
+                          type="text"
+                          disabled={!draft.imageflowManagedMode}
+                          className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        />
+                      </label>
+                    </div>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务端 Provider</span>
+                      <input
+                        value={draft.imageflowProvider}
+                        onChange={(e) => setDraft({ ...draft, imageflowProvider: e.target.value })}
+                        onBlur={(e) => commitSettings({ ...draft, imageflowProvider: e.target.value })}
+                        type="text"
+                        disabled={!draft.imageflowManagedMode}
+                        className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                      />
+                    </label>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">使用项目质量配置</span>
+                      <button
+                        type="button"
+                        onClick={() => commitSettings({ ...draft, imageflowUseProjectQualityProfile: !draft.imageflowUseProjectQualityProfile })}
+                        className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${draft.imageflowUseProjectQualityProfile ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        role="switch"
+                        aria-checked={draft.imageflowUseProjectQualityProfile}
+                        aria-label="使用项目质量配置"
+                        disabled={!draft.imageflowManagedMode}
+                      >
+                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.imageflowUseProjectQualityProfile ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div className="hidden sm:block">
                   <div className="mb-1 flex items-center justify-between">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">任务提交方式</span>

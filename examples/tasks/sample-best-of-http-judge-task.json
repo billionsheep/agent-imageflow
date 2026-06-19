@@ -1,0 +1,23 @@
+{
+  "idempotency_key": "xhs-7day-cover-http-judge-v1",
+  "title": "HTTP Judge Best-of 封面图",
+  "purpose": "小红书笔记封面",
+  "prompt": "一张小红书风格的 AI 动漫账号封面图，主题是用 AI 做动漫头像，画面清爽、有标题留白、适合移动端浏览。",
+  "negative_prompt": "low quality, blurry, watermark, unreadable text",
+  "style_preset": "anime-cover",
+  "aspect_ratio": "3:4",
+  "output_format": "png",
+  "requested_count": 3,
+  "provider": "mock",
+  "selection_mode": "auto",
+  "best_of_config": {
+    "strategy": "http_judge_v1",
+    "judge_prompt": "从候选图里选一张更适合作为内容封面图的图片，优先考虑构图完整、清晰和移动端可读性。"
+  },
+  "review_required": false,
+  "metadata_json": {
+    "channel": "xiaohongshu",
+    "content_day": 1,
+    "content_title": "用 AI 做动漫头像"
+  }
+}

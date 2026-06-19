@@ -1,0 +1,19 @@
+{
+  "idempotency_key": "fal-cover-day1-v1",
+  "title": "fal.ai Day 1 封面图",
+  "purpose": "小红书笔记封面 fal provider smoke",
+  "prompt": "一张小红书风格的 AI 动漫账号封面图，主题是普通人如何用 AI 做第一张动漫头像，画面清爽、有标题留白、年轻化、明亮、适合移动端浏览。",
+  "negative_prompt": "low quality, blurry, watermark, extra fingers, unreadable text",
+  "style_preset": "anime-cover",
+  "aspect_ratio": "3:4",
+  "output_format": "png",
+  "requested_count": 1,
+  "provider": "fal",
+  "selection_mode": "manual_optional",
+  "review_required": false,
+  "metadata_json": {
+    "channel": "xiaohongshu",
+    "content_day": 1,
+    "provider_smoke": "fal"
+  }
+}

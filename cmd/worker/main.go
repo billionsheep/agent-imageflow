@@ -45,7 +45,7 @@ func main() {
 		log.Fatalf("ping redis: %v", err)
 	}
 
-	service := app.NewService(cfg, store.NewPostgresStore(conn), q, storage.NewLocalStorage(cfg.StorageRoot))
+	service := app.NewService(cfg, store.NewPostgresStore(conn), q, storage.NewLocalStorage(cfg.StorageRoot, cfg.ThumbnailMaxWidth, cfg.ThumbnailMaxHeight))
 	log.Printf("Agent ImageFlow worker started with concurrency=%d", cfg.WorkerConcurrency)
 
 	var wg sync.WaitGroup
@@ -67,7 +67,20 @@ func runWorker(ctx context.Context, workerID int, service *app.Service) {
 		default:
 		}
 
-		taskID, err := service.Queue().Dequeue(ctx, 5*time.Second)
+		promoted, err := service.Queue().PromoteScheduled(ctx, 32)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("worker %d promote scheduled error: %v", workerID, err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if promoted > 0 {
+			log.Printf("worker %d promoted %d scheduled task(s)", workerID, promoted)
+		}
+
+		taskID, err := service.Queue().Dequeue(ctx, time.Second)
 		if errors.Is(err, redis.Nil) {
 			continue
 		}

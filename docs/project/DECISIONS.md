@@ -1,5 +1,59 @@
 # Decisions
 
+## 2026-06-18: MVP 后续阶段转向资产库治理和真实场景验证
+
+- Decision: 当前 MVP 产品闭环不再继续盲目扩功能，后续先围绕真实场景试用收集需求，并把下一阶段聚焦到 Web 服务端资产同步、资产库治理、存储可视化、session/source tracking、参考图/prompt 留存、云端安全和对外开通路径。新增 `docs/project/FUTURE_REQUIREMENTS_AND_SCENARIOS.md` 作为后续拆分 CSV / vertical slices 的输入。
+- Reason: 实测 MCP 可以创建并交付服务端资产，但 Web 不会自动显示 MCP / REST / CLI 创建的任务；同时用户明确提出萌宠小红书账号、嵌入式架构图账号、存储可视化、过期策略、项目/会话隔离、prompt 和原始形象留存等真实使用需求。继续零散加功能会造成资产库、治理、安全和业务空间模型遗漏。
+- Impact: 第一版 MVP 边界不变；下一阶段优先从“生成能力”转向“资产库可见、可治理、可隔离、可追踪”。嵌入式架构图场景如果要求 Mermaid / D2 / SVG 可编辑源，需要作为 Diagram source track 单独确认，不能默认混入生图 MVP。
+
+## 2026-06-18: 项目级 access-config 在不改路由的前提下扩展为多 key 策略
+
+- Decision: 保持 `GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/access-config` 路由不变，在 `project.metadata_json.access_config` 中加入 `api_keys` 列表；顶层 `api_key_enabled` / `api_key_name` / `api_key_preview` / `api_key_hash` 继续作为兼容视图保留。`POST` 通过 `action=add_key|update_key|delete_key` 和 `api_key_id` 完成最小多 key 管理动作。
+- Reason: 当前 MVP 已经具备项目级鉴权，但只有单把活动 key，无法支撑低风险轮换、双写切换或按系统分发凭据。项目规则又不希望为了这一片引入数据库迁移、复杂 secret manager 或新的管理页面。
+- Impact: REST、CLI 和审计层现在都能识别多把命名 key；HTTP API 对项目级资源接受任意一把启用 key，并会在审计里优先记录命中的 key 名称。MVP 范围内的生产 hardening 缺口由此清零。
+
+## 2026-06-18: HTTP / API 审计日志第一版采用本地 JSONL + CLI 查询
+
+- Decision: HTTP / API 第一版结构化审计日志仅挂在 `api` 入口，针对 `/api/*` 请求写入 `STORAGE_ROOT/audit/http-api/YYYY-MM-DD.jsonl`；同时提供本地 `vag audit list` 查询入口，支持按 project / task / asset / status 等条件过滤。审计写入异常时记录日志并 fail-open，不把审计故障升级为请求失败。
+- Reason: 当前项目已经进入生产 hardening 阶段，需要先补一层“谁在什么时候对哪个资源做了什么”的可追踪性；但项目规则不希望这一片直接引入数据库迁移、Web 审计页、远程日志系统或更复杂 retention 治理。
+- Impact: `api` 进程会为常见 HTTP 请求记录 method、route、action、status、duration、auth mode、actor 和关键 scope/resource id；运维可直接用 `vag audit list` 做本地排查。当前主要剩余 hardening 缺口从“审计、多 key 策略”收敛为“多 key 策略”。
+
+## 2026-06-18: HTTP API 第一版限流采用 Redis 固定窗口并 fail-open
+
+- Decision: HTTP API 第一版限流仅挂在 `api` 入口，复用现有 Redis 做固定窗口计数；同时支持实例级和 project 级阈值，命中时返回 `429`、结构化错误 JSON 和 `Retry-After`。Redis 限流后端异常时记录日志并 fail-open，不把限流组件故障升级为整站不可用。
+- Reason: 当前项目已经进入自托管 / 对公网暴露前的生产 hardening 阶段，需要先补一层基础放大保护；但本片不适合引入新的数据库表、复杂配额系统、IP 级策略或多节点治理。
+- Impact: 配置面增加 `RATE_LIMIT_WINDOW_SECONDS`、`RATE_LIMIT_INSTANCE_MAX_REQUESTS`、`RATE_LIMIT_PROJECT_MAX_REQUESTS`；MCP stdio、Worker 和服务端核心状态机不受直接影响。当前主要剩余 hardening 缺口从“基础限流”转移为“审计、多 key 策略”。
+
+## 2026-06-18: Best-of 第三版加入可选 auto reject，但保留人工改选
+
+- Decision: 在已存在的 `best_of_config` 上增加 `auto_reject_non_selected` 开关；当 `selection_mode=auto` / `best_of` 自动选出推荐图后，可由服务端自动把其他候选标记为 rejected。同时保留 `rejected -> approved` 的人工 override 路径，不让 auto reject 变成不可逆闸门。
+- Reason: 小团队/单体平台的实际摩擦已经从“怎么选出推荐图”转向“怎么自动清理未入选候选状态”。如果只做 auto reject 而不保留人工改选，则会把轻量状态流重新拉回强审核心智，不符合 MVP 定位。
+- Impact: `best_of_config` 现在同时表达 scorer 和 auto reject 策略；服务端会事务式应用 `selected + rejected siblings`，当前主要剩余缺口从“自动 reject 非推荐候选”转移为“限流、审计、多 key 策略”等生产 hardening。
+
+## 2026-06-18: Best-of 第二版采用可插拔 scorer + HTTP judge adapter
+
+- Decision: 在不改变当前 `generated -> selected/rejected` 轻量状态模型的前提下，给任务输入和项目级 quality profile 新增 `best_of_config`；服务端 best-of scorer 采用可注册策略，默认保留 `local_metadata_v1`，并新增可选 `http_judge_v1` 通过外部 HTTP judge 做视觉/LLM 打分。
+- Reason: 当前需要把自动选优从写死的本地元数据启发式升级为可扩展的视觉/LLM judge 能力，但又不希望把 MVP 绑定到某一家付费模型、引入新数据库迁移，或让外部评分成为自动选优的单点故障。
+- Impact: REST/MCP/Web 托管入口与项目级 quality profile 都可表达 scorer 选择；`http_judge_v1` 会消费服务端缩略图 data URL 和结构化任务信息，失败时自动回退到 `local_metadata_v1`。MVP 主要剩余缺口从“可插拔评分”转移为“生产 hardening”。
+
+## 2026-06-18: fal.ai provider adapter 采用 queue + rest storage HTTP 协议，并复用统一 resolved input 链路
+
+- Decision: 服务端 `provider=fal` 采用 fal queue + rest storage 的标准 HTTP 协议实现，不引入 Go SDK 新依赖；继续直接消费 `CreateTask` 统一生成的 `resolved_input_files`，不新增第二套 provider 专用输入协议或状态机。
+- Reason: 当前已经有 OpenAI-compatible 的真实输入复用闭环，下一步需要把同一套 `input-files`、匿名 remote URL 和当前项目 `asset_id` 扩到第二条真实 provider 路径；保持 HTTP 实现更透明，也更容易用本地 mock 做集成 smoke。
+- Impact: `provider=fal` 现已支持 queue 文生图，以及基于 remote URL / `asset_id` / `input_file_id` 的 edit 输入复用；MVP 的主要剩余缺口从“更多 provider 输入复用”转移为“生产 hardening”。
+
+## 2026-06-18: Remote URL 物化到 scope input-files，asset reuse 限定在同 workspace/project
+
+- Decision: 服务端在创建任务时支持三类 edit/mask 输入来源: scope `input-files`、匿名 `http/https` 远程 URL、当前 workspace/project 下已有 `asset_id`。远程 URL 会在创建任务时抓取并物化到当前 scope 的 `input-files`；`asset_id` 复用限定在同 workspace/project，不新增数据库表或第二套输入状态机。
+- Reason: 当前需要把“真实 provider edit/mask”从只支持上传文件扩展到更实用的复用路径，同时项目规则不希望在这一片引入新的输入索引表、缓存表或跨项目资产引用复杂度。
+- Impact: `CreateTask` 现在可以统一把三类来源解析为 `resolved_input_files`，OpenAI-compatible 继续消费同一条 `/images/edits` 路径；任务快照会保留远程 `url`、生成的 `input_file_id` 和原始 `asset_id`，后续更多 provider 应复用这条输入解析链路。
+
+## 2026-06-18: Scope 管理第二版进入独立 modal，并先复用 metadata 存 archive 状态
+
+- Decision: Web scope 管理从“仅设置页内联同步/新建”升级为独立 modal；workspace / project / campaign 的 archive 状态先写入各自 `metadata_json`，不新增数据库迁移；delete 只允许删除空 scope。
+- Reason: 现有设置页足够完成托管模式的“查 + 选 + 新建”，但当用户需要持续维护业务空间时，缺少独立管理入口和 rename/archive/delete 会明显拖慢日常使用；同时当前项目规则不希望为了这一片引入新的 scope 状态表或复杂迁移。
+- Impact: REST 新增 workspace/project/campaign 的 `PATCH` / `DELETE`；Web 顶栏可直接打开独立 scope 管理入口；设置页 selector 默认过滤 archived scope；scope 管理仍保持实例级 Basic Auth 管理能力，project API key 不参与这一层。
+
 ## 2026-06-18: 项目定位为 Agent ImageFlow
 
 - Decision: 项目定位从 DiagramOps / 技术图示网关调整为 Agent ImageFlow / AI 图片资产生成与管理平台。
@@ -77,4 +131,76 @@
 
 - Decision: `web/`、MCP、REST API 和 CLI 最终都应作为入口调用同一个服务端 application core；不长期维护“浏览器直连 provider”和“服务端 Worker provider”两套正式生图系统。
 - Reason: Agent ImageFlow 的产品定义是可追踪、可选优、可交付的图片资产平台。浏览器直连 provider 可以提供成熟交互和迁移经验，但不能作为 MCP/自动化系统的正式事实源。
-- Impact: 后续优先补 MCP stdio server 和服务端真实 provider adapter；Web 再进入服务端托管模式。原 Web 的 OpenAI-compatible、fal.ai、自定义 HTTP provider 逻辑作为服务端 provider adapter 的参考来源。
+- Impact: MCP stdio server 已补齐；后续优先迁移服务端真实 provider adapter，再进入 Web 托管模式。原 Web 的 OpenAI-compatible、fal.ai、自定义 HTTP provider 逻辑作为服务端 provider adapter 的参考来源。
+
+## 2026-06-18: MCP stdio 入口复用现有服务端核心
+
+- Decision: 新增 Go `cmd/mcp` 和 `internal/mcp`，用标准库实现 MCP stdio JSON-RPC 薄封装，不新增 MCP SDK 依赖。MCP tools 直接调用现有 `app.Service`。
+- Reason: 当前 slice 只需要本地 stdio、tools/list 和 tools/call；标准库实现能减少依赖和迁移成本，并确保 MCP、REST、CLI 共用同一套任务/资产状态机。
+- Impact: Docker image 新增 `/app/mcp`；MCP 对外暴露 `generated/selected` 语义，底层 `draft/approved` 继续作为兼容命名保留。下一步可以在不改 MCP 协议层的情况下迁移真实 provider adapter。
+
+## 2026-06-18: 第一版真实 provider 采用 OpenAI-compatible adapter
+
+- Decision: 服务端新增 `provider=openai-compatible`，通过 `OPENAI_COMPATIBLE_BASE_URL`、`OPENAI_COMPATIBLE_API_KEY`、`OPENAI_COMPATIBLE_MODEL` 和 `PROVIDER_TIMEOUT_SECONDS` 配置，调用同步 `images/generations` 并解析 `data[].b64_json` 或 `data[].url`。
+- Reason: OpenAI-compatible 形态与现有 Web 参考项目和多家中转/云端生图服务最接近，能最小成本验证“真实云端 provider -> Worker -> asset processor -> storage -> delivery”闭环。
+- Impact: 默认 provider 仍是 `mock`，未配置密钥时不会启用真实 provider；真实 API smoke 需要用户自行配置密钥。当前 slice 不包含 fal.ai、异步 polling、provider routing、reference image 或 edit/mask。
+
+## 2026-06-18: Web managed mode 先采用设置驱动的最小托管入口
+
+- Decision: Web 第一版托管模式通过设置页开启，并配置服务端 API URL、workspace、project、campaign 和 provider；提交 prompt 时创建服务端 `ImageTask`，轮询任务状态，展示服务端候选 `Asset`，在详情页执行 select/reject。原浏览器直连 provider 路径保留为 legacy playground mode。
+- Reason: 当前阶段的优先目标是让 Web 进入服务端 application core，验证 `ImageTask/Asset` 托管闭环，而不是同时实现完整 project/campaign 管理、reference/mask 参数迁移和模板系统。
+- Impact: Web 已能参与正式资产流；prompt template、style preset、reference/mask descriptor 的服务端保存/传递已补齐，下一步应补真实 edit/mask provider 边界和更完整的 workspace/project/campaign 管理体验。
+
+## 2026-06-18: Quality profile 先复用 project metadata
+
+- Decision: 第一版服务端质量复用使用 `project.metadata_json.quality_profile` 保存 prompt template、negative prompt、style preset、reference image 参数和 generation config；创建任务时通过 `use_project_quality_profile` 显式复用，并把有效配置快照写入 `structured_input_json`。
+- Reason: 当前 MVP 需要稳定质量输入和复用策略，但还不需要独立模板表、版本化模板库或完整 Web 管理界面；复用既有 `project.metadata_json` 可以避免 schema 迁移和过早复杂化。
+- Impact: REST/MCP/Web 托管入口已能共用项目级质量配置；best-of 自动选优和 reference/mask descriptor 已在后续 slice 补齐，真实 provider edit/mask 调用仍待后续实现。
+
+## 2026-06-18: Best-of 第一版采用本地启发式
+
+- Decision: 第一版 best-of 自动选优通过 `selection_mode=auto` / `best_of` 触发，Worker 在资产登记后先使用 `local_metadata_v1` 本地启发式选出一张候选并标记 selected；当前第二版已在此基础上补 `best_of_config` 和 `http_judge_v1`，当前第三版再补可选 auto reject，但仍不改变轻量资产状态模型。
+- Reason: 当前目标是削弱逐张人工审核成本并跑通自动推荐状态流；先有本地启发式基线，再补可插拔视觉/LLM 打分和可选 auto reject，更适合 MVP 的渐进演进顺序。
+- Impact: Web managed mode 默认传 `selection_mode=auto`，多候选任务完成后会出现推荐资产；该推荐和 auto rejected 候选都仍可被用户手动覆盖。后续重点从 best-of 状态流转向限流、审计和多 key 等生产 hardening。
+
+## 2026-06-18: Advanced managed input 先迁移 descriptor，不上传原图
+
+- Decision: Web/MCP/REST 第一版高级托管输入先迁移 reference image、mask/edit descriptor 和 generation config；服务端把这些字段写入 `structured_input_json` 和 asset `parameters_json`，但暂不上传 Web IndexedDB 原图/mask，也不执行真实 provider edit/mask 请求。
+- Reason: 当前目标是让高级输入不再被 Web managed mode 拦截，并确保服务端资产闭环不丢上下文；直接引入文件上传、服务端取回和各 provider edit/mask API 会扩大 schema、存储和安全边界。
+- Impact: 后续真实 edit/mask provider slice 可以复用已保存 descriptor，但还需要新增服务端可访问的输入图片/遮罩存储或上传路径。
+
+## 2026-06-18: Repair/reconcile 管理能力先放在本地 CLI
+
+- Decision: 第一版 repair/reconcile 通过 `vag repair scan/requeue/verify-asset` 本地维护命令提供，直接读取 `DATABASE_URL`、`REDIS_URL` 和 `STORAGE_ROOT`；暂不暴露 REST/MCP 管理接口。
+- Reason: repair 能力会扫描文件系统、重置任务状态并重新入队，属于本地自托管运维动作；在尚未实现项目级 API key 和权限模型前，不宜开放为远程 HTTP 能力。
+- Impact: Docker image 中的 `/app/vag` 可用于 smoke 和人工修复；未来如果要远程化 repair，需要先完成鉴权、审计和更严格的操作范围控制。
+
+## 2026-06-18: 第一版项目鉴权采用实例级 Basic Auth + 项目级单 key
+
+- Decision: HTTP API 第一版使用两层可选鉴权：实例入口可配置 `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD`，project 维度在 `project.metadata_json.access_config` 中维护单把活动 API key 的 `name/preview/hash`；客户端优先通过 `X-API-Key` 传项目 key，也兼容 Bearer token。
+- Reason: 当前产品面向单体平台和小团队自托管，先需要“能挡住公开入口、能按 project 隔离凭据、能让 Web/CLI/脚本继续用”的最小方案，而不是完整用户体系、RBAC 或多 key 管理。
+- Impact: REST 新增 `GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/access-config`；Web managed mode 新增 project key、Basic user、Basic password 设置；`vag` 通过 `AGENT_IMAGEFLOW_BASIC_USER`、`AGENT_IMAGEFLOW_BASIC_PASS`、`AGENT_IMAGEFLOW_API_KEY` 透传鉴权。第一版只保留一把活动 key，并使用标准库 `sha256` + 常量时间比较，后续如果暴露到更复杂环境，再升级到审计、限流和更强密钥管理。
+
+## 2026-06-18: Web scope 管理第一版放在设置页完成
+
+- Decision: 第一版 Web scope 管理不新开独立页面，而是在设置页的托管模式区域补“服务端同步 + 下拉选择 + 快速新建”；scope REST 接口新增列出/创建 workspace、project、campaign，并视为实例级管理操作，若启用了 Basic Auth 则只要求 Basic Auth。
+- Reason: 当前最主要摩擦是托管模式仍依赖手填 seed scope；先把“查 + 选 + 新建”做进已有设置页，可以最小改动地让日常使用更顺，而不会把 slice 扩张成完整后台系统。
+- Impact: Web 已不再主要依赖手写 `workspace_id/project_id/campaign_id`；后续如果要补独立 scope 管理页、rename/delete/archive 或更细权限，再在这个基础上继续演进。
+
+## 2026-06-18: 服务端缩略图统一由 cwebp 生成
+
+- Decision: 服务端缩略图不再依赖 provider 返回的 thumbnail bytes，而是统一基于原图在 asset processor 中生成 `.webp`；运行时镜像安装 `libwebp-tools`，通过 `cwebp` 完成 resize 和 WebP 编码。
+- Reason: 架构和输入输出规格都要求稳定的服务端 thumbnail output，并明确建议 `thumbnails/{asset_id}/{version}.webp`；Go 标准库没有 WebP 编码器，而当前项目规则又不希望为此引入新的 Go 第三方图像依赖。
+- Impact: `thumbnail_path` 的扩展名切换为 `.webp`，`GET /api/assets/{id}/thumbnail` 返回 `image/webp`；Docker Compose 继续作为标准运行环境，若直接运行本地二进制则需要系统 PATH 中存在 `cwebp`。
+
+## 2026-06-18: 第一版服务端输入文件先落 scope 内本地存储，不入数据库
+
+- Decision: 第一版 reference image / mask 的服务端可访问路径通过 scope 内 `input-files` 实现，文件和 metadata 直接落到本地文件系统；`CreateTask` 只接受公开的 `input_file_id`，并在服务端把它解析成内部 `resolved_input_files`，不新增数据库表。
+- Reason: 当前 slice 需要尽快把 Web 托管模式和真实 provider edit/mask 接起来，但项目规则不希望在这一片引入数据库迁移、额外依赖和更宽的索引面。scope 内文件系统 metadata 足够支撑 MVP 闭环。
+- Impact: Web managed mode 现在会先上传 reference image / mask，再创建带 `input_file_id` 的任务；OpenAI-compatible provider 在存在已解析输入文件时走 `/images/edits` multipart。后续如果需要远程 URL 抓取、asset reuse、输入文件治理或跨实例管理，再考虑独立表或对象存储索引。
+
+## 2026-06-18: 生产入口默认交给反向代理，保持 compose 为开发友好
+
+- Decision: 保持当前 `docker-compose.yml` 为本地开发友好配置；生产自托管默认通过反向代理/TLS 暴露 UI/API，对外只开放反向代理入口，不直接公网暴露 PostgreSQL 和 Redis。
+- Reason: 本片目标是补齐 README/demo/自托管说明，而不是重写部署拓扑。开发环境需要低摩擦启动，生产环境则需要更小暴露面和更清晰的域名入口。
+- Impact: README 与 Runbook 明确要求在公网部署时设置 `PUBLIC_BASE_URL`、启用 Basic Auth 和 project API key，并通过反向代理承接 `/api/*`；后续如果需要更强生产安全能力，再继续补限流、审计和多 key 策略。

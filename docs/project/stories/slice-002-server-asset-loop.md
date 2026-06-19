@@ -125,4 +125,4 @@ npm --prefix web run build
 
 - Changes: 新增 Go API、Worker、CLI、PostgreSQL schema、Redis queue、本地文件存储、mock provider、Docker Compose、示例任务和 Web 侧服务端 API client 边界。
 - Verification: `go test ./...` 通过；`docker compose build` 通过；干净 volume 下 `docker compose up -d` 成功；CLI 创建任务得到 `task_7b61c7463cb993dd78a8`，Worker 完成 3 个 ready `asset_version`；approve `asset_70948a43b0b74e34c81e` 后 asset metadata 返回 original/thumbnail/metadata URL；reject `asset_c652f332b2059c8e2358` 后状态变为 `rejected`；original 和 thumbnail HTTP HEAD 均返回 `200 OK` / `image/png`；`npm --prefix web test -- --run` 17 files / 219 tests passed；`npm --prefix web run build` 通过。
-- Remaining gaps: MCP server 未做；Web 还未深度接入服务端托管任务流；mock 缩略图先生成独立 PNG，后续可增强为真实 resize / webp；真实云端 provider 未接入。
+- Remaining gaps: MCP server 已在 slice 003 补齐；OpenAI-compatible provider 已在 slice 004 补齐；Web 还未深度接入服务端托管任务流；mock 缩略图先生成独立 PNG，后续可增强为真实 resize / webp。

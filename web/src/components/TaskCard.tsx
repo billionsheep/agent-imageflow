@@ -89,6 +89,10 @@ export default function TaskCard({
   const swipeOffsetRef = useRef(0)
   const pendingSwipeOffsetRef = useRef(0)
   const swipeFrameRef = useRef<number | null>(null)
+  const managedAssets = task.managedBy === 'agent-imageflow' ? task.imageflowAssets ?? [] : []
+  const firstManagedAsset = managedAssets[0]
+  const managedThumbnailUrl = firstManagedAsset?.thumbnailUrl || ''
+  const managedAssetStatus = firstManagedAsset?.status || ''
 
   const updateSwipeDirection = (nextDirection: -1 | 0 | 1) => {
     if (swipeDirectionRef.current === nextDirection) return
@@ -251,6 +255,11 @@ export default function TaskCard({
     setCoverSize('')
     setThumbSrc('')
 
+    if (managedThumbnailUrl) {
+      setThumbSrc(managedThumbnailUrl)
+      return
+    }
+
     let cancelled = false
     const imageId = task.outputImages?.[0]
     let unsubscribe: (() => void) | undefined
@@ -278,7 +287,7 @@ export default function TaskCard({
       cancelled = true
       unsubscribe?.()
     }
-  }, [task.outputImages])
+  }, [managedThumbnailUrl, task.outputImages])
 
   const duration = (() => {
     let seconds: number
@@ -318,7 +327,7 @@ export default function TaskCard({
   const showPendingPrompt = isAgentTaskPromptPending(task)
   const showN = !isAgentTask && (task.params.n > 1 || nDisplay.isMismatch)
   const outputErrorCount = task.outputErrors?.length ?? 0
-  const outputSuccessCount = task.outputImages?.length ?? 0
+  const outputSuccessCount = managedAssets.length || task.outputImages?.length || 0
   const requestedOutputCount = Math.max(task.params.n, outputSuccessCount + outputErrorCount)
   const hasPartialOutputFailure = task.status === 'done' && outputErrorCount > 0
 
@@ -485,15 +494,34 @@ export default function TaskCard({
             <>
               <img
                 src={thumbSrc}
-                data-image-id={task.outputImages[0]}
-                data-output-image-ids={task.outputImages.join(',')}
+                data-image-id={firstManagedAsset?.assetId ?? task.outputImages[0]}
+                data-output-image-ids={managedAssets.length ? managedAssets.map((asset) => asset.assetId).join(',') : task.outputImages.join(',')}
                 className="saveable-image w-full h-full object-cover"
                 loading="lazy"
                 alt=""
+                onLoad={(e) => {
+                  if (!managedThumbnailUrl) return
+                  const image = e.currentTarget
+                  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                    setCoverRatio(formatImageRatio(image.naturalWidth, image.naturalHeight))
+                    setCoverSize(`${image.naturalWidth}×${image.naturalHeight}`)
+                  }
+                }}
               />
-              {(hasPartialOutputFailure || task.outputImages.length > 1) && (
+              {managedAssetStatus && (
+                <span className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                  managedAssetStatus === 'selected'
+                    ? 'bg-green-500 text-white'
+                    : managedAssetStatus === 'rejected'
+                    ? 'bg-red-500 text-white'
+                    : 'bg-black/60 text-white'
+                }`}>
+                  {managedAssetStatus}
+                </span>
+              )}
+              {(hasPartialOutputFailure || outputSuccessCount > 1) && (
                 <span className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-                  {hasPartialOutputFailure ? <>{requestedOutputCount} | <span className="font-semibold text-yellow-300">{outputSuccessCount}</span></> : task.outputImages.length}
+                  {hasPartialOutputFailure ? <>{requestedOutputCount} | <span className="font-semibold text-yellow-300">{outputSuccessCount}</span></> : outputSuccessCount}
                 </span>
               )}
             </>
@@ -637,7 +665,7 @@ export default function TaskCard({
               onTouchEnd={(e) => e.stopPropagation()}
               onTouchCancel={(e) => e.stopPropagation()}
             >
-              {((task.status === 'error' && !isFalReconnecting) || settings.alwaysShowRetryButton) && (
+              {task.managedBy !== 'agent-imageflow' && ((task.status === 'error' && !isFalReconnecting) || settings.alwaysShowRetryButton) && (
                 <TaskActionButton
                   tooltip="重试任务"
                   onClick={() => retryTask(task)}

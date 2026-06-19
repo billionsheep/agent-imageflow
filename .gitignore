@@ -6,8 +6,8 @@
 !.env.example
 
 # Local runtime data
-storage/
-tmp/
+/storage/
+/tmp/
 *.db
 *.sqlite
 *.sqlite3
@@ -20,4 +20,4 @@ coverage/
 # Dependency caches
 node_modules/
 .cache/
-
+.vite/

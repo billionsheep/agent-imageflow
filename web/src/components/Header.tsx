@@ -7,7 +7,7 @@ import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
-import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
+import { CollectionManageIcon, EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -23,6 +23,7 @@ export default function Header() {
   const appMode = useStore((s) => s.appMode)
   const setAppMode = useStore((s) => s.setAppMode)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const setShowScopeManager = useStore((s) => s.setShowScopeManager)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const agentMobileHeaderVisible = useStore((s) => s.agentMobileHeaderVisible)
   const agentConversations = useStore((s) => s.agentConversations)
@@ -85,6 +86,7 @@ export default function Header() {
 
   const installTooltip = useTooltip()
   const helpTooltip = useTooltip()
+  const scopeTooltip = useTooltip()
   const settingsTooltip = useTooltip()
 
   useEffect(() => {
@@ -288,6 +290,24 @@ export default function Header() {
               </button>
               <ViewportTooltip visible={helpTooltip.visible} className="whitespace-nowrap">
                 操作指南
+              </ViewportTooltip>
+            </div>
+            <div
+              className="relative"
+              {...scopeTooltip.handlers}
+            >
+              <button
+                onClick={() => {
+                  dismissAllTooltips()
+                  setShowScopeManager(true)
+                }}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                aria-label="Scope 管理"
+              >
+                <CollectionManageIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </button>
+              <ViewportTooltip visible={scopeTooltip.visible} className="whitespace-nowrap">
+                Scope 管理
               </ViewportTooltip>
             </div>
             <div

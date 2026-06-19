@@ -18,20 +18,53 @@ import (
 )
 
 type Service struct {
-	cfg      config.Config
-	store    *store.PostgresStore
-	queue    *queue.RedisQueue
-	storage  storage.LocalStorage
-	provider provider.MockProvider
+	cfg           config.Config
+	store         *store.PostgresStore
+	queue         *queue.RedisQueue
+	storage       storage.LocalStorage
+	providers     map[string]provider.Adapter
+	bestOfScorers map[string]bestOfScorer
 }
 
 func NewService(cfg config.Config, st *store.PostgresStore, q *queue.RedisQueue, fs storage.LocalStorage) *Service {
+	providers := map[string]provider.Adapter{
+		provider.MockProviderID: provider.MockProvider{},
+	}
+	falProvider := provider.NewFalProvider(provider.FalConfig{
+		BaseURL:             cfg.FalBaseURL,
+		RestBaseURL:         cfg.FalRestBaseURL,
+		APIKey:              cfg.FalAPIKey,
+		Model:               cfg.FalModel,
+		TimeoutSeconds:      cfg.ProviderTimeoutSeconds,
+		PollIntervalMs:      cfg.FalPollIntervalMs,
+		StartTimeoutSeconds: cfg.ProviderTimeoutSeconds,
+	})
+	if falProvider.Configured() {
+		providers[provider.FalProviderID] = falProvider
+	}
+	openAICompatible := provider.NewOpenAICompatibleProvider(provider.OpenAICompatibleConfig{
+		BaseURL:        cfg.OpenAICompatibleBaseURL,
+		APIKey:         cfg.OpenAICompatibleAPIKey,
+		Model:          cfg.OpenAICompatibleModel,
+		TimeoutSeconds: cfg.ProviderTimeoutSeconds,
+	})
+	if openAICompatible.Configured() {
+		providers[provider.OpenAICompatibleProviderID] = openAICompatible
+	}
+	bestOfScorers := map[string]bestOfScorer{
+		domain.BestOfStrategyLocalMetadata: localMetadataBestOfScorer{},
+	}
+	httpJudge := newHTTPJudgeBestOfScorer(cfg.BestOfHTTPScorerURL, cfg.BestOfHTTPScorerAPIKey, cfg.BestOfHTTPScorerTimeout)
+	if httpJudge.Configured() {
+		bestOfScorers[domain.BestOfStrategyHTTPJudge] = httpJudge
+	}
 	return &Service{
-		cfg:      cfg,
-		store:    st,
-		queue:    q,
-		storage:  fs,
-		provider: provider.MockProvider{},
+		cfg:           cfg,
+		store:         st,
+		queue:         q,
+		storage:       fs,
+		providers:     providers,
+		bestOfScorers: bestOfScorers,
 	}
 }
 
@@ -43,7 +76,15 @@ func (s *Service) CreateTask(ctx context.Context, scope domain.Scope, req domain
 	if err := s.store.CheckScope(ctx, scope); err != nil {
 		return domain.TaskResponse{}, err
 	}
-	normalized, structured, inputHash, err := s.normalizeTaskRequest(scope, req)
+	projectProfile := domain.QualityProfile{}
+	if req.UseProjectQualityProfile {
+		var err error
+		projectProfile, err = s.store.GetProjectQualityProfile(ctx, scope.WorkspaceID, scope.ProjectID)
+		if err != nil {
+			return domain.TaskResponse{}, err
+		}
+	}
+	normalized, structured, inputHash, err := s.normalizeTaskRequest(ctx, scope, req, projectProfile)
 	if err != nil {
 		return domain.TaskResponse{}, err
 	}
@@ -73,6 +114,7 @@ func (s *Service) CreateTask(ctx context.Context, scope domain.Scope, req domain
 		OutputFormat:        normalized.OutputFormat,
 		StructuredInputJSON: structured,
 		Provider:            normalized.Provider,
+		SelectionMode:       normalized.SelectionMode,
 		Status:              domain.TaskQueued,
 		RequestedCount:      normalized.RequestedCount,
 		CreatedBy:           "local-user",
@@ -100,6 +142,38 @@ func (s *Service) GetTask(ctx context.Context, taskID string) (domain.TaskRespon
 		return domain.TaskResponse{}, err
 	}
 	return s.taskResponse(ctx, task)
+}
+
+func (s *Service) GetProjectQualityProfile(ctx context.Context, workspaceID, projectID string) (domain.ProjectQualityProfileResponse, error) {
+	profile, err := s.store.GetProjectQualityProfile(ctx, workspaceID, projectID)
+	if err != nil {
+		return domain.ProjectQualityProfileResponse{}, err
+	}
+	profile, err = normalizeQualityProfile(profile)
+	if err != nil {
+		return domain.ProjectQualityProfileResponse{}, err
+	}
+	return domain.ProjectQualityProfileResponse{
+		WorkspaceID:    workspaceID,
+		ProjectID:      projectID,
+		QualityProfile: profile,
+	}, nil
+}
+
+func (s *Service) UpdateProjectQualityProfile(ctx context.Context, workspaceID, projectID string, profile domain.QualityProfile) (domain.ProjectQualityProfileResponse, error) {
+	normalized, err := normalizeQualityProfile(profile)
+	if err != nil {
+		return domain.ProjectQualityProfileResponse{}, err
+	}
+	saved, err := s.store.UpdateProjectQualityProfile(ctx, workspaceID, projectID, normalized)
+	if err != nil {
+		return domain.ProjectQualityProfileResponse{}, err
+	}
+	return domain.ProjectQualityProfileResponse{
+		WorkspaceID:    workspaceID,
+		ProjectID:      projectID,
+		QualityProfile: saved,
+	}, nil
 }
 
 func (s *Service) ListAssets(ctx context.Context, projectID, campaignID string) ([]domain.AssetResponse, error) {
@@ -134,7 +208,7 @@ func (s *Service) GetAssetFile(ctx context.Context, assetID, kind string) (strin
 	case "original":
 		return item.Version.FilePath, item.Version.MimeType, nil
 	case "thumbnail":
-		return item.Version.ThumbnailPath, "image/png", nil
+		return item.Version.ThumbnailPath, storage.MimeTypeForPath(item.Version.ThumbnailPath), nil
 	default:
 		return "", "", fmt.Errorf("unknown file kind %q", kind)
 	}
@@ -157,7 +231,7 @@ func (s *Service) ProcessTask(ctx context.Context, taskID string) error {
 		return nil
 	}
 
-	attemptID, _, err := s.store.CreateAttempt(ctx, task)
+	attemptID, attemptNo, err := s.store.CreateAttempt(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -167,17 +241,34 @@ func (s *Service) ProcessTask(ctx context.Context, taskID string) error {
 	}
 	task.Status = domain.TaskRunning
 
-	result, err := s.provider.Generate(ctx, task)
+	adapter, ok := s.providers[task.Provider]
+	if !ok {
+		err := fmt.Errorf("provider %q is not enabled", task.Provider)
+		code := "provider_not_enabled"
+		msg := err.Error()
+		_ = s.store.FinishAttempt(ctx, attemptID, domain.AttemptFailed, provider.Result{ErrorCode: code, ErrorMessage: msg}, started, &code, &msg, nil)
+		_ = s.store.UpdateTaskStatus(ctx, task.ID, domain.TaskFailed, &code, &msg)
+		return err
+	}
+	result, err := adapter.Generate(ctx, task)
 	if err != nil {
+		scheduled, retryErr := s.scheduleRetry(ctx, task.ID, attemptID, attemptNo, result, started, err)
+		if retryErr != nil {
+			return retryErr
+		}
+		if scheduled {
+			return nil
+		}
 		code := "provider_error"
 		msg := err.Error()
-		_ = s.store.FinishAttempt(ctx, attemptID, domain.AttemptFailed, result, started, &code, &msg)
+		_ = s.store.FinishAttempt(ctx, attemptID, domain.AttemptFailed, result, started, &code, &msg, nil)
 		_ = s.store.UpdateTaskStatus(ctx, task.ID, domain.TaskFailed, &code, &msg)
 		return err
 	}
 
 	successCount := 0
 	var processErr error
+	registered := make([]domain.AssetWithVersion, 0, len(result.Files))
 	for _, file := range result.Files {
 		assetID := domain.NewID("asset")
 		versionID := domain.NewID("ver")
@@ -186,10 +277,12 @@ func (s *Service) ProcessTask(ctx context.Context, taskID string) error {
 			processErr = err
 			continue
 		}
-		if _, err := s.store.InsertAssetWithVersion(ctx, task, file, stored); err != nil {
+		item, err := s.store.InsertAssetWithVersion(ctx, task, file, stored)
+		if err != nil {
 			processErr = err
 			continue
 		}
+		registered = append(registered, item)
 		successCount++
 	}
 
@@ -220,10 +313,13 @@ func (s *Service) ProcessTask(ctx context.Context, taskID string) error {
 	if status == domain.TaskFailed {
 		attemptStatus = domain.AttemptFailed
 	}
-	if err := s.store.FinishAttempt(ctx, attemptID, attemptStatus, result, started, code, message); err != nil {
+	if err := s.store.FinishAttempt(ctx, attemptID, attemptStatus, result, started, code, message, nil); err != nil {
 		return err
 	}
-	return s.store.UpdateTaskStatus(ctx, task.ID, status, code, message)
+	if err := s.store.UpdateTaskStatus(ctx, task.ID, status, code, message); err != nil {
+		return err
+	}
+	return s.autoSelectBestAsset(ctx, task, registered)
 }
 
 func (s *Service) taskResponse(ctx context.Context, task domain.Task) (domain.TaskResponse, error) {
@@ -262,6 +358,7 @@ func (s *Service) assetResponse(item domain.AssetWithVersion) domain.AssetRespon
 		Model:          item.Version.Model,
 		Prompt:         item.Version.Prompt,
 		ParametersJSON: item.Version.ParametersJSON,
+		MetadataJSON:   metadataJSONFromStructuredInput(item.TaskStructuredInputJSON),
 		Delivery: domain.DeliveryInfo{
 			LocalPath:    item.Version.FilePath,
 			DownloadURL:  s.assetURL(item.ID, "original"),
@@ -272,6 +369,18 @@ func (s *Service) assetResponse(item domain.AssetWithVersion) domain.AssetRespon
 	}
 }
 
+func metadataJSONFromStructuredInput(raw json.RawMessage) json.RawMessage {
+	var structured map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &structured) != nil {
+		return json.RawMessage(`{}`)
+	}
+	metadata := structured["metadata_json"]
+	if len(metadata) == 0 || !json.Valid(metadata) {
+		return json.RawMessage(`{}`)
+	}
+	return metadata
+}
+
 func (s *Service) assetURL(assetID, suffix string) string {
 	if suffix == "" {
 		return s.cfg.PublicBaseURL + "/api/assets/" + assetID
@@ -279,21 +388,20 @@ func (s *Service) assetURL(assetID, suffix string) string {
 	return s.cfg.PublicBaseURL + "/api/assets/" + assetID + "/" + suffix
 }
 
-func (s *Service) normalizeTaskRequest(scope domain.Scope, req domain.CreateTaskRequest) (domain.CreateTaskRequest, []byte, string, error) {
+func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, req domain.CreateTaskRequest, projectProfile domain.QualityProfile) (domain.CreateTaskRequest, []byte, string, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.Purpose = strings.TrimSpace(req.Purpose)
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	req.NegativePrompt = strings.TrimSpace(req.NegativePrompt)
 	req.StylePreset = strings.TrimSpace(req.StylePreset)
+	req.PromptTemplate = strings.TrimSpace(req.PromptTemplate)
 	req.AspectRatio = strings.TrimSpace(req.AspectRatio)
 	req.OutputFormat = strings.TrimSpace(req.OutputFormat)
 	req.Provider = strings.TrimSpace(req.Provider)
+	req.SelectionMode = strings.TrimSpace(req.SelectionMode)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	if req.Title == "" {
 		req.Title = "Untitled image task"
-	}
-	if req.Prompt == "" {
-		return req, nil, "", fmt.Errorf("prompt is required")
 	}
 	if req.AspectRatio == "" {
 		req.AspectRatio = "1:1"
@@ -304,8 +412,29 @@ func (s *Service) normalizeTaskRequest(scope domain.Scope, req domain.CreateTask
 	if req.Provider == "" {
 		req.Provider = s.cfg.DefaultProvider
 	}
-	if req.Provider != "mock" {
-		return req, nil, "", fmt.Errorf("provider %q is not enabled in this slice", req.Provider)
+	selectionMode, ok := domain.NormalizeSelectionMode(req.SelectionMode)
+	if !ok {
+		return req, nil, "", fmt.Errorf("unknown selection_mode %q", req.SelectionMode)
+	}
+	req.SelectionMode = selectionMode
+	quality, err := applyQualityProfile(req, projectProfile)
+	if err != nil {
+		return req, nil, "", err
+	}
+	req = quality.Request
+	if req.Prompt == "" {
+		return req, nil, "", fmt.Errorf("prompt is required")
+	}
+	req.MaskImage = normalizeMaskImage(req.MaskImage)
+	if err := s.validateBestOfConfig(req.SelectionMode, req.BestOfConfig); err != nil {
+		return req, nil, "", err
+	}
+	req, resolvedInputFiles, err := s.resolveTaskInputFiles(ctx, scope, req)
+	if err != nil {
+		return req, nil, "", err
+	}
+	if _, ok := s.providers[req.Provider]; !ok {
+		return req, nil, "", fmt.Errorf("provider %q is not enabled; configure it or use %q", req.Provider, provider.MockProviderID)
 	}
 	if req.RequestedCount < 1 {
 		req.RequestedCount = 1
@@ -318,21 +447,30 @@ func (s *Service) normalizeTaskRequest(scope domain.Scope, req domain.CreateTask
 	}
 
 	structured, err := json.Marshal(map[string]any{
-		"workspace_id":    scope.WorkspaceID,
-		"project_id":      scope.ProjectID,
-		"campaign_id":     scope.CampaignID,
-		"idempotency_key": req.IdempotencyKey,
-		"title":           req.Title,
-		"purpose":         req.Purpose,
-		"prompt":          req.Prompt,
-		"negative_prompt": req.NegativePrompt,
-		"style_preset":    req.StylePreset,
-		"aspect_ratio":    req.AspectRatio,
-		"output_format":   req.OutputFormat,
-		"requested_count": req.RequestedCount,
-		"provider":        req.Provider,
-		"review_required": req.ReviewRequired,
-		"metadata_json":   json.RawMessage(req.MetadataJSON),
+		"workspace_id":                scope.WorkspaceID,
+		"project_id":                  scope.ProjectID,
+		"campaign_id":                 scope.CampaignID,
+		"idempotency_key":             req.IdempotencyKey,
+		"title":                       req.Title,
+		"purpose":                     req.Purpose,
+		"prompt":                      req.Prompt,
+		"negative_prompt":             req.NegativePrompt,
+		"style_preset":                req.StylePreset,
+		"prompt_template":             req.PromptTemplate,
+		"template_variables":          req.TemplateVariables,
+		"reference_images":            req.ReferenceImages,
+		"mask_image":                  req.MaskImage,
+		"best_of_config":              req.BestOfConfig,
+		"resolved_input_files":        resolvedInputFiles,
+		"generation_config":           json.RawMessage(req.GenerationConfig),
+		"use_project_quality_profile": req.UseProjectQualityProfile,
+		"aspect_ratio":                req.AspectRatio,
+		"output_format":               req.OutputFormat,
+		"requested_count":             req.RequestedCount,
+		"provider":                    req.Provider,
+		"selection_mode":              req.SelectionMode,
+		"review_required":             req.ReviewRequired,
+		"metadata_json":               json.RawMessage(req.MetadataJSON),
 	})
 	if err != nil {
 		return req, nil, "", err

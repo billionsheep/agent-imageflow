@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/billionsheep/agent-imageflow/internal/app"
 	"github.com/billionsheep/agent-imageflow/internal/config"
@@ -42,10 +43,28 @@ func main() {
 		log.Fatalf("ping redis: %v", err)
 	}
 
-	service := app.NewService(cfg, store.NewPostgresStore(conn), q, storage.NewLocalStorage(cfg.StorageRoot))
+	var rateLimiter httpapi.RateLimiter
+	if cfg.RateLimitWindowSeconds > 0 && (cfg.RateLimitInstanceMaxReq > 0 || cfg.RateLimitProjectMaxReq > 0) {
+		rateLimiter, err = httpapi.NewRedisRateLimiter(cfg.RedisURL)
+		if err != nil {
+			log.Fatalf("create redis rate limiter: %v", err)
+		}
+		defer rateLimiter.Close()
+	}
+
+	localStorage := storage.NewLocalStorage(cfg.StorageRoot, cfg.ThumbnailMaxWidth, cfg.ThumbnailMaxHeight)
+	service := app.NewService(cfg, store.NewPostgresStore(conn), q, localStorage)
 	server := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: httpapi.New(service),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.New(service, httpapi.Options{
+			BasicAuthUsername:            cfg.BasicAuthUsername,
+			BasicAuthPassword:            cfg.BasicAuthPassword,
+			AuditSink:                    localStorage,
+			RateLimiter:                  rateLimiter,
+			RateLimitWindow:              time.Duration(cfg.RateLimitWindowSeconds) * time.Second,
+			RateLimitInstanceMaxRequests: cfg.RateLimitInstanceMaxReq,
+			RateLimitProjectMaxRequests:  cfg.RateLimitProjectMaxReq,
+		}),
 	}
 
 	go func() {

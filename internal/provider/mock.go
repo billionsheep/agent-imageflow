@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
+	"sync"
 
 	"github.com/billionsheep/agent-imageflow/internal/domain"
 )
@@ -40,7 +42,21 @@ type Result struct {
 
 type MockProvider struct{}
 
+var mockTransientFailures sync.Map
+
 func (p MockProvider) Generate(_ context.Context, task domain.Task) (Result, error) {
+	if shouldFailMockTransientOnce(task) {
+		raw := []byte(fmt.Sprintf(`{"provider_request_id":"mock_%s","status":"failed","error_code":"temporary_unavailable"}`, task.ID))
+		return Result{
+			ProviderRequestID: "mock_" + task.ID,
+			Status:            "failed",
+			RawResponse:       raw,
+			CostRaw:           []byte(`{"provider":"mock","estimated_cost":0}`),
+			ErrorCode:         "temporary_unavailable",
+			ErrorMessage:      "mock transient failure, please retry",
+		}, fmt.Errorf("mock transient failure, please retry")
+	}
+
 	count := task.RequestedCount
 	if count < 1 {
 		count = 1
@@ -62,7 +78,12 @@ func (p MockProvider) Generate(_ context.Context, task domain.Task) (Result, err
 		if err != nil {
 			return Result{}, err
 		}
-		parameters := []byte(fmt.Sprintf(`{"aspect_ratio":%q,"output_format":%q,"style_preset":%q,"slot":%d}`, task.AspectRatio, task.OutputFormat, task.StylePreset, i))
+		parameters := taskProviderParameters(task, map[string]any{
+			"aspect_ratio":  task.AspectRatio,
+			"output_format": task.OutputFormat,
+			"style_preset":  task.StylePreset,
+			"slot":          i,
+		})
 		cost := []byte(`{"provider":"mock","estimated_cost":0}`)
 		files = append(files, GeneratedFile{
 			Slot:          i,
@@ -87,6 +108,30 @@ func (p MockProvider) Generate(_ context.Context, task domain.Task) (Result, err
 		RawResponse:       raw,
 		CostRaw:           []byte(`{"provider":"mock","estimated_cost":0}`),
 	}, nil
+}
+
+func shouldFailMockTransientOnce(task domain.Task) bool {
+	if task.ID == "" || mockFailureMode(task) != "transient_once" {
+		return false
+	}
+	_, loaded := mockTransientFailures.LoadOrStore(task.ID, true)
+	return !loaded
+}
+
+func mockFailureMode(task domain.Task) string {
+	var input struct {
+		GenerationConfig json.RawMessage `json:"generation_config"`
+	}
+	if len(task.StructuredInputJSON) == 0 || json.Unmarshal(task.StructuredInputJSON, &input) != nil || len(input.GenerationConfig) == 0 {
+		return ""
+	}
+	var generationConfig struct {
+		MockFailureMode string `json:"mock_failure_mode"`
+	}
+	if json.Unmarshal(input.GenerationConfig, &generationConfig) != nil {
+		return ""
+	}
+	return generationConfig.MockFailureMode
 }
 
 func dimensions(aspectRatio string) (int, int) {
