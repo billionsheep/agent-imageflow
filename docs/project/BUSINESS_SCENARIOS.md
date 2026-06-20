@@ -183,13 +183,12 @@ Campaign:
 - Web / MCP / REST / CLI 创建图片任务。
 - 生成、落盘、缩略图、metadata、selected/rejected。
 - reference image、mask/edit descriptor 和真实 provider 输入复用。
+- 按 source、session、batch、status、provider 和 keyword 查询资产，Web 资产库支持分页加载和图片 lazy loading。
 
 当前还不完整：
 
-- Web 不能统一显示 MCP / REST / CLI 创建的全部资产。
 - 没有正式 Reference Library、Mascot Profile、Prompt Recipe 和 edit lineage 视图。
-- 没有 session/run/source_thread 隔离。
-- 没有发布使用记录、存储占用和过期策略。
+- 没有发布使用记录、配额策略、批量清理 UI 和更细 retention 策略。
 
 ### 嵌入式项目架构图账号
 
@@ -212,6 +211,7 @@ Campaign:
 - 如果只是生成“图片风格的技术架构图封面/插图”，当前图片资产闭环可以承接。
 - 如果需要可编辑、可 diff、可长期维护的 Mermaid / D2 / SVG / draw.io 源文件，当前产品还不完整。
 - 嵌入式架构图对事实准确性、模块命名、连线方向和接口关系要求更高，不能只依赖生图模型自由发挥。
+- 当前 P1 只补图片资产筛选、批次追踪和技术文章插图示例；不会把该场景扩成技术图编辑器。
 
 后续如果确认要支持该方向，应补：
 

@@ -134,14 +134,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleGetProjectQualityProfile(w, r, parts[2], parts[4])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		s.handleUpdateProjectQualityProfile(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
+		s.handleGetProjectProviderProfile(w, r, parts[2], parts[4])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
+		s.handleUpdateProjectProviderProfile(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		s.handleGetProjectAccessConfig(w, r, parts[2], parts[4])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		s.handleUpdateProjectAccessConfig(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "tasks", "*", "attempts"):
+		s.handleGetTaskAttempts(w, r, parts[2])
 	case isRead && match(parts, "api", "tasks", "*"):
 		s.handleGetTask(w, r, parts[2])
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "assets"):
 		s.handleListAssets(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
+		s.handleGetBatchProgress(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "assets", "*"):
 		s.handleGetAsset(w, r, parts[2])
 	case r.Method == http.MethodPost && match(parts, "api", "assets", "*", "approve"):
@@ -324,9 +332,12 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
+	case match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
+		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4], AllowBasicOnly: true}, true, nil
-	case match(parts, "api", "tasks", "*"):
+	case match(parts, "api", "tasks", "*"),
+		match(parts, "api", "tasks", "*", "attempts"):
 		scope, err := s.service.GetTaskScope(r.Context(), parts[2])
 		if err != nil {
 			return requestAuthScope{}, false, err
@@ -337,7 +348,8 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			CampaignID:  scope.CampaignID,
 			TaskID:      parts[2],
 		}, true, nil
-	case match(parts, "api", "projects", "*", "campaigns", "*", "assets"):
+	case match(parts, "api", "projects", "*", "campaigns", "*", "assets"),
+		match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
 		return requestAuthScope{ProjectID: parts[2], CampaignID: parts[4]}, true, nil
 	case match(parts, "api", "assets", "*"),
 		match(parts, "api", "assets", "*", "approve"),
@@ -632,6 +644,15 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request, taskID st
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) handleGetTaskAttempts(w http.ResponseWriter, r *http.Request, taskID string) {
+	response, err := s.service.ListTaskAttempts(r.Context(), taskID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleGetProjectQualityProfile(w http.ResponseWriter, r *http.Request, workspaceID, projectID string) {
 	response, err := s.service.GetProjectQualityProfile(r.Context(), workspaceID, projectID)
 	if err != nil {
@@ -650,6 +671,31 @@ func (s *Server) handleUpdateProjectQualityProfile(w http.ResponseWriter, r *htt
 		return
 	}
 	response, err := s.service.UpdateProjectQualityProfile(r.Context(), workspaceID, projectID, profile)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleGetProjectProviderProfile(w http.ResponseWriter, r *http.Request, workspaceID, projectID string) {
+	response, err := s.service.GetProjectProviderProfile(r.Context(), workspaceID, projectID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleUpdateProjectProviderProfile(w http.ResponseWriter, r *http.Request, workspaceID, projectID string) {
+	defer r.Body.Close()
+	var profile domain.ProjectProviderProfile
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&profile); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	response, err := s.service.UpdateProjectProviderProfile(r.Context(), workspaceID, projectID, profile)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -683,7 +729,26 @@ func (s *Server) handleUpdateProjectAccessConfig(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) handleListAssets(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {
-	response, err := s.service.ListAssets(r.Context(), projectID, campaignID)
+	query, err := parseAssetListQuery(r, projectID, campaignID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
+		return
+	}
+	response, err := s.service.ListAssets(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleGetBatchProgress(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {
+	query, err := parseBatchProgressQuery(r, projectID, campaignID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
+		return
+	}
+	response, err := s.service.GetBatchProgress(r.Context(), query)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -717,6 +782,75 @@ func (s *Server) handleAssetFile(w http.ResponseWriter, r *http.Request, assetID
 	}
 	w.Header().Set("Content-Type", mimeType)
 	http.ServeFile(w, r, path)
+}
+
+func parseBatchProgressQuery(r *http.Request, projectID, campaignID string) (domain.BatchProgressQuery, error) {
+	values := r.URL.Query()
+	limit := domain.DefaultBatchProgressLimit
+	if rawLimit := strings.TrimSpace(values.Get("limit")); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return domain.BatchProgressQuery{}, err
+		}
+		limit = parsed
+	}
+	if limit <= 0 {
+		limit = domain.DefaultBatchProgressLimit
+	}
+	if limit > domain.MaxBatchProgressLimit {
+		limit = domain.MaxBatchProgressLimit
+	}
+	return domain.BatchProgressQuery{
+		ProjectID:  projectID,
+		CampaignID: campaignID,
+		SessionID:  strings.TrimSpace(values.Get("session_id")),
+		BatchID:    strings.TrimSpace(values.Get("batch_id")),
+		Limit:      limit,
+	}, nil
+}
+
+func parseAssetListQuery(r *http.Request, projectID, campaignID string) (domain.AssetListQuery, error) {
+	values := r.URL.Query()
+	query := domain.AssetListQuery{
+		ProjectID:  projectID,
+		CampaignID: campaignID,
+		Status:     values.Get("status"),
+		Provider:   values.Get("provider"),
+		Model:      values.Get("model"),
+		Source:     values.Get("source"),
+		SessionID:  values.Get("session_id"),
+		BatchID:    values.Get("batch_id"),
+		Keyword:    values.Get("keyword"),
+	}
+	if limitRaw := strings.TrimSpace(values.Get("limit")); limitRaw != "" {
+		limit, err := strconv.Atoi(limitRaw)
+		if err != nil {
+			return domain.AssetListQuery{}, err
+		}
+		query.Limit = limit
+	}
+	if offsetRaw := strings.TrimSpace(values.Get("offset")); offsetRaw != "" {
+		offset, err := strconv.Atoi(offsetRaw)
+		if err != nil {
+			return domain.AssetListQuery{}, err
+		}
+		query.Offset = offset
+	}
+	if createdFromRaw := strings.TrimSpace(values.Get("created_from")); createdFromRaw != "" {
+		createdFrom, err := time.Parse(time.RFC3339, createdFromRaw)
+		if err != nil {
+			return domain.AssetListQuery{}, err
+		}
+		query.CreatedFrom = &createdFrom
+	}
+	if createdToRaw := strings.TrimSpace(values.Get("created_to")); createdToRaw != "" {
+		createdTo, err := time.Parse(time.RFC3339, createdToRaw)
+		if err != nil {
+			return domain.AssetListQuery{}, err
+		}
+		query.CreatedTo = &createdTo
+	}
+	return query, nil
 }
 
 func (s *Server) setCORS(w http.ResponseWriter) {

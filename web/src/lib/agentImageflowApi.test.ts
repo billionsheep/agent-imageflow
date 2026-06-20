@@ -3,14 +3,17 @@ import {
   buildAgentImageflowHeaders,
   buildAgentImageflowAssetsUrl,
   buildAgentImageflowAssetUrl,
+  buildAgentImageflowBatchProgressUrl,
   buildAgentImageflowCampaignsUrl,
   buildAgentImageflowCampaignUrl,
   buildAgentImageflowInputFilesUrl,
   buildAgentImageflowProjectUrl,
   buildAgentImageflowProjectsUrl,
+  buildAgentImageflowProviderProfileUrl,
   buildAgentImageflowQualityProfileUrl,
   buildAgentImageflowStorageGovernanceUrl,
   buildAgentImageflowStorageIntegrityUrl,
+  buildAgentImageflowTaskAttemptsUrl,
   buildAgentImageflowTaskStatusUrl,
   buildAgentImageflowTaskUrl,
   buildAgentImageflowWorkspaceUrl,
@@ -38,6 +41,7 @@ describe('agentImageflowApi', () => {
 
   it('builds task and asset lookup URLs', () => {
     expect(buildAgentImageflowTaskStatusUrl('http://localhost:8081', 'task_1')).toBe('http://localhost:8081/api/tasks/task_1')
+    expect(buildAgentImageflowTaskAttemptsUrl('http://localhost:8081', 'task_1')).toBe('http://localhost:8081/api/tasks/task_1/attempts')
     expect(buildAgentImageflowAssetUrl('http://localhost:8081', 'asset_1')).toBe('http://localhost:8081/api/assets/asset_1')
     expect(buildAgentImageflowWorkspacesUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/workspaces')
     expect(buildAgentImageflowWorkspaceUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default')
@@ -64,10 +68,35 @@ describe('agentImageflowApi', () => {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
     })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets')
+    expect(buildAgentImageflowAssetsUrl('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      limit: 24,
+      offset: 48,
+      status: 'selected',
+      provider: 'mock',
+      source: 'mcp',
+      sessionId: 'session_1',
+      batchId: 'batch_1',
+      keyword: 'cover',
+    })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets?limit=24&offset=48&status=selected&provider=mock&source=mcp&session_id=session_1&batch_id=batch_1&keyword=cover')
+    expect(buildAgentImageflowBatchProgressUrl('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      sessionId: 'session_1',
+      batchId: 'batch_1',
+      limit: 50,
+    })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-progress?session_id=session_1&batch_id=batch_1&limit=50')
     expect(buildAgentImageflowQualityProfileUrl('http://localhost:8081/', {
       workspaceId: 'ws_default',
       projectId: 'prj_xhs_anime',
     })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/quality-profile')
+    expect(buildAgentImageflowProviderProfileUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+    })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/provider-profile')
     expect(buildAgentImageflowStorageGovernanceUrl('http://localhost:8081/', {
       workspaceId: 'ws_default',
       projectId: 'prj_xhs_anime',

@@ -12,6 +12,7 @@ import (
 	"image/draw"
 	"image/png"
 	"sync"
+	"time"
 
 	"github.com/billionsheep/agent-imageflow/internal/domain"
 )
@@ -38,13 +39,14 @@ type Result struct {
 	CostRaw           []byte
 	ErrorCode         string
 	ErrorMessage      string
+	Metrics           domain.AttemptMetrics
 }
 
 type MockProvider struct{}
 
 var mockTransientFailures sync.Map
 
-func (p MockProvider) Generate(_ context.Context, task domain.Task) (Result, error) {
+func (p MockProvider) Generate(ctx context.Context, task domain.Task) (Result, error) {
 	if shouldFailMockTransientOnce(task) {
 		raw := []byte(fmt.Sprintf(`{"provider_request_id":"mock_%s","status":"failed","error_code":"temporary_unavailable"}`, task.ID))
 		return Result{
@@ -56,13 +58,26 @@ func (p MockProvider) Generate(_ context.Context, task domain.Task) (Result, err
 			ErrorMessage:      "mock transient failure, please retry",
 		}, fmt.Errorf("mock transient failure, please retry")
 	}
+	if delay := mockDelay(task); delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return Result{
+				ProviderRequestID: "mock_" + task.ID,
+				Status:            "failed",
+				CostRaw:           []byte(`{"provider":"mock","estimated_cost":0}`),
+				ErrorCode:         "mock_canceled",
+				ErrorMessage:      ctx.Err().Error(),
+			}, ctx.Err()
+		}
+	}
 
 	count := task.RequestedCount
 	if count < 1 {
 		count = 1
 	}
-	if count > 4 {
-		count = 4
+	if maxN := taskProviderMaxN(task, MockProviderID, 4); count > maxN {
+		count = maxN
 	}
 
 	width, height := dimensions(task.AspectRatio)
@@ -119,19 +134,38 @@ func shouldFailMockTransientOnce(task domain.Task) bool {
 }
 
 func mockFailureMode(task domain.Task) string {
+	config := mockGenerationConfig(task)
+	return config.MockFailureMode
+}
+
+func mockDelay(task domain.Task) time.Duration {
+	config := mockGenerationConfig(task)
+	if config.MockDelayMs <= 0 {
+		return 0
+	}
+	if config.MockDelayMs > 10_000 {
+		config.MockDelayMs = 10_000
+	}
+	return time.Duration(config.MockDelayMs) * time.Millisecond
+}
+
+type mockGenerationConfigPayload struct {
+	MockFailureMode string `json:"mock_failure_mode"`
+	MockDelayMs     int    `json:"mock_delay_ms"`
+}
+
+func mockGenerationConfig(task domain.Task) mockGenerationConfigPayload {
 	var input struct {
 		GenerationConfig json.RawMessage `json:"generation_config"`
 	}
 	if len(task.StructuredInputJSON) == 0 || json.Unmarshal(task.StructuredInputJSON, &input) != nil || len(input.GenerationConfig) == 0 {
-		return ""
+		return mockGenerationConfigPayload{}
 	}
-	var generationConfig struct {
-		MockFailureMode string `json:"mock_failure_mode"`
-	}
+	var generationConfig mockGenerationConfigPayload
 	if json.Unmarshal(input.GenerationConfig, &generationConfig) != nil {
-		return ""
+		return mockGenerationConfigPayload{}
 	}
-	return generationConfig.MockFailureMode
+	return generationConfig
 }
 
 func dimensions(aspectRatio string) (int, int) {

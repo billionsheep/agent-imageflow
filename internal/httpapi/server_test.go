@@ -238,6 +238,22 @@ func TestInferAuditRoute(t *testing.T) {
 	if action != "get_asset_thumbnail" {
 		t.Fatalf("unexpected action %q", action)
 	}
+
+	route, action = inferAuditRoute([]string{"api", "tasks", "task_1", "attempts"}, http.MethodGet)
+	if route != "/api/tasks/{task_id}/attempts" {
+		t.Fatalf("unexpected attempts route %q", route)
+	}
+	if action != "list_task_attempts" {
+		t.Fatalf("unexpected attempts action %q", action)
+	}
+
+	route, action = inferAuditRoute([]string{"api", "projects", "prj_demo", "campaigns", "cmp_demo", "batch-progress"}, http.MethodGet)
+	if route != "/api/projects/{project_id}/campaigns/{campaign_id}/batch-progress" {
+		t.Fatalf("unexpected batch-progress route %q", route)
+	}
+	if action != "get_batch_progress" {
+		t.Fatalf("unexpected batch-progress action %q", action)
+	}
 }
 
 func TestStorageGovernanceRouteUsesProjectScopeAuth(t *testing.T) {
@@ -280,5 +296,70 @@ func TestStorageGovernanceRouteUsesProjectScopeAuth(t *testing.T) {
 				t.Fatalf("unexpected action %q", action)
 			}
 		})
+	}
+}
+
+func TestProviderProfileRouteUsesProjectScopeAuth(t *testing.T) {
+	server := &Server{}
+	parts := []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "provider-profile"}
+	scope, ok, err := server.resolveRequestAuthScope(
+		httptest.NewRequest(http.MethodGet, "/api/workspaces/ws_default/projects/prj_demo/provider-profile", nil),
+		parts,
+	)
+	if err != nil {
+		t.Fatalf("resolveRequestAuthScope returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected provider-profile route to resolve auth scope")
+	}
+	if scope.WorkspaceID != "ws_default" || scope.ProjectID != "prj_demo" {
+		t.Fatalf("unexpected scope: %#v", scope)
+	}
+	if scope.AllowBasicOnly {
+		t.Fatal("provider-profile should use project API key rules")
+	}
+
+	route, action := inferAuditRoute(parts, http.MethodGet)
+	if route != "/api/workspaces/{workspace_id}/projects/{project_id}/provider-profile" {
+		t.Fatalf("unexpected route %q", route)
+	}
+	if action != "get_provider_profile" {
+		t.Fatalf("unexpected action %q", action)
+	}
+}
+
+func TestParseAssetListQuery(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/assets?limit=500&offset=7&status=selected&provider=mock&model=mock-image&source=mcp&session_id=s1&batch_id=b1&keyword=hero&created_from=2026-06-19T01:02:03Z&created_to=2026-06-19T02:03:04Z", nil)
+
+	query, err := parseAssetListQuery(request, "prj_demo", "cmp_demo")
+	if err != nil {
+		t.Fatalf("parseAssetListQuery returned error: %v", err)
+	}
+	if query.ProjectID != "prj_demo" || query.CampaignID != "cmp_demo" {
+		t.Fatalf("unexpected scope: %#v", query)
+	}
+	if query.Limit != 500 || query.Offset != 7 || query.Status != "selected" || query.Provider != "mock" || query.Model != "mock-image" {
+		t.Fatalf("basic filters were not parsed: %#v", query)
+	}
+	if query.Source != "mcp" || query.SessionID != "s1" || query.BatchID != "b1" || query.Keyword != "hero" {
+		t.Fatalf("metadata filters were not parsed: %#v", query)
+	}
+	if query.CreatedFrom == nil || query.CreatedTo == nil {
+		t.Fatalf("date filters were not parsed: %#v", query)
+	}
+}
+
+func TestParseBatchProgressQuery(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-progress?session_id=s1&batch_id=b1&limit=500", nil)
+
+	query, err := parseBatchProgressQuery(request, "prj_demo", "cmp_demo")
+	if err != nil {
+		t.Fatalf("parseBatchProgressQuery returned error: %v", err)
+	}
+	if query.ProjectID != "prj_demo" || query.CampaignID != "cmp_demo" || query.SessionID != "s1" || query.BatchID != "b1" {
+		t.Fatalf("unexpected query: %#v", query)
+	}
+	if query.Limit != domain.MaxBatchProgressLimit {
+		t.Fatalf("limit = %d, want cap %d", query.Limit, domain.MaxBatchProgressLimit)
 	}
 }

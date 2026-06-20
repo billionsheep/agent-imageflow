@@ -291,6 +291,21 @@ export default function DetailModal() {
   const transparentOutputText = task.transparentOutput || task.params.transparent_output ? 'true' : 'false'
   const currentTransparentOutputFailed = Boolean(currentOutputImageId && task.transparentOutput && task.transparentOriginalImages?.[currentOutputImageIndex] === '')
   const outputCompressionText = task.params.output_compression == null ? '未设置' : String(task.params.output_compression)
+  const managedAttempts = isManagedImageflowTask ? task.imageflowAttempts ?? [] : []
+  const visibleManagedAttempts = managedAttempts.slice(-4).reverse()
+
+  const formatAttemptLatency = (latencyMs?: number) => {
+    if (!Number.isFinite(latencyMs)) return 'pending'
+    if ((latencyMs ?? 0) >= 1000) return `${Math.round((latencyMs ?? 0) / 1000)}s`
+    return `${latencyMs}ms`
+  }
+
+  const formatAttemptTime = (value?: string) => {
+    if (!value) return ''
+    const ts = Date.parse(value)
+    if (!Number.isFinite(ts)) return ''
+    return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
 
   const formatTime = (ts: number | null) => {
     if (!ts) return ''
@@ -1150,6 +1165,51 @@ export default function DetailModal() {
                   </div>
                 ) : (
                   <div className="text-xs text-gray-500 dark:text-gray-400">等待服务端返回候选资产。</div>
+                )}
+                {visibleManagedAttempts.length > 0 && (
+                  <div className="mt-3 border-t border-gray-200/70 pt-3 dark:border-white/[0.08]">
+                    <div className="mb-2 flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                      <span>Attempts</span>
+                      <span>{managedAttempts.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {visibleManagedAttempts.map((attempt) => (
+                        <div key={attempt.attemptNo} className="text-xs text-gray-600 dark:text-gray-300">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">#{attempt.attemptNo} · {attempt.provider}</span>
+                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                              attempt.status === 'completed'
+                                ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                                : attempt.status === 'failed'
+                                ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+                                : 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                            }`}>
+                              {attempt.status}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+                            <span>{formatAttemptLatency(attempt.latencyMs)}</span>
+                            {Number.isFinite(attempt.queueWaitMs) && <span>queue {formatAttemptLatency(attempt.queueWaitMs)}</span>}
+                            {Number.isFinite(attempt.providerFirstByteMs) && <span>first {formatAttemptLatency(attempt.providerFirstByteMs)}</span>}
+                            {Number.isFinite(attempt.providerTotalMs) && <span>provider {formatAttemptLatency(attempt.providerTotalMs)}</span>}
+                            {Number.isFinite(attempt.responseDownloadMs) && <span>download {formatAttemptLatency(attempt.responseDownloadMs)}</span>}
+                            {Number.isFinite(attempt.storeMs) && <span>store {formatAttemptLatency(attempt.storeMs)}</span>}
+                            {Number.isFinite(attempt.thumbnailMs) && <span>thumb {formatAttemptLatency(attempt.thumbnailMs)}</span>}
+                            {attempt.retryCount != null && attempt.retryCount > 0 && <span>retry #{attempt.retryCount}</span>}
+                            {attempt.errorStage && <span className="font-mono text-red-500 dark:text-red-400">{attempt.errorStage}</span>}
+                            {formatAttemptTime(attempt.startedAt) && <span>start {formatAttemptTime(attempt.startedAt)}</span>}
+                            {attempt.retryAfter && <span>retry {formatAttemptTime(attempt.retryAfter)}</span>}
+                            {attempt.errorCode && <span className="font-mono text-red-500 dark:text-red-400">{attempt.errorCode}</span>}
+                          </div>
+                          {attempt.errorMessage && (
+                            <div className="mt-1 line-clamp-2 text-[11px] text-red-500 dark:text-red-400" title={attempt.errorMessage}>
+                              {attempt.errorMessage}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}

@@ -172,6 +172,40 @@ export interface AgentImageflowQualityProfileResponse {
   quality_profile: AgentImageflowQualityProfile
 }
 
+export interface AgentImageflowProviderProfile {
+  enabled?: boolean
+  provider?: string
+  model?: string
+  base_url?: string
+  generation_config?: Record<string, unknown>
+  use_project_quality_profile?: boolean
+  max_n?: number
+  supports_url_result?: boolean
+  preferred_response_format?: string
+  max_concurrency?: number
+  timeout_seconds?: number
+}
+
+export interface AgentImageflowProviderProfileResponse {
+  workspace_id: string
+  project_id: string
+  provider_profile: AgentImageflowProviderProfile
+}
+
+export interface AgentImageflowAssetListQuery {
+  limit?: number
+  offset?: number
+  status?: string
+  provider?: string
+  model?: string
+  source?: string
+  sessionId?: string
+  batchId?: string
+  keyword?: string
+  createdFrom?: string
+  createdTo?: string
+}
+
 export interface AgentImageflowStorageUsageCategoryStat {
   category: string
   file_count: number
@@ -268,6 +302,74 @@ export interface AgentImageflowTaskResponse {
   error_message?: string | null
 }
 
+export interface AgentImageflowTaskAttempt {
+  attempt_id: string
+  task_id: string
+  attempt_no: number
+  status: string
+  provider: string
+  provider_request_id?: string
+  started_at: string
+  finished_at?: string
+  latency_ms?: number
+  queue_wait_ms?: number
+  provider_first_byte_ms?: number
+  provider_total_ms?: number
+  response_download_ms?: number
+  store_ms?: number
+  thumbnail_ms?: number
+  retry_count?: number
+  error_stage?: string
+  response_bytes?: number
+  retry_after?: string
+  error_code?: string
+  error_message?: string
+}
+
+export interface AgentImageflowTaskAttemptsResponse {
+  task_id: string
+  attempts: AgentImageflowTaskAttempt[]
+}
+
+export interface AgentImageflowBatchProgressQuery {
+  sessionId?: string
+  batchId?: string
+  limit?: number
+}
+
+export interface AgentImageflowBatchProgressTask {
+  task_id: string
+  status: string
+  asset_count: number
+  attempt_count: number
+  retrying: boolean
+  error_stage?: string
+  error_code?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentImageflowBatchProgressResponse {
+  generated_at: string
+  project_id: string
+  campaign_id: string
+  session_id?: string
+  batch_id?: string
+  counts: {
+    task_count: number
+    queued_count: number
+    running_count: number
+    succeeded_count: number
+    partial_count: number
+    failed_count: number
+    retrying_count: number
+    asset_count: number
+    attempt_count: number
+  }
+  tasks: AgentImageflowBatchProgressTask[]
+}
+
 export interface AgentImageflowAssetListEntry {
   asset_id: string
   status: string
@@ -321,6 +423,10 @@ export function buildAgentImageflowTaskStatusUrl(baseUrl: string, taskId: string
   return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/tasks/${encodeURIComponent(taskId)}`
 }
 
+export function buildAgentImageflowTaskAttemptsUrl(baseUrl: string, taskId: string): string {
+  return `${buildAgentImageflowTaskStatusUrl(baseUrl, taskId)}/attempts`
+}
+
 export function buildAgentImageflowWorkspacesUrl(baseUrl: string): string {
   return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/workspaces`
 }
@@ -357,9 +463,13 @@ export function buildAgentImageflowInputFilesUrl(baseUrl: string, scope: AgentIm
   return `${buildAgentImageflowCampaignsUrl(baseUrl, scope)}/${encodeURIComponent(scope.campaignId)}/input-files`
 }
 
-export function buildAgentImageflowAssetsUrl(baseUrl: string, scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>): string {
+export function buildAgentImageflowAssetsUrl(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  query?: AgentImageflowAssetListQuery,
+): string {
   const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
-  return [
+  const url = [
     base,
     'api',
     'projects',
@@ -368,6 +478,31 @@ export function buildAgentImageflowAssetsUrl(baseUrl: string, scope: Pick<AgentI
     encodeURIComponent(scope.campaignId),
     'assets',
   ].join('/')
+  const params = buildAssetListSearchParams(query)
+  return params ? `${url}?${params}` : url
+}
+
+export function buildAgentImageflowBatchProgressUrl(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  query?: AgentImageflowBatchProgressQuery,
+): string {
+  const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  const url = [
+    base,
+    'api',
+    'projects',
+    encodeURIComponent(scope.projectId),
+    'campaigns',
+    encodeURIComponent(scope.campaignId),
+    'batch-progress',
+  ].join('/')
+  const params = new URLSearchParams()
+  if (query?.sessionId?.trim()) params.set('session_id', query.sessionId.trim())
+  if (query?.batchId?.trim()) params.set('batch_id', query.batchId.trim())
+  if (query?.limit && Number.isFinite(query.limit)) params.set('limit', String(Math.max(1, Math.trunc(query.limit))))
+  const text = params.toString()
+  return text ? `${url}?${text}` : url
 }
 
 export function buildAgentImageflowQualityProfileUrl(baseUrl: string, scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>): string {
@@ -380,6 +515,19 @@ export function buildAgentImageflowQualityProfileUrl(baseUrl: string, scope: Pic
     'projects',
     encodeURIComponent(scope.projectId),
     'quality-profile',
+  ].join('/')
+}
+
+export function buildAgentImageflowProviderProfileUrl(baseUrl: string, scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>): string {
+  const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  return [
+    base,
+    'api',
+    'workspaces',
+    encodeURIComponent(scope.workspaceId),
+    'projects',
+    encodeURIComponent(scope.projectId),
+    'provider-profile',
   ].join('/')
 }
 
@@ -427,6 +575,31 @@ export function buildAgentImageflowHeaders(
     nextHeaders.Authorization = `Basic ${encodeBasicCredentials(auth.basicUsername ?? '', auth.basicPassword ?? '')}`
   }
   return nextHeaders
+}
+
+function buildAssetListSearchParams(query?: AgentImageflowAssetListQuery): string {
+  if (!query) return ''
+  const params = new URLSearchParams()
+  const appendString = (key: string, value?: string) => {
+    const trimmed = value?.trim()
+    if (trimmed) params.set(key, trimmed)
+  }
+  if (Number.isFinite(query.limit) && query.limit && query.limit > 0) {
+    params.set('limit', String(Math.trunc(query.limit)))
+  }
+  if (Number.isFinite(query.offset) && query.offset && query.offset > 0) {
+    params.set('offset', String(Math.trunc(query.offset)))
+  }
+  appendString('status', query.status)
+  appendString('provider', query.provider)
+  appendString('model', query.model)
+  appendString('source', query.source)
+  appendString('session_id', query.sessionId)
+  appendString('batch_id', query.batchId)
+  appendString('keyword', query.keyword)
+  appendString('created_from', query.createdFrom)
+  appendString('created_to', query.createdTo)
+  return params.toString()
 }
 
 export async function createAgentImageflowTask(
@@ -607,15 +780,33 @@ export async function getAgentImageflowTask(baseUrl: string, taskId: string, aut
   return normalizeAgentImageflowTaskResponse(response)
 }
 
+export async function getAgentImageflowTaskAttempts(baseUrl: string, taskId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowTaskAttemptsResponse> {
+  return requestJson<AgentImageflowTaskAttemptsResponse>(buildAgentImageflowTaskAttemptsUrl(baseUrl, taskId), {
+    headers: buildAgentImageflowHeaders(auth),
+  })
+}
+
 export async function listAgentImageflowAssets(
   baseUrl: string,
   scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
   auth?: AgentImageflowAuth,
+  query?: AgentImageflowAssetListQuery,
 ): Promise<AgentImageflowAssetResponse[]> {
-  const response = await requestJson<AgentImageflowAssetResponse[]>(buildAgentImageflowAssetsUrl(baseUrl, scope), {
+  const response = await requestJson<AgentImageflowAssetResponse[]>(buildAgentImageflowAssetsUrl(baseUrl, scope, query), {
     headers: buildAgentImageflowHeaders(auth),
   })
   return normalizeAgentImageflowAssetListResponse(response)
+}
+
+export async function getAgentImageflowBatchProgress(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  auth?: AgentImageflowAuth,
+  query?: AgentImageflowBatchProgressQuery,
+): Promise<AgentImageflowBatchProgressResponse> {
+  return requestJson<AgentImageflowBatchProgressResponse>(buildAgentImageflowBatchProgressUrl(baseUrl, scope, query), {
+    headers: buildAgentImageflowHeaders(auth),
+  })
 }
 
 export async function getAgentImageflowQualityProfile(
@@ -648,6 +839,16 @@ export async function getAgentImageflowStorageIntegrity(
   })
 }
 
+export async function getAgentImageflowProviderProfile(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowProviderProfileResponse> {
+  return requestJson<AgentImageflowProviderProfileResponse>(buildAgentImageflowProviderProfileUrl(baseUrl, scope), {
+    headers: buildAgentImageflowHeaders(auth),
+  })
+}
+
 export async function updateAgentImageflowQualityProfile(
   baseUrl: string,
   scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
@@ -655,6 +856,19 @@ export async function updateAgentImageflowQualityProfile(
   auth?: AgentImageflowAuth,
 ): Promise<AgentImageflowQualityProfileResponse> {
   return requestJson<AgentImageflowQualityProfileResponse>(buildAgentImageflowQualityProfileUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(profile),
+  })
+}
+
+export async function updateAgentImageflowProviderProfile(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
+  profile: AgentImageflowProviderProfile,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowProviderProfileResponse> {
+  return requestJson<AgentImageflowProviderProfileResponse>(buildAgentImageflowProviderProfileUrl(baseUrl, scope), {
     method: 'POST',
     headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(profile),

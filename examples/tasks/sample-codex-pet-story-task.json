@@ -1,0 +1,26 @@
+{
+  "idempotency_key": "pet-story-scene-001-v1",
+  "title": "萌宠短故事 Scene 001",
+  "purpose": "内容账号短故事配图",
+  "prompt": "一只圆眼睛的小橘猫在窗边看雨，画面温暖、干净、适合小红书萌宠故事封面，保留标题留白。",
+  "negative_prompt": "low quality, blurry, watermark, scary, distorted face",
+  "style_preset": "cute-pet-story-cover",
+  "aspect_ratio": "3:4",
+  "output_format": "png",
+  "requested_count": 2,
+  "provider": "mock",
+  "selection_mode": "auto",
+  "review_required": false,
+  "metadata_json": {
+    "source": "codex",
+    "source_agent": "codex-cli",
+    "source_thread_id": "thread_pet_story_demo",
+    "session_id": "pet_story_session_2026_06_19",
+    "run_id": "run_scene_batch_001",
+    "batch_id": "pet_story_batch_001",
+    "story_id": "rainy_window_cat",
+    "scene_id": "scene_001",
+    "target_path": "assets/pet-story/rainy-window-cat/scene-001.png",
+    "channel": "xiaohongshu"
+  }
+}

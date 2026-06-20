@@ -14,6 +14,7 @@ import type {
   TaskRecord,
   FavoriteCollection,
   AgentImageflowManagedAsset,
+  AgentImageflowManagedAttempt,
   AgentImageflowManagedScope,
   ExportData,
   ResponsesApiResponse,
@@ -61,6 +62,7 @@ import {
   createAgentImageflowTask,
   getAgentImageflowAsset,
   getAgentImageflowTask,
+  getAgentImageflowTaskAttempts,
   normalizeAgentImageflowApiBaseUrl,
   rejectAgentImageflowAsset,
   selectAgentImageflowAsset,
@@ -68,6 +70,7 @@ import {
   type AgentImageflowAssetResponse,
   type AgentImageflowMaskImage,
   type AgentImageflowReferenceImage,
+  type AgentImageflowTaskAttempt,
   type AgentImageflowTaskResponse,
 } from './lib/agentImageflowApi'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
@@ -85,13 +88,18 @@ const thumbnailBackfillIds = new Map<string, 'visible' | 'background'>()
 const thumbnailBackfillRunningIds = new Set<string>()
 const thumbnailSubscribers = new Map<string, Set<(thumbnail: { dataUrl: string; width?: number; height?: number }) => void>>()
 let thumbnailBackfillScheduled = false
+let backgroundThumbnailBackfillsStarted = 0
 const MAX_IMAGE_CACHE_ENTRIES = 8
 const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
+const MAX_BACKGROUND_THUMBNAIL_BACKFILL_QUEUE = 120
+const MAX_BACKGROUND_THUMBNAIL_BACKFILLS_PER_SESSION = 48
 const FAL_RECOVERY_POLL_MS = 10_000
 const CUSTOM_RECOVERY_POLL_MS = 10_000
 const IMAGEFLOW_POLL_MS = 1_500
 const IMAGEFLOW_MAX_POLL_ATTEMPTS = 120
+const RECOVERY_MAX_AUTO_TASKS = 5
+const RECOVERY_MAX_TASK_AGE_MS = 6 * 60 * 60 * 1000
 const SUPPORT_PROMPT_IMAGE_THRESHOLD = 50
 const AGENT_INPUT_DRAFT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000
 const AGENT_ROUND_IMAGE_MENTION_RE = /@(?:第)?(\d+)轮图(\d+)/g
@@ -253,9 +261,18 @@ function scheduleThumbnailBackfill(ids: Iterable<string>, priority: 'visible' | 
   for (const id of ids) {
     if (getCachedThumbnail(id) || thumbnailBackfillRunningIds.has(id)) continue
     const currentPriority = thumbnailBackfillIds.get(id)
+    if (priority === 'background' && !currentPriority && getQueuedBackgroundThumbnailBackfillCount() >= MAX_BACKGROUND_THUMBNAIL_BACKFILL_QUEUE) continue
     if (!currentPriority || priority === 'visible') thumbnailBackfillIds.set(id, priority)
   }
   scheduleThumbnailBackfillTick()
+}
+
+function getQueuedBackgroundThumbnailBackfillCount() {
+  let count = 0
+  for (const priority of thumbnailBackfillIds.values()) {
+    if (priority === 'background') count += 1
+  }
+  return count
 }
 
 function scheduleThumbnailBackfillTick() {
@@ -284,25 +301,31 @@ async function processNextThumbnailBackfill() {
 }
 
 async function getNextThumbnailBackfillBatch() {
-  const candidates = getOrderedThumbnailBackfillIds().slice(0, MAX_THUMBNAIL_BACKFILL_CONCURRENT)
+  const candidates = getOrderedThumbnailBackfillIds().filter(({ priority }) =>
+    priority === 'visible' || backgroundThumbnailBackfillsStarted < MAX_BACKGROUND_THUMBNAIL_BACKFILLS_PER_SESSION,
+  ).slice(0, MAX_THUMBNAIL_BACKFILL_CONCURRENT)
   if (candidates.length === 0) return []
 
-  const sizes = await Promise.all(candidates.map(async (id) => {
+  const sizes = await Promise.all(candidates.map(async ({ id }) => {
     const image = await getImage(id)
     return { width: image?.width, height: image?.height }
   }))
   const concurrency = getThumbnailConcurrencyForBatch(sizes)
   const selected = candidates.slice(0, concurrency)
-  for (const id of selected) thumbnailBackfillIds.delete(id)
-  return selected
+  for (const { id, priority } of selected) {
+    thumbnailBackfillIds.delete(id)
+    if (priority === 'background') backgroundThumbnailBackfillsStarted += 1
+  }
+  return selected.map(({ id }) => id)
 }
 
 function getOrderedThumbnailBackfillIds() {
-  const visible: string[] = []
-  const background: string[] = []
+  const visible: Array<{ id: string; priority: 'visible' | 'background' }> = []
+  const background: Array<{ id: string; priority: 'visible' | 'background' }> = []
   for (const [id, priority] of thumbnailBackfillIds) {
-    if (priority === 'visible') visible.push(id)
-    else background.push(id)
+    const entry = { id, priority }
+    if (priority === 'visible') visible.push(entry)
+    else background.push(entry)
   }
   return [...visible, ...background]
 }
@@ -1899,6 +1922,38 @@ async function mapImageflowTaskAssets(baseUrl: string, response: AgentImageflowT
   return hydrated.filter((asset): asset is AgentImageflowManagedAsset => Boolean(asset))
 }
 
+function mapImageflowTaskAttempts(attempts: AgentImageflowTaskAttempt[]): AgentImageflowManagedAttempt[] {
+  return attempts.map((attempt) => ({
+    attemptNo: attempt.attempt_no,
+    status: attempt.status,
+    provider: attempt.provider,
+    latencyMs: attempt.latency_ms,
+    queueWaitMs: attempt.queue_wait_ms,
+    providerFirstByteMs: attempt.provider_first_byte_ms,
+    providerTotalMs: attempt.provider_total_ms,
+    responseDownloadMs: attempt.response_download_ms,
+    storeMs: attempt.store_ms,
+    thumbnailMs: attempt.thumbnail_ms,
+    retryCount: attempt.retry_count,
+    errorStage: attempt.error_stage,
+    responseBytes: attempt.response_bytes,
+    retryAfter: attempt.retry_after,
+    errorCode: attempt.error_code,
+    errorMessage: attempt.error_message,
+    startedAt: attempt.started_at,
+    finishedAt: attempt.finished_at,
+  }))
+}
+
+async function getImageflowTaskAttemptsSafe(baseUrl: string, serviceTaskId: string, auth: AgentImageflowAuth | undefined, fallback: AgentImageflowManagedAttempt[] = []): Promise<AgentImageflowManagedAttempt[]> {
+  try {
+    const response = await getAgentImageflowTaskAttempts(baseUrl, serviceTaskId, auth)
+    return mapImageflowTaskAttempts(response.attempts ?? [])
+  } catch {
+    return fallback
+  }
+}
+
 function patchImageflowAsset(task: TaskRecord, nextAsset: AgentImageflowManagedAsset): AgentImageflowManagedAsset[] {
   const currentAssets = task.imageflowAssets ?? []
   let replaced = false
@@ -1949,7 +2004,10 @@ async function pollImageflowTask(taskId: string, baseUrl: string, serviceTaskId:
 
   try {
     const auth = getImageflowAuth(useStore.getState().settings)
-    const response = await getAgentImageflowTask(baseUrl, serviceTaskId, auth)
+    const [response, attempts] = await Promise.all([
+      getAgentImageflowTask(baseUrl, serviceTaskId, auth),
+      getImageflowTaskAttemptsSafe(baseUrl, serviceTaskId, auth, latest.imageflowAttempts ?? []),
+    ])
     const assets = await mapImageflowTaskAssets(baseUrl, response, auth)
     const status = response.status
 
@@ -1960,6 +2018,7 @@ async function pollImageflowTask(taskId: string, baseUrl: string, serviceTaskId:
         imageflowStatus: status,
         imageflowErrorCode: response.error_code ?? null,
         imageflowAssets: assets,
+        imageflowAttempts: attempts,
         finishedAt: Date.now(),
         elapsed: Date.now() - latest.createdAt,
       })
@@ -1974,6 +2033,7 @@ async function pollImageflowTask(taskId: string, baseUrl: string, serviceTaskId:
         imageflowStatus: status,
         imageflowErrorCode: response.error_code ?? null,
         imageflowAssets: assets,
+        imageflowAttempts: attempts,
         finishedAt: Date.now(),
         elapsed: Date.now() - latest.createdAt,
       })
@@ -1985,6 +2045,7 @@ async function pollImageflowTask(taskId: string, baseUrl: string, serviceTaskId:
       imageflowStatus: status,
       imageflowErrorCode: response.error_code ?? null,
       imageflowAssets: assets,
+      imageflowAttempts: attempts,
     })
     scheduleImageflowPoll(taskId, baseUrl, serviceTaskId, attempt + 1)
   } catch (err) {
@@ -2402,8 +2463,38 @@ async function recoverFalTask(taskId: string) {
   }
 }
 
+let initStorePromise: Promise<void> | null = null
+let initStoreCompleted = false
+
+export function resetStartupGuardsForTests() {
+  initStorePromise = null
+  initStoreCompleted = false
+  backgroundThumbnailBackfillsStarted = 0
+  thumbnailBackfillIds.clear()
+  thumbnailBackfillRunningIds.clear()
+  thumbnailBackfillScheduled = false
+}
+
+function shouldAutoRecoverTask(task: TaskRecord, now = Date.now()) {
+  return now - task.createdAt <= RECOVERY_MAX_TASK_AGE_MS
+}
+
 /** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并清理孤立图片 */
-export async function initStore() {
+export function initStore() {
+  if (initStoreCompleted) return Promise.resolve()
+  if (initStorePromise) return initStorePromise
+
+  initStorePromise = runInitStore()
+    .then(() => {
+      initStoreCompleted = true
+    })
+    .finally(() => {
+      initStorePromise = null
+    })
+  return initStorePromise
+}
+
+async function runInitStore() {
   const legacyAgentConversations = normalizeAgentConversations(useStore.getState().agentConversations)
   const storedTasks = await getAllTasks()
   const storedAgentConversations = normalizeAgentConversations(await getAllAgentConversations())
@@ -2456,20 +2547,28 @@ export async function initStore() {
     .map((task) => putTask(task)))
   useStore.getState().setTasks(tasks)
   showSupportPromptForExistingLocalData(tasks)
+  let autoRecoveryCount = 0
+  const now = Date.now()
   for (const task of tasks) {
+    if (autoRecoveryCount >= RECOVERY_MAX_AUTO_TASKS) break
     if (
       task.apiProvider === 'fal' &&
       task.falRequestId &&
       task.falEndpoint &&
-      (task.status === 'running' || task.falRecoverable)
+      (task.status === 'running' || task.falRecoverable) &&
+      shouldAutoRecoverTask(task, now)
     ) {
       scheduleFalRecovery(task.id, 0)
+      autoRecoveryCount += 1
+      continue
     }
     if (
       task.customTaskId &&
-      (task.status === 'running' || task.customRecoverable)
+      (task.status === 'running' || task.customRecoverable) &&
+      shouldAutoRecoverTask(task, now)
     ) {
       scheduleCustomRecovery(task.id, 0)
+      autoRecoveryCount += 1
     }
   }
 
@@ -2646,6 +2745,7 @@ async function submitManagedImageflowTask() {
   const auth = getImageflowAuth(normalizedSettings)
   const scope = getImageflowScope(normalizedSettings)
   const provider = normalizedSettings.imageflowProvider || 'mock'
+  const requestProvider = provider === 'project-default' ? undefined : provider
   const taskParams = {
     ...params,
     n: Math.min(4, Math.max(1, Math.trunc(params.n || 1))),
@@ -2675,6 +2775,7 @@ async function submitManagedImageflowTask() {
     imageflowStatus: 'creating',
     imageflowProvider: provider,
     imageflowAssets: [],
+    imageflowAttempts: [],
   }
 
   useStore.getState().setTasks([task, ...useStore.getState().tasks])
@@ -2696,7 +2797,7 @@ async function submitManagedImageflowTask() {
       aspect_ratio: getImageflowAspectRatio(taskParams.size),
       output_format: taskParams.output_format,
       requested_count: taskParams.n,
-      provider,
+      provider: requestProvider,
       reference_images: uploadedInputs.referenceImages,
       mask_image: uploadedInputs.maskImage,
       generation_config: {
@@ -2725,12 +2826,16 @@ async function submitManagedImageflowTask() {
         use_project_quality_profile: normalizedSettings.imageflowUseProjectQualityProfile,
       },
     }, auth)
-    const assets = await mapImageflowTaskAssets(baseUrl, response, auth)
+    const [assets, attempts] = await Promise.all([
+      mapImageflowTaskAssets(baseUrl, response, auth),
+      getImageflowTaskAttemptsSafe(baseUrl, response.task_id, auth),
+    ])
     updateTaskInStore(taskId, {
       imageflowTaskId: response.task_id,
       imageflowStatus: response.status,
       imageflowErrorCode: response.error_code ?? null,
       imageflowAssets: assets,
+      imageflowAttempts: attempts,
     })
     scheduleImageflowPoll(taskId, baseUrl, response.task_id, 1)
   } catch (err) {

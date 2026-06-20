@@ -13,7 +13,9 @@ import (
 	"image/png"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"strings"
 	"time"
@@ -23,12 +25,29 @@ import (
 
 const maxImageResponseBytes = 50 << 20
 
+const (
+	OpenAICompatibleRequestModeImagesSyncURL   = "images_sync_url"
+	OpenAICompatibleRequestModeImagesSyncB64   = "images_sync_b64"
+	OpenAICompatibleRequestModeImagesStream    = "images_stream"
+	OpenAICompatibleRequestModeResponsesStream = "responses_stream"
+
+	openAICompatibleAPIModeImages       = "images"
+	openAICompatibleEndpointGenerations = "/images/generations"
+	openAICompatibleEndpointEdits       = "/images/edits"
+	openAICompatibleResponseFormatB64   = "b64_json"
+	openAICompatibleResponseFormatURL   = "url"
+	openAICompatibleResponseFormatOmit  = "omitted"
+)
+
 type OpenAICompatibleConfig struct {
-	BaseURL        string
-	APIKey         string
-	Model          string
-	TimeoutSeconds int
-	HTTPClient     *http.Client
+	BaseURL                      string
+	APIKey                       string
+	Model                        string
+	TimeoutSeconds               int
+	ConnectTimeoutSeconds        int
+	ResponseHeaderTimeoutSeconds int
+	TotalTimeoutSeconds          int
+	HTTPClient                   *http.Client
 }
 
 type OpenAICompatibleProvider struct {
@@ -38,14 +57,30 @@ type OpenAICompatibleProvider struct {
 	httpClient *http.Client
 }
 
+type openAICompatibleRequestShape struct {
+	APIMode        string
+	Endpoint       string
+	Operation      string
+	RequestMode    string
+	ResponseFormat string
+	Stream         bool
+	PartialImages  int
+	N              int
+}
+
 func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) OpenAICompatibleProvider {
-	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 120 * time.Second
-	}
+	totalTimeout := providerTimeoutDuration(firstPositive(cfg.TotalTimeoutSeconds, cfg.TimeoutSeconds, 300))
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		connectTimeout := providerTimeoutDuration(firstPositive(cfg.ConnectTimeoutSeconds, 30))
+		headerTimeout := providerTimeoutDuration(firstPositive(cfg.ResponseHeaderTimeoutSeconds, cfg.TimeoutSeconds, 300))
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.DialContext = (&net.Dialer{Timeout: connectTimeout}).DialContext
+		transport.ResponseHeaderTimeout = headerTimeout
+		client = &http.Client{
+			Timeout:   totalTimeout,
+			Transport: transport,
+		}
 	}
 	return OpenAICompatibleProvider{
 		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
@@ -57,6 +92,36 @@ func NewOpenAICompatibleProvider(cfg OpenAICompatibleConfig) OpenAICompatiblePro
 
 func (p OpenAICompatibleProvider) Configured() bool {
 	return p.baseURL != "" && p.apiKey != "" && p.model != ""
+}
+
+func openAICompatibleRequestShapeForTask(task domain.Task, endpoint, operation string, requestN int) openAICompatibleRequestShape {
+	responseFormat := openAICompatiblePreferredResponseFormat(task)
+	requestMode := OpenAICompatibleRequestModeImagesSyncURL
+	recordedResponseFormat := openAICompatibleResponseFormatOmit
+	if responseFormat == openAICompatibleResponseFormatB64 {
+		requestMode = OpenAICompatibleRequestModeImagesSyncB64
+		recordedResponseFormat = openAICompatibleResponseFormatB64
+	}
+	return openAICompatibleRequestShape{
+		APIMode:        openAICompatibleAPIModeImages,
+		Endpoint:       endpoint,
+		Operation:      operation,
+		RequestMode:    requestMode,
+		ResponseFormat: recordedResponseFormat,
+		Stream:         false,
+		PartialImages:  0,
+		N:              requestN,
+	}
+}
+
+func openAICompatiblePreferredResponseFormat(task domain.Task) string {
+	input := parseTaskStructuredProviderInput(task)
+	if input.ProviderProfile.Enabled &&
+		strings.TrimSpace(input.ProviderProfile.Provider) == OpenAICompatibleProviderID &&
+		strings.TrimSpace(input.ProviderProfile.PreferredResponseFormat) == openAICompatibleResponseFormatB64 {
+		return openAICompatibleResponseFormatB64
+	}
+	return openAICompatibleResponseFormatURL
 }
 
 func (p OpenAICompatibleProvider) Generate(ctx context.Context, task domain.Task) (Result, error) {
@@ -83,13 +148,18 @@ func (p OpenAICompatibleProvider) Generate(ctx context.Context, task domain.Task
 }
 
 func (p OpenAICompatibleProvider) generateGeneration(ctx context.Context, task domain.Task, size, outputFormat string) (Result, error) {
+	model := taskProviderModel(task, OpenAICompatibleProviderID, p.model)
+	requestN := max(1, min(task.RequestedCount, taskProviderMaxN(task, OpenAICompatibleProviderID, 4)))
+	shape := openAICompatibleRequestShapeForTask(task, openAICompatibleEndpointGenerations, "generation", requestN)
 	body := map[string]any{
-		"model":           p.model,
-		"prompt":          task.Prompt,
-		"n":               max(1, min(task.RequestedCount, 4)),
-		"size":            size,
-		"response_format": "b64_json",
-		"output_format":   outputFormat,
+		"model":         model,
+		"prompt":        task.Prompt,
+		"n":             requestN,
+		"size":          size,
+		"output_format": outputFormat,
+	}
+	if shape.ResponseFormat == openAICompatibleResponseFormatB64 {
+		body["response_format"] = openAICompatibleResponseFormatB64
 	}
 	if task.NegativePrompt != "" {
 		body["negative_prompt"] = task.NegativePrompt
@@ -97,12 +167,15 @@ func (p OpenAICompatibleProvider) generateGeneration(ctx context.Context, task d
 	if task.StylePreset != "" {
 		body["style_preset"] = task.StylePreset
 	}
+	for key, value := range openAICompatiblePassthroughParams(task) {
+		body[key] = value
+	}
 
 	requestBytes, err := json.Marshal(body)
 	if err != nil {
 		return Result{}, err
 	}
-	url := p.baseURL + "/images/generations"
+	url := p.baseURL + openAICompatibleEndpointGenerations
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(requestBytes))
 	if err != nil {
 		return Result{}, err
@@ -111,17 +184,29 @@ func (p OpenAICompatibleProvider) generateGeneration(ctx context.Context, task d
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
+	started := time.Now()
+	var firstByteAt time.Time
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		GotFirstResponseByte: func() {
+			firstByteAt = time.Now()
+		},
+	}))
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return Result{}, err
+		return openAIRequestErrorResult(task, started, firstByteAt, err), err
 	}
-	return p.parseImageResponse(ctx, task, size, "generation", resp)
+	result, parseErr := p.parseImageResponse(ctx, task, size, shape, model, resp)
+	applyOpenAIRequestMetrics(&result, started, firstByteAt)
+	return result, parseErr
 }
 
 func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.Task, size, outputFormat string, input *resolvedEditInput) (Result, error) {
+	model := taskProviderModel(task, OpenAICompatibleProviderID, p.model)
+	requestN := max(1, min(task.RequestedCount, taskProviderMaxN(task, OpenAICompatibleProviderID, 4)))
+	shape := openAICompatibleRequestShapeForTask(task, openAICompatibleEndpointEdits, "edit", requestN)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("model", p.model); err != nil {
+	if err := writer.WriteField("model", model); err != nil {
 		return Result{}, err
 	}
 	if err := writer.WriteField("prompt", task.Prompt); err != nil {
@@ -130,14 +215,21 @@ func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.
 	if err := writer.WriteField("size", size); err != nil {
 		return Result{}, err
 	}
-	if err := writer.WriteField("response_format", "b64_json"); err != nil {
-		return Result{}, err
+	if shape.ResponseFormat == openAICompatibleResponseFormatB64 {
+		if err := writer.WriteField("response_format", openAICompatibleResponseFormatB64); err != nil {
+			return Result{}, err
+		}
 	}
 	if err := writer.WriteField("output_format", outputFormat); err != nil {
 		return Result{}, err
 	}
-	if count := max(1, min(task.RequestedCount, 4)); count > 1 {
-		if err := writer.WriteField("n", fmt.Sprintf("%d", count)); err != nil {
+	for key, value := range openAICompatiblePassthroughParams(task) {
+		if err := writer.WriteField(key, fmt.Sprint(value)); err != nil {
+			return Result{}, err
+		}
+	}
+	if requestN > 1 {
+		if err := writer.WriteField("n", fmt.Sprintf("%d", requestN)); err != nil {
 			return Result{}, err
 		}
 	}
@@ -163,7 +255,7 @@ func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.
 		return Result{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/images/edits", &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+openAICompatibleEndpointEdits, &body)
 	if err != nil {
 		return Result{}, err
 	}
@@ -171,30 +263,54 @@ func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
+	started := time.Now()
+	var firstByteAt time.Time
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		GotFirstResponseByte: func() {
+			firstByteAt = time.Now()
+		},
+	}))
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return Result{}, err
+		return openAIRequestErrorResult(task, started, firstByteAt, err), err
 	}
-	return p.parseImageResponse(ctx, task, size, "edit", resp)
+	result, parseErr := p.parseImageResponse(ctx, task, size, shape, model, resp)
+	applyOpenAIRequestMetrics(&result, started, firstByteAt)
+	return result, parseErr
 }
 
-func (p OpenAICompatibleProvider) parseImageResponse(ctx context.Context, task domain.Task, size, requestMode string, resp *http.Response) (Result, error) {
+func (p OpenAICompatibleProvider) parseImageResponse(ctx context.Context, task domain.Task, size string, shape openAICompatibleRequestShape, model string, resp *http.Response) (Result, error) {
 	defer resp.Body.Close()
+	downloadStarted := time.Now()
 	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxImageResponseBytes))
 	if err != nil {
-		return Result{}, err
+		return Result{
+			Status:       "failed",
+			CostRaw:      []byte(`{"provider":"openai-compatible"}`),
+			ErrorCode:    "response_download_failed",
+			ErrorMessage: err.Error(),
+			Metrics: domain.AttemptMetrics{
+				ResponseDownloadMs: time.Since(downloadStarted).Milliseconds(),
+				ErrorStage:         "response_download",
+			},
+		}, err
 	}
 	result := Result{
 		ProviderRequestID: resp.Header.Get("X-Request-Id"),
 		Status:            "received",
 		RawResponse:       respBytes,
 		CostRaw:           []byte(`{"provider":"openai-compatible"}`),
+		Metrics: domain.AttemptMetrics{
+			ResponseDownloadMs: time.Since(downloadStarted).Milliseconds(),
+			ResponseBytes:      int64(len(respBytes)),
+		},
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		code := fmt.Sprintf("http_%d", resp.StatusCode)
 		message := responseErrorMessage(respBytes, resp.Status)
 		result.ErrorCode = code
 		result.ErrorMessage = message
+		result.Metrics.ErrorStage = "provider_response"
 		return result, fmt.Errorf("openai-compatible provider failed: %s", message)
 	}
 
@@ -202,11 +318,13 @@ func (p OpenAICompatibleProvider) parseImageResponse(ctx context.Context, task d
 	if err := json.Unmarshal(respBytes, &payload); err != nil {
 		result.ErrorCode = "invalid_response"
 		result.ErrorMessage = err.Error()
+		result.Metrics.ErrorStage = "response_parse"
 		return result, fmt.Errorf("parse openai-compatible response: %w", err)
 	}
 	if payload.Error != nil && payload.Error.Message != "" {
 		result.ErrorCode = firstNonEmpty(payload.Error.Code, "provider_error")
 		result.ErrorMessage = payload.Error.Message
+		result.Metrics.ErrorStage = "provider_response"
 		return result, fmt.Errorf("openai-compatible provider error: %s", payload.Error.Message)
 	}
 	if payload.ID != "" {
@@ -226,27 +344,37 @@ func (p OpenAICompatibleProvider) parseImageResponse(ctx context.Context, task d
 
 	files := make([]GeneratedFile, 0, len(payload.Data))
 	for i, item := range payload.Data {
-		imageBytes, err := p.imageBytes(ctx, item)
+		imageBytes, resultKind, err := p.imageBytes(ctx, item)
 		if err != nil {
 			result.ErrorCode = "image_decode_failed"
 			result.ErrorMessage = err.Error()
+			result.Metrics.ErrorStage = "response_download"
 			return result, err
 		}
 		pngBytes, width, height, err := normalizePNG(imageBytes)
 		if err != nil {
 			result.ErrorCode = "unsupported_image"
 			result.ErrorMessage = err.Error()
+			result.Metrics.ErrorStage = "response_parse"
 			return result, err
 		}
 		parameterBytes := taskProviderParameters(task, map[string]any{
-			"provider":       "openai-compatible",
-			"model":          p.model,
-			"request_mode":   requestMode,
-			"slot":           i,
-			"size":           size,
-			"aspect_ratio":   task.AspectRatio,
-			"output_format":  "png",
-			"revised_prompt": item.RevisedPrompt,
+			"provider":        "openai-compatible",
+			"model":           model,
+			"api_mode":        shape.APIMode,
+			"endpoint":        shape.Endpoint,
+			"request_mode":    shape.RequestMode,
+			"operation":       shape.Operation,
+			"stream":          shape.Stream,
+			"partial_images":  shape.PartialImages,
+			"response_format": shape.ResponseFormat,
+			"result_kind":     resultKind,
+			"n":               shape.N,
+			"slot":            i,
+			"size":            size,
+			"aspect_ratio":    task.AspectRatio,
+			"output_format":   "png",
+			"revised_prompt":  item.RevisedPrompt,
 		})
 		files = append(files, GeneratedFile{
 			Slot:          i,
@@ -257,7 +385,7 @@ func (p OpenAICompatibleProvider) parseImageResponse(ctx context.Context, task d
 			Height:        height,
 			ThumbnailW:    width,
 			ThumbnailH:    height,
-			Model:         p.model,
+			Model:         model,
 			ParametersRaw: parameterBytes,
 			CostRaw:       result.CostRaw,
 		})
@@ -265,6 +393,7 @@ func (p OpenAICompatibleProvider) parseImageResponse(ctx context.Context, task d
 	if len(files) == 0 {
 		result.ErrorCode = "empty_response"
 		result.ErrorMessage = "openai-compatible provider returned no image data"
+		result.Metrics.ErrorStage = "response_parse"
 		return result, errors.New(result.ErrorMessage)
 	}
 	result.Status = "succeeded"
@@ -276,26 +405,28 @@ func (p OpenAICompatibleProvider) readEditInputFile(path, mimeType string, force
 	return readTaskInputFile(path, mimeType, forcePNG)
 }
 
-func (p OpenAICompatibleProvider) imageBytes(ctx context.Context, item openAICompatibleDataItem) ([]byte, error) {
+func (p OpenAICompatibleProvider) imageBytes(ctx context.Context, item openAICompatibleDataItem) ([]byte, string, error) {
 	if item.B64JSON != "" {
-		return base64.StdEncoding.DecodeString(stripDataURLPrefix(item.B64JSON))
+		raw, err := base64.StdEncoding.DecodeString(stripDataURLPrefix(item.B64JSON))
+		return raw, openAICompatibleResponseFormatB64, err
 	}
 	if item.URL == "" {
-		return nil, fmt.Errorf("response item has neither b64_json nor url")
+		return nil, "", fmt.Errorf("response item has neither b64_json nor url")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, item.URL, nil)
 	if err != nil {
-		return nil, err
+		return nil, openAICompatibleResponseFormatURL, err
 	}
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, openAICompatibleResponseFormatURL, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("download image failed: %s", resp.Status)
+		return nil, openAICompatibleResponseFormatURL, fmt.Errorf("download image failed: %s", resp.Status)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxImageResponseBytes))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxImageResponseBytes))
+	return raw, openAICompatibleResponseFormatURL, err
 }
 
 type resolvedEditInput struct {
@@ -372,6 +503,61 @@ func fileExtensionForMultipartMime(mimeType string) string {
 	}
 }
 
+func openAICompatiblePassthroughParams(task domain.Task) map[string]any {
+	input := parseTaskStructuredProviderInput(task)
+	if len(input.GenerationConfig) == 0 {
+		return nil
+	}
+	var config map[string]any
+	if err := json.Unmarshal(input.GenerationConfig, &config); err != nil {
+		return nil
+	}
+	params := map[string]any{}
+	if value := trimmedConfigString(config, "quality"); value != "" {
+		params["quality"] = value
+	}
+	if value := trimmedConfigString(config, "moderation"); value != "" {
+		params["moderation"] = value
+	}
+	if value, ok := configIntInRange(config, "output_compression", 0, 100); ok {
+		params["output_compression"] = value
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	return params
+}
+
+func trimmedConfigString(config map[string]any, key string) string {
+	value, ok := config[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func configIntInRange(config map[string]any, key string, minValue, maxValue int) (int, bool) {
+	value, ok := config[key]
+	if !ok || value == nil {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case float64:
+		intValue := int(typed)
+		if typed != float64(intValue) || intValue < minValue || intValue > maxValue {
+			return 0, false
+		}
+		return intValue, true
+	case int:
+		if typed < minValue || typed > maxValue {
+			return 0, false
+		}
+		return typed, true
+	default:
+		return 0, false
+	}
+}
+
 func sizeForAspectRatio(aspectRatio string) string {
 	switch aspectRatio {
 	case "3:4", "9:16":
@@ -400,6 +586,73 @@ func stripDataURLPrefix(value string) string {
 		return value[comma+1:]
 	}
 	return value
+}
+
+func openAIRequestErrorResult(task domain.Task, started time.Time, firstByteAt time.Time, err error) Result {
+	metrics := domain.AttemptMetrics{
+		ProviderTotalMs: time.Since(started).Milliseconds(),
+		ErrorStage:      classifyOpenAIRequestErrorStage(err),
+	}
+	if !firstByteAt.IsZero() {
+		metrics.ProviderFirstByteMs = firstByteAt.Sub(started).Milliseconds()
+	}
+	return Result{
+		ProviderRequestID: "openai_compatible_" + task.ID,
+		Status:            "failed",
+		CostRaw:           []byte(`{"provider":"openai-compatible"}`),
+		ErrorCode:         "provider_request_failed",
+		ErrorMessage:      err.Error(),
+		Metrics:           metrics,
+	}
+}
+
+func applyOpenAIRequestMetrics(result *Result, started time.Time, firstByteAt time.Time) {
+	if result == nil {
+		return
+	}
+	if !firstByteAt.IsZero() {
+		result.Metrics.ProviderFirstByteMs = firstByteAt.Sub(started).Milliseconds()
+	} else if result.Metrics.ProviderFirstByteMs == 0 {
+		result.Metrics.ProviderFirstByteMs = time.Since(started).Milliseconds()
+	}
+	result.Metrics.ProviderTotalMs = time.Since(started).Milliseconds()
+}
+
+func classifyOpenAIRequestErrorStage(err error) string {
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "awaiting headers") ||
+		strings.Contains(message, "response header") ||
+		strings.Contains(message, "first byte") {
+		return "provider_first_byte"
+	}
+	if strings.Contains(message, "dial") ||
+		strings.Contains(message, "connect") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "connection refused") {
+		return "connect"
+	}
+	if strings.Contains(message, "context deadline") ||
+		strings.Contains(message, "client.timeout") ||
+		strings.Contains(message, "timeout") {
+		return "provider_total"
+	}
+	return "provider_request"
+}
+
+func providerTimeoutDuration(seconds int) time.Duration {
+	if seconds < 1 {
+		seconds = 1
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 1
 }
 
 func firstNonEmpty(value, fallback string) string {

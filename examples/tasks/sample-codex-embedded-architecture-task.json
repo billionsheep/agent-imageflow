@@ -1,0 +1,26 @@
+{
+  "idempotency_key": "embedded-architecture-article-001-v1",
+  "title": "嵌入式架构文章插图 001",
+  "purpose": "技术文章封面或插图图片资产",
+  "prompt": "一张清晰的嵌入式系统架构风格插图，主题是传感器数据从 MCU 到 RTOS 任务再到无线模块的处理流程，画面适合技术博客封面，视觉简洁、有层次、不要生成不可读的小字。",
+  "negative_prompt": "low quality, blurry, messy wiring, unreadable tiny text, random labels",
+  "style_preset": "technical-illustration-cover",
+  "aspect_ratio": "16:9",
+  "output_format": "png",
+  "requested_count": 2,
+  "provider": "mock",
+  "selection_mode": "auto",
+  "review_required": false,
+  "metadata_json": {
+    "source": "codex",
+    "source_agent": "codex-cli",
+    "source_thread_id": "thread_embedded_article_demo",
+    "session_id": "embedded_article_session_2026_06_19",
+    "run_id": "run_architecture_batch_001",
+    "batch_id": "embedded_architecture_batch_001",
+    "story_id": "rtos_sensor_pipeline",
+    "scene_id": "cover_001",
+    "target_path": "assets/embedded/rtos-sensor-pipeline/cover-001.png",
+    "content_type": "technical_article_image"
+  }
+}

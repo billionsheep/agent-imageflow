@@ -151,6 +151,47 @@ type TaskResponse struct {
 	Assets   []AssetListEntry `json:"assets"`
 }
 
+type TaskAttempt struct {
+	ID                  string     `json:"attempt_id"`
+	TaskID              string     `json:"task_id"`
+	AttemptNo           int        `json:"attempt_no"`
+	Status              string     `json:"status"`
+	Provider            string     `json:"provider"`
+	ProviderRequestID   string     `json:"provider_request_id,omitempty"`
+	StartedAt           time.Time  `json:"started_at"`
+	FinishedAt          *time.Time `json:"finished_at,omitempty"`
+	LatencyMs           *int       `json:"latency_ms,omitempty"`
+	QueueWaitMs         *int       `json:"queue_wait_ms,omitempty"`
+	ProviderFirstByteMs *int       `json:"provider_first_byte_ms,omitempty"`
+	ProviderTotalMs     *int       `json:"provider_total_ms,omitempty"`
+	ResponseDownloadMs  *int       `json:"response_download_ms,omitempty"`
+	StoreMs             *int       `json:"store_ms,omitempty"`
+	ThumbnailMs         *int       `json:"thumbnail_ms,omitempty"`
+	RetryCount          int        `json:"retry_count"`
+	ErrorStage          string     `json:"error_stage,omitempty"`
+	ResponseBytes       int64      `json:"response_bytes,omitempty"`
+	RetryAfter          *time.Time `json:"retry_after,omitempty"`
+	ErrorCode           *string    `json:"error_code,omitempty"`
+	ErrorMessage        *string    `json:"error_message,omitempty"`
+}
+
+type TaskAttemptsResponse struct {
+	TaskID   string        `json:"task_id"`
+	Attempts []TaskAttempt `json:"attempts"`
+}
+
+type AttemptMetrics struct {
+	QueueWaitMs         int64  `json:"queue_wait_ms,omitempty"`
+	ProviderFirstByteMs int64  `json:"provider_first_byte_ms,omitempty"`
+	ProviderTotalMs     int64  `json:"provider_total_ms,omitempty"`
+	ResponseDownloadMs  int64  `json:"response_download_ms,omitempty"`
+	StoreMs             int64  `json:"store_ms,omitempty"`
+	ThumbnailMs         int64  `json:"thumbnail_ms,omitempty"`
+	RetryCount          int    `json:"retry_count,omitempty"`
+	ErrorStage          string `json:"error_stage,omitempty"`
+	ResponseBytes       int64  `json:"response_bytes,omitempty"`
+}
+
 type AssetListEntry struct {
 	AssetID      string `json:"asset_id"`
 	Status       string `json:"status"`
@@ -174,6 +215,84 @@ type AssetResponse struct {
 	MetadataJSON   json.RawMessage `json:"metadata_json"`
 	Delivery       DeliveryInfo    `json:"delivery"`
 	CreatedAt      time.Time       `json:"created_at"`
+}
+
+type AssetListQuery struct {
+	ProjectID   string
+	CampaignID  string
+	Limit       int
+	Offset      int
+	Status      string
+	Provider    string
+	Model       string
+	Source      string
+	SessionID   string
+	BatchID     string
+	Keyword     string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+}
+
+type BatchProgressQuery struct {
+	ProjectID  string
+	CampaignID string
+	SessionID  string
+	BatchID    string
+	Limit      int
+}
+
+type BatchProgressTask struct {
+	TaskID       string    `json:"task_id"`
+	Status       string    `json:"status"`
+	AssetCount   int       `json:"asset_count"`
+	AttemptCount int       `json:"attempt_count"`
+	Retrying     bool      `json:"retrying"`
+	ErrorStage   string    `json:"error_stage,omitempty"`
+	ErrorCode    *string   `json:"error_code,omitempty"`
+	ErrorMessage *string   `json:"error_message,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type BatchProgressCounts struct {
+	TaskCount      int `json:"task_count"`
+	QueuedCount    int `json:"queued_count"`
+	RunningCount   int `json:"running_count"`
+	SucceededCount int `json:"succeeded_count"`
+	PartialCount   int `json:"partial_count"`
+	FailedCount    int `json:"failed_count"`
+	RetryingCount  int `json:"retrying_count"`
+	AssetCount     int `json:"asset_count"`
+	AttemptCount   int `json:"attempt_count"`
+}
+
+type BatchProgressResponse struct {
+	GeneratedAt time.Time           `json:"generated_at"`
+	ProjectID   string              `json:"project_id"`
+	CampaignID  string              `json:"campaign_id"`
+	SessionID   string              `json:"session_id,omitempty"`
+	BatchID     string              `json:"batch_id,omitempty"`
+	Counts      BatchProgressCounts `json:"counts"`
+	Tasks       []BatchProgressTask `json:"tasks"`
+}
+
+const (
+	DefaultAssetListLimit     = 50
+	MaxAssetListLimit         = 100
+	DefaultBatchProgressLimit = 100
+	MaxBatchProgressLimit     = 500
+)
+
+var StandardMetadataFields = []string{
+	"source",
+	"source_agent",
+	"source_thread_id",
+	"session_id",
+	"run_id",
+	"batch_id",
+	"story_id",
+	"scene_id",
+	"target_path",
 }
 
 type DeliveryInfo struct {
@@ -406,6 +525,26 @@ type ProjectQualityProfileResponse struct {
 	QualityProfile QualityProfile `json:"quality_profile"`
 }
 
+type ProjectProviderProfile struct {
+	Enabled                  bool            `json:"enabled"`
+	Provider                 string          `json:"provider,omitempty"`
+	Model                    string          `json:"model,omitempty"`
+	BaseURL                  string          `json:"base_url,omitempty"`
+	GenerationConfig         json.RawMessage `json:"generation_config,omitempty"`
+	UseProjectQualityProfile bool            `json:"use_project_quality_profile,omitempty"`
+	MaxN                     int             `json:"max_n,omitempty"`
+	SupportsURLResult        bool            `json:"supports_url_result,omitempty"`
+	PreferredResponseFormat  string          `json:"preferred_response_format,omitempty"`
+	MaxConcurrency           int             `json:"max_concurrency,omitempty"`
+	TimeoutSeconds           int             `json:"timeout_seconds,omitempty"`
+}
+
+type ProjectProviderProfileResponse struct {
+	WorkspaceID     string                 `json:"workspace_id"`
+	ProjectID       string                 `json:"project_id"`
+	ProviderProfile ProjectProviderProfile `json:"provider_profile"`
+}
+
 type WorkspaceSummary struct {
 	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
@@ -616,6 +755,35 @@ func (c ProjectAccessConfig) Public() ProjectAccessConfigView {
 		APIKeyPreview: normalized.APIKeyPreview,
 		APIKeys:       publicKeys,
 	}
+}
+
+func NormalizeMetadataJSON(raw json.RawMessage) json.RawMessage {
+	var metadata map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &metadata) != nil || metadata == nil {
+		return json.RawMessage(`{}`)
+	}
+	for _, field := range StandardMetadataFields {
+		value, exists := metadata[field]
+		if !exists {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok {
+			delete(metadata, field)
+			continue
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			delete(metadata, field)
+			continue
+		}
+		metadata[field] = text
+	}
+	normalized, err := json.Marshal(metadata)
+	if err != nil || !json.Valid(normalized) {
+		return json.RawMessage(`{}`)
+	}
+	return normalized
 }
 
 func normalizeProjectAPIKeyEntry(key ProjectAPIKey, fallbackID string) *ProjectAPIKey {

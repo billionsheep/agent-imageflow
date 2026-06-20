@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/billionsheep/agent-imageflow/internal/domain"
 	"github.com/billionsheep/agent-imageflow/internal/provider"
@@ -30,6 +31,8 @@ type StoredAssetFile struct {
 	MimeType      string
 	Width         int
 	Height        int
+	StoreMs       int64
+	ThumbnailMs   int64
 }
 
 func NewLocalStorage(root string, thumbnailMaxWidth, thumbnailMaxHeight int) LocalStorage {
@@ -46,6 +49,7 @@ func (s LocalStorage) Root() string {
 }
 
 func (s LocalStorage) StoreGeneratedFile(ctx context.Context, task domain.Task, assetID string, versionID string, file provider.GeneratedFile) (StoredAssetFile, error) {
+	started := time.Now()
 	version := 1
 	base := filepath.Join(s.root, "workspaces", task.WorkspaceID, "projects", task.ProjectID, "campaigns", task.CampaignID)
 	tmpDir := filepath.Join(base, "tmp", assetID)
@@ -71,10 +75,12 @@ func (s LocalStorage) StoreGeneratedFile(ctx context.Context, task domain.Task, 
 		width = detectedWidth
 		height = detectedHeight
 	}
+	thumbnailStarted := time.Now()
 	thumbnailWidth, thumbnailHeight, err := s.createThumbnail(ctx, tmpOriginal, tmpThumbnail, width, height)
 	if err != nil {
 		return StoredAssetFile{}, err
 	}
+	thumbnailMs := time.Since(thumbnailStarted).Milliseconds()
 
 	hashBytes := sha256.Sum256(file.Bytes)
 	hash := "sha256:" + hex.EncodeToString(hashBytes[:])
@@ -140,5 +146,7 @@ func (s LocalStorage) StoreGeneratedFile(ctx context.Context, task domain.Task, 
 		MimeType:      file.MimeType,
 		Width:         width,
 		Height:        height,
+		StoreMs:       time.Since(started).Milliseconds(),
+		ThumbnailMs:   thumbnailMs,
 	}, nil
 }

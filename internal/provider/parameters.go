@@ -2,15 +2,17 @@ package provider
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/billionsheep/agent-imageflow/internal/domain"
 )
 
 type taskStructuredProviderInput struct {
-	ReferenceImages    []domain.ReferenceImage `json:"reference_images"`
-	MaskImage          *domain.MaskImage       `json:"mask_image"`
-	ResolvedInputFiles *resolvedTaskInputFiles `json:"resolved_input_files"`
-	GenerationConfig   json.RawMessage         `json:"generation_config"`
+	ReferenceImages    []domain.ReferenceImage       `json:"reference_images"`
+	MaskImage          *domain.MaskImage             `json:"mask_image"`
+	ResolvedInputFiles *resolvedTaskInputFiles       `json:"resolved_input_files"`
+	GenerationConfig   json.RawMessage               `json:"generation_config"`
+	ProviderProfile    domain.ProjectProviderProfile `json:"provider_profile"`
 }
 
 type resolvedTaskInputFiles struct {
@@ -59,10 +61,40 @@ func taskProviderParameters(task domain.Task, base map[string]any) []byte {
 			parameters["generation_config"] = generationConfig
 		}
 	}
+	if input.ProviderProfile.Enabled {
+		parameters["provider_profile"] = input.ProviderProfile
+	}
 
 	raw, err := json.Marshal(parameters)
 	if err != nil {
 		return []byte(`{}`)
 	}
 	return raw
+}
+
+func taskProviderModel(task domain.Task, providerID, fallback string) string {
+	input := parseTaskStructuredProviderInput(task)
+	if input.ProviderProfile.Enabled &&
+		input.ProviderProfile.Provider == providerID &&
+		input.ProviderProfile.Model != "" {
+		return input.ProviderProfile.Model
+	}
+	return fallback
+}
+
+func taskProviderMaxN(task domain.Task, providerID string, fallback int) int {
+	maxN := fallback
+	input := parseTaskStructuredProviderInput(task)
+	if input.ProviderProfile.Enabled &&
+		strings.TrimSpace(input.ProviderProfile.Provider) == providerID &&
+		input.ProviderProfile.MaxN > 0 {
+		maxN = input.ProviderProfile.MaxN
+	}
+	if maxN < 1 {
+		return 1
+	}
+	if maxN > 10 {
+		return 10
+	}
+	return maxN
 }

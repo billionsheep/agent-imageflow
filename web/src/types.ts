@@ -253,6 +253,8 @@ export interface TaskRecord {
   imageflowErrorCode?: string | null
   /** 服务端候选资产 */
   imageflowAssets?: AgentImageflowManagedAsset[]
+  /** 服务端任务 attempt 摘要，不包含 provider raw response 或 secret */
+  imageflowAttempts?: AgentImageflowManagedAttempt[]
 }
 
 export interface AgentImageflowManagedScope {
@@ -286,6 +288,27 @@ export interface AgentImageflowManagedAsset {
   sceneId?: string
   targetPath?: string
   createdAt?: string
+}
+
+export interface AgentImageflowManagedAttempt {
+  attemptNo: number
+  status: string
+  provider: string
+  latencyMs?: number
+  queueWaitMs?: number
+  providerFirstByteMs?: number
+  providerTotalMs?: number
+  responseDownloadMs?: number
+  storeMs?: number
+  thumbnailMs?: number
+  retryCount?: number
+  errorStage?: string
+  responseBytes?: number
+  retryAfter?: string
+  errorCode?: string
+  errorMessage?: string
+  startedAt?: string
+  finishedAt?: string
 }
 
 export interface FavoriteCollection {

@@ -7,10 +7,23 @@ import {
   normalizeAgentImageflowApiBaseUrl,
   rejectAgentImageflowAsset,
   selectAgentImageflowAsset,
+  type AgentImageflowAssetListQuery,
   type AgentImageflowAssetResponse,
   type AgentImageflowAuth,
 } from '../lib/agentImageflowApi'
 import { CopyIcon, LinkIcon, RefreshIcon } from './icons'
+
+const ASSET_PAGE_SIZE = 24
+const MAX_RENDERED_SERVER_ASSETS = 120
+
+interface AssetFilters {
+  status: string
+  provider: string
+  source: string
+  sessionId: string
+  batchId: string
+  keyword: string
+}
 
 function buildAuth(settings: ReturnType<typeof normalizeSettings>): AgentImageflowAuth {
   return {
@@ -48,6 +61,60 @@ function AssetField({ label, value }: { label: string; value?: string }) {
   )
 }
 
+function AssetFilterInput({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange: (value: string) => void }) {
+  return (
+    <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
+      <span className="mb-1 block uppercase">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-blue-300 dark:border-white/[0.08] dark:bg-gray-950/50 dark:text-gray-100 dark:focus:border-blue-500/60"
+      />
+    </label>
+  )
+}
+
+function buildAssetListQuery(filters: AssetFilters, offset: number): AgentImageflowAssetListQuery {
+  return {
+    limit: ASSET_PAGE_SIZE,
+    offset,
+    status: filters.status,
+    provider: filters.provider,
+    source: filters.source,
+    sessionId: filters.sessionId,
+    batchId: filters.batchId,
+    keyword: filters.keyword,
+  }
+}
+
+function mergeAssets(current: AgentImageflowAssetResponse[], next: AgentImageflowAssetResponse[]): AgentImageflowAssetResponse[] {
+  const seen = new Set(current.map((asset) => asset.asset_id))
+  const merged = [...current]
+  for (const asset of next) {
+    if (seen.has(asset.asset_id)) continue
+    seen.add(asset.asset_id)
+    merged.push(asset)
+  }
+  return merged
+}
+
+function formatJSONSummary(value?: Record<string, unknown>): string {
+  if (!value || Object.keys(value).length === 0) return ''
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return ''
+  }
+}
+
+function safeLocalPathLabel(value?: string): string {
+  if (!value) return ''
+  const pieces = value.split(/[\\/]+/).filter(Boolean)
+  const filename = pieces[pieces.length - 1]
+  return filename ? `stored file: ${filename}` : 'stored file available'
+}
+
 export default function ServerAssetLibrary() {
   const settings = useStore((state) => state.settings)
   const showToast = useStore((state) => state.showToast)
@@ -69,35 +136,65 @@ export default function ServerAssetLibrary() {
   const scopeReady = Boolean(scope.workspaceId && scope.projectId && scope.campaignId)
   const [assets, setAssets] = useState<AgentImageflowAssetResponse[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [actionAssetId, setActionAssetId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [filters, setFilters] = useState<AssetFilters>({
+    status: '',
+    provider: '',
+    source: '',
+    sessionId: '',
+    batchId: '',
+    keyword: '',
+  })
   const requestRef = useRef(0)
 
-  const refreshAssets = useCallback(async () => {
+  const loadAssets = useCallback(async (mode: 'replace' | 'append', offset: number) => {
     if (!scopeReady) {
       setAssets([])
+      setHasMore(false)
       return
     }
     const requestId = ++requestRef.current
-    setLoading(true)
+    if (mode === 'append') {
+      setLoadingMore(true)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
       const response = await listAgentImageflowAssets(baseUrl, {
         projectId: scope.projectId,
         campaignId: scope.campaignId,
-      }, auth)
+      }, auth, buildAssetListQuery(filters, offset))
       if (requestRef.current !== requestId) return
-      setAssets(response)
+      const loadedCount = mode === 'append'
+        ? Math.min(offset + response.length, MAX_RENDERED_SERVER_ASSETS)
+        : Math.min(response.length, MAX_RENDERED_SERVER_ASSETS)
+      setAssets((current) => {
+        const nextAssets = mode === 'append' ? mergeAssets(current, response) : response
+        return nextAssets.slice(0, MAX_RENDERED_SERVER_ASSETS)
+      })
+      setHasMore(response.length === ASSET_PAGE_SIZE && loadedCount < MAX_RENDERED_SERVER_ASSETS)
     } catch (nextError) {
       if (requestRef.current !== requestId) return
       setError(nextError instanceof Error ? nextError.message : String(nextError))
-      setAssets([])
+      if (mode === 'replace') {
+        setAssets([])
+        setHasMore(false)
+      }
     } finally {
       if (requestRef.current === requestId) {
         setLoading(false)
+        setLoadingMore(false)
       }
     }
-  }, [auth, baseUrl, scope.campaignId, scope.projectId, scopeReady])
+  }, [auth, baseUrl, filters, scope.campaignId, scope.projectId, scopeReady])
+
+  const refreshAssets = useCallback(async () => {
+    await loadAssets('replace', 0)
+  }, [loadAssets])
 
   useEffect(() => {
     void refreshAssets()
@@ -144,6 +241,7 @@ export default function ServerAssetLibrary() {
 
   const selectedCount = assets.filter((asset) => asset.status === 'selected').length
   const rejectedCount = assets.filter((asset) => asset.status === 'rejected').length
+  const filtersActive = Object.values(filters).some((value) => value.trim())
 
   return (
     <section data-no-drag-select className="mb-5 rounded-lg border border-gray-200/80 bg-white/90 p-4 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -156,7 +254,7 @@ export default function ServerAssetLibrary() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
-            {assets.length} assets · {selectedCount} selected · {rejectedCount} rejected
+            {assets.length} shown · {selectedCount} selected · {rejectedCount} rejected
           </span>
           <button
             type="button"
@@ -170,6 +268,39 @@ export default function ServerAssetLibrary() {
           </button>
         </div>
       </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+        <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="mb-1 block uppercase">status</span>
+          <select
+            value={filters.status}
+            onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+            className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-gray-950/50 dark:text-gray-100 dark:focus:border-blue-500/60"
+          >
+            <option value="">All</option>
+            <option value="generated">Generated</option>
+            <option value="selected">Selected</option>
+            <option value="rejected">Rejected</option>
+            <option value="published">Published</option>
+          </select>
+        </label>
+        <AssetFilterInput label="provider" value={filters.provider} placeholder="mock" onChange={(value) => setFilters((current) => ({ ...current, provider: value }))} />
+        <AssetFilterInput label="source" value={filters.source} placeholder="mcp / web" onChange={(value) => setFilters((current) => ({ ...current, source: value }))} />
+        <AssetFilterInput label="session" value={filters.sessionId} placeholder="session_id" onChange={(value) => setFilters((current) => ({ ...current, sessionId: value }))} />
+        <AssetFilterInput label="batch" value={filters.batchId} placeholder="batch_id" onChange={(value) => setFilters((current) => ({ ...current, batchId: value }))} />
+        <AssetFilterInput label="keyword" value={filters.keyword} placeholder="prompt / id" onChange={(value) => setFilters((current) => ({ ...current, keyword: value }))} />
+      </div>
+      {filtersActive && (
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setFilters({ status: '', provider: '', source: '', sessionId: '', batchId: '', keyword: '' })}
+            className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-500 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+          >
+            清除筛选
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200">
@@ -186,14 +317,18 @@ export default function ServerAssetLibrary() {
           当前 campaign 暂无服务端资产。MCP、REST、CLI 或 Web 托管模式生成后会显示在这里。
         </div>
       ) : (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {assets.map((asset) => {
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {assets.map((asset) => {
             const source = getMetadataValue(asset, 'source')
             const sessionId = getMetadataValue(asset, 'session_id')
             const batchId = getMetadataValue(asset, 'batch_id')
             const storyId = getMetadataValue(asset, 'story_id')
             const sceneId = getMetadataValue(asset, 'scene_id')
             const targetPath = getMetadataValue(asset, 'target_path')
+            const metadataSummary = formatJSONSummary(asset.metadata_json)
+            const parametersSummary = formatJSONSummary(asset.parameters_json)
+            const safeLocalPath = safeLocalPathLabel(asset.delivery.local_path)
             const busy = actionAssetId === asset.asset_id
             return (
               <article key={asset.asset_id} className="overflow-hidden rounded-lg border border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40">
@@ -219,6 +354,7 @@ export default function ServerAssetLibrary() {
                     <AssetField label="provider" value={asset.provider} />
                     <AssetField label="model" value={asset.model} />
                     <AssetField label="task" value={asset.task_id} />
+                    <AssetField label="hash" value={asset.hash} />
                     <AssetField label="source" value={source} />
                     <AssetField label="session" value={sessionId} />
                     <AssetField label="batch" value={batchId} />
@@ -227,6 +363,23 @@ export default function ServerAssetLibrary() {
                     <AssetField label="created" value={formatAssetDate(asset.created_at)} />
                     <AssetField label="target" value={targetPath} />
                   </div>
+
+                  {(metadataSummary || parametersSummary || safeLocalPath) && (
+                    <details className="rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                      <summary className="cursor-pointer text-[11px] font-medium text-gray-500 dark:text-gray-300">Details</summary>
+                      <div className="mt-2 space-y-2">
+                        {safeLocalPath && (
+                          <div className="break-all text-[11px] text-gray-500 dark:text-gray-400">{safeLocalPath}</div>
+                        )}
+                        {metadataSummary && (
+                          <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-2 text-[11px] text-gray-600 dark:bg-gray-950/50 dark:text-gray-300">{metadataSummary}</pre>
+                        )}
+                        {parametersSummary && (
+                          <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-2 text-[11px] text-gray-600 dark:bg-gray-950/50 dark:text-gray-300">{parametersSummary}</pre>
+                        )}
+                      </div>
+                    </details>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -285,8 +438,22 @@ export default function ServerAssetLibrary() {
                 </div>
               </article>
             )
-          })}
-        </div>
+            })}
+          </div>
+          {hasMore && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void loadAssets('append', assets.length)}
+                disabled={loadingMore}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200/80 bg-white px-3 text-xs font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-300"
+              >
+                <RefreshIcon className={`h-4 w-4 ${loadingMore ? 'animate-spin' : ''}`} />
+                加载更多
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   )

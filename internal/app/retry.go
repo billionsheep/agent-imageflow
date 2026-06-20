@@ -11,7 +11,7 @@ import (
 	"github.com/billionsheep/agent-imageflow/internal/provider"
 )
 
-func (s *Service) scheduleRetry(ctx context.Context, taskID string, attemptID string, attemptNo int, result provider.Result, started time.Time, err error) (bool, error) {
+func (s *Service) scheduleRetry(ctx context.Context, taskID string, attemptID string, attemptNo int, result provider.Result, started time.Time, metrics domain.AttemptMetrics, err error) (bool, error) {
 	retryAfter, ok := s.retryAfter(attemptNo, result, err)
 	if !ok {
 		return false, nil
@@ -19,7 +19,7 @@ func (s *Service) scheduleRetry(ctx context.Context, taskID string, attemptID st
 
 	code := firstNonEmpty(result.ErrorCode, "provider_retry_scheduled")
 	message := firstNonEmpty(result.ErrorMessage, err.Error())
-	if finishErr := s.store.FinishAttempt(ctx, attemptID, domain.AttemptFailed, result, started, &code, &message, &retryAfter); finishErr != nil {
+	if finishErr := s.store.FinishAttempt(ctx, attemptID, domain.AttemptFailed, result, started, metrics, &code, &message, &retryAfter); finishErr != nil {
 		return false, finishErr
 	}
 	if updateErr := s.store.UpdateTaskStatus(ctx, taskID, domain.TaskQueued, &code, &message); updateErr != nil {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { activateFirstImportedProfile, buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
@@ -10,19 +10,20 @@ import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import ServerAssetLibrary from './components/ServerAssetLibrary'
 import TaskGrid from './components/TaskGrid'
-import AgentWorkspace from './components/AgentWorkspace'
 import InputBar from './components/InputBar'
-import DetailModal from './components/DetailModal'
-import Lightbox from './components/Lightbox'
-import SettingsModal from './components/SettingsModal'
-import ScopeManagerModal from './components/ScopeManagerModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
-import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
+
+const AgentWorkspace = lazy(() => import('./components/AgentWorkspace'))
+const DetailModal = lazy(() => import('./components/DetailModal'))
+const Lightbox = lazy(() => import('./components/Lightbox'))
+const SettingsModal = lazy(() => import('./components/SettingsModal'))
+const ScopeManagerModal = lazy(() => import('./components/ScopeManagerModal'))
+const MaskEditorModal = lazy(() => import('./components/MaskEditorModal'))
 
 let customProviderConfigUrlImportStarted = false
 
@@ -31,6 +32,11 @@ export default function App() {
   const appMode = useStore((s) => s.appMode)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
+  const detailTaskId = useStore((s) => s.detailTaskId)
+  const lightboxImageId = useStore((s) => s.lightboxImageId)
+  const showSettings = useStore((s) => s.showSettings)
+  const showScopeManager = useStore((s) => s.showScopeManager)
+  const maskEditorImageId = useStore((s) => s.maskEditorImageId)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -113,7 +119,9 @@ export default function App() {
     <>
       <Header />
       {appMode === 'agent' ? (
-        <AgentWorkspace />
+        <Suspense fallback={null}>
+          <AgentWorkspace />
+        </Suspense>
       ) : (
         <main data-home-main data-drag-select-surface className="pb-48">
           <div className="safe-area-x max-w-7xl mx-auto">
@@ -124,16 +132,36 @@ export default function App() {
         </main>
       )}
       <InputBar />
-      <DetailModal />
-      <Lightbox />
-      <SettingsModal />
-      <ScopeManagerModal />
+      {detailTaskId && (
+        <Suspense fallback={null}>
+          <DetailModal />
+        </Suspense>
+      )}
+      {lightboxImageId && (
+        <Suspense fallback={null}>
+          <Lightbox />
+        </Suspense>
+      )}
+      {showSettings && (
+        <Suspense fallback={null}>
+          <SettingsModal />
+        </Suspense>
+      )}
+      {showScopeManager && (
+        <Suspense fallback={null}>
+          <ScopeManagerModal />
+        </Suspense>
+      )}
       <ConfirmDialog />
       <SupportPromptModal />
       <FavoriteCollectionPickerModal />
       <ManageCollectionsModal />
       <Toast />
-      <MaskEditorModal />
+      {maskEditorImageId && (
+        <Suspense fallback={null}>
+          <MaskEditorModal />
+        </Suspense>
+      )}
       <ImageContextMenu />
     </>
   )

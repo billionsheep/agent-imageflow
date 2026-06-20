@@ -27,6 +27,8 @@
 - 项目级 API key / Basic Auth / 多 key 策略已接入：REST 支持 access-config 管理、实例级 Basic Auth 和项目级 `X-API-Key` / Bearer；Web managed mode 与 CLI 均已支持透传鉴权。
 - HTTP API 基础限流已接入：复用 Redis 做固定窗口计数，支持实例级 / project 级阈值、`429` + `Retry-After`，并在限流后端异常时 fail-open。
 - HTTP / API 第一版结构化审计日志已接入：`api` 进程会把 `/api/*` 请求写入 `STORAGE_ROOT/audit/http-api/YYYY-MM-DD.jsonl`，并通过 `vag audit list` 提供本地查询。
+- Worker 并发和 provider backpressure 已接入：`WORKER_CONCURRENCY` 控制队列消费并发，`OPENAI_COMPATIBLE_MAX_CONCURRENCY` 与 `FAL_MAX_CONCURRENCY` 分别控制 provider 入口 cap；openai-compatible 支持 connect/header/total timeout profile；task attempts 可通过 REST/CLI/Web 查看 queue/provider/download/store/thumbnail 阶段指标。
+- Benchmark 能力已接入：`vag benchmark image-generation` 可创建有限任务、等待终态并输出成功率、P50/P95、timeout、retry、queue wait、provider first byte、download/store/thumbnail 和调参建议；真实 provider benchmark 默认需要 `--allow-paid-provider`。
 - Web scope selector / quick create 第一版已接入：REST 可列出/创建 workspace、project、campaign；设置页可同步和快速新建 scope。
 - 独立 Web scope 管理第二版已接入：REST 可 rename/archive/delete workspace、project、campaign；Web 顶栏和设置页可进入独立管理 modal，archived scope 会在 selector 中被过滤。
 - 开发环境存储根目录默认使用项目内 `./storage`。
@@ -123,7 +125,7 @@ project:
 - name
 - description
 - style_preset
-- metadata_json (`quality_profile` 保存项目级质量复用配置，`access_config` 保存项目级 API key 兼容视图与 `api_keys` 列表，`archived_at` 用于 project 归档状态)
+- metadata_json (`quality_profile` 保存项目级质量复用配置，`provider_profile` 保存非敏感项目级 provider 默认值，`access_config` 保存项目级 API key 兼容视图与 `api_keys` 列表，`archived_at` 用于 project 归档状态)
 - created_at
 - updated_at
 
@@ -266,6 +268,11 @@ delivery_event:
 - `POST /api/workspaces/{workspace_id}/projects/{project_id}/quality-profile`
   - Input: project-level quality profile
   - Output: saved quality profile
+- `GET /api/workspaces/{workspace_id}/projects/{project_id}/provider-profile`
+  - Output: project-level non-sensitive provider defaults (`enabled`、`provider`、`model`、`base_url`、`generation_config`、`use_project_quality_profile`)
+- `POST /api/workspaces/{workspace_id}/projects/{project_id}/provider-profile`
+  - Input: same non-sensitive provider profile fields
+  - Output: saved provider profile; plaintext provider secret is not accepted or returned
 - `GET /api/workspaces/{workspace_id}/projects/{project_id}/access-config`
   - Output: project-level API key enabled/name/preview compatibility view plus `api_keys` list
 - `POST /api/workspaces/{workspace_id}/projects/{project_id}/access-config`
@@ -273,12 +280,19 @@ delivery_event:
   - Output: saved project access config without plaintext key
 - `GET /api/tasks/{id}`
   - Output: task status and generated assets
+- `GET /api/tasks/{id}/attempts`
+  - Output: safe attempt summary (`attempt_no`、`status`、`provider`、`latency_ms`、`retry_after`、`error_code`、`error_message`、timestamps)
+  - Security: does not return `raw_response_json`, request body, Authorization header, API key, or provider secret
 - `POST /api/assets/{id}/select`
   - Output: updated asset status
 - `POST /api/assets/{id}/reject`
   - Output: updated asset status
 - `GET /api/assets/{id}`
   - Output: asset metadata and versions
+- `GET /api/projects/{project_id}/campaigns/{campaign_id}/assets`
+  - Output: asset list array for current campaign
+  - Query: optional `limit`、`offset`、`status`、`provider`、`model`、`source`、`session_id`、`batch_id`、`keyword`、`created_from`、`created_to`
+  - Limit: default `50`, maximum `100`
 - `GET /api/assets/{id}/original`
   - Output: original image file
 - `GET /api/assets/{id}/thumbnail`
@@ -299,6 +313,9 @@ delivery_event:
 
 - `vag task create --file task.json`
 - `vag task get <task_id>`
+- `vag task attempts <task_id>`
+- `vag benchmark image-generation --provider mock --tasks 32 --requested-count 1`
+- `vag batch progress --session-id <session_id> --batch-id <batch_id>`
 - `vag project access get`
 - `vag project access set --enabled=true --key <api_key>`
 - `vag project access add-key --name rollout --key <api_key>`

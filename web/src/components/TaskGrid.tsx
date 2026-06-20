@@ -2,6 +2,9 @@ import { useMemo, useRef, useState, useEffect } from 'react'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds, useStore, reuseConfig, editOutputs, removeTask, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import TaskCard from './TaskCard'
 
+const TASK_GRID_INITIAL_LIMIT = 60
+const TASK_GRID_PAGE_SIZE = 60
+
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
   const searchQuery = useStore((s) => s.searchQuery)
@@ -16,6 +19,7 @@ export default function TaskGrid() {
   const rootRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const [selectionBox, setSelectionBox] = useState<{ startPageX: number; startPageY: number; currentPageX: number; currentPageY: number } | null>(null)
+  const [visibleLimit, setVisibleLimit] = useState(TASK_GRID_INITIAL_LIMIT)
   const dragStart = useRef<{ pageX: number; pageY: number } | null>(null)
   const lastClientPoint = useRef<{ x: number; y: number } | null>(null)
   const hasDragged = useRef(false)
@@ -42,6 +46,16 @@ export default function TaskGrid() {
       return taskMatchesSearchQuery(t, q)
     })
   }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId])
+
+  useEffect(() => {
+    setVisibleLimit(TASK_GRID_INITIAL_LIMIT)
+  }, [searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId])
+
+  const visibleTasks = useMemo(
+    () => filteredTasks.slice(0, visibleLimit),
+    [filteredTasks, visibleLimit],
+  )
+  const hiddenTaskCount = Math.max(0, filteredTasks.length - visibleTasks.length)
 
   const handleDelete = (task: typeof tasks[0]) => {
     setConfirmDialog({
@@ -286,7 +300,7 @@ export default function TaskGrid() {
       className="relative min-h-[50vh]"
     >
       <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-        {filteredTasks.map((task) => (
+        {visibleTasks.map((task) => (
           <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
             <TaskCard
               task={task}
@@ -312,6 +326,17 @@ export default function TaskGrid() {
           </div>
         ))}
       </div>
+      {hiddenTaskCount > 0 && (
+        <div className="mb-16 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setVisibleLimit((current) => current + TASK_GRID_PAGE_SIZE)}
+            className="inline-flex h-10 items-center rounded-lg border border-gray-200 bg-white px-4 text-xs font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-300"
+          >
+            加载更多本地任务（剩余 {hiddenTaskCount}）
+          </button>
+        </div>
+      )}
       {selectionBox && (
         <div
           className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"

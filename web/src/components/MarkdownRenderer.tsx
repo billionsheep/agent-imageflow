@@ -102,6 +102,17 @@ const canLoadStreamdown = (() => {
 
 let streamdownPromise: Promise<MarkdownRendererState> | null = null
 let legacyMarkdownPromise: Promise<MarkdownRendererState> | null = null
+let markdownStylesPromise: Promise<unknown> | null = null
+
+function loadMarkdownStyles() {
+  markdownStylesPromise ??= Promise.all([
+    import('streamdown/styles.css'),
+    import('katex/dist/katex.min.css'),
+  ]).catch((error) => {
+    console.warn('Markdown styles failed to load:', error)
+  })
+  return markdownStylesPromise
+}
 
 function loadLegacyMarkdown() {
   legacyMarkdownPromise ??= Promise.all([import('react-markdown'), import('remark-gfm')])
@@ -124,10 +135,11 @@ function loadMarkdownRenderer() {
   if (!canLoadStreamdown) return loadLegacyMarkdown()
 
   streamdownPromise ??= Promise.all([
+    loadMarkdownStyles(),
     import('streamdown'),
     import('@streamdown/math'),
   ])
-    .then(([streamdown, math]) => ({
+    .then(([, streamdown, math]) => ({
       type: 'modern' as const,
       Component: streamdown.Streamdown,
       math: {

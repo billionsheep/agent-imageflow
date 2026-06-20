@@ -183,7 +183,7 @@ func (f *fakeService) GetTask(ctx context.Context, taskID string) (domain.TaskRe
 	}, nil
 }
 
-func (f *fakeService) ListAssets(ctx context.Context, projectID, campaignID string) ([]domain.AssetResponse, error) {
+func (f *fakeService) ListAssets(ctx context.Context, query domain.AssetListQuery) ([]domain.AssetResponse, error) {
 	return []domain.AssetResponse{fakeAsset(domain.AssetDraft)}, nil
 }
 

@@ -131,10 +131,14 @@ import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversati
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
+import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, resetStartupGuardsForTests, reuseConfig, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
+
+beforeEach(() => {
+  resetStartupGuardsForTests()
+})
 
 describe('error toast messages', () => {
   it('drops long error detail after the failure title', () => {
@@ -569,6 +573,18 @@ describe('agent conversation persistence', () => {
     await clearAgentConversations()
   })
 
+  it('deduplicates concurrent initStore calls', async () => {
+    const storedConversation = agentConversation({ id: 'stored-conversation', createdAt: 1, updatedAt: 1 })
+    await putAgentConversation(storedConversation)
+
+    const firstInit = initStore()
+    const secondInit = initStore()
+
+    expect(secondInit).toBe(firstInit)
+    await firstInit
+    expect(useStore.getState().agentConversations.map((conversation) => conversation.id)).toEqual(['stored-conversation'])
+  })
+
   it('omits agent conversations from localStorage state', () => {
     const conversation = agentConversation({
       rounds: [{
@@ -756,6 +772,7 @@ describe('fal task recovery', () => {
       falRequestId: 'fal-request-id',
       falEndpoint: 'fal-endpoint',
       falRecoverable: true,
+      createdAt: Date.now(),
       finishedAt: null,
       elapsed: null,
     })
@@ -784,6 +801,38 @@ describe('fal task recovery', () => {
     const originalImage = await getImage(recovered!.transparentOriginalImages![0])
     expect(outputImage?.dataUrl).toBe('transparent:data:image/png;base64,fal-recovered')
     expect(originalImage?.dataUrl).toBe('data:image/png;base64,fal-recovered')
+  })
+
+  it('caps automatic recovery work during startup', async () => {
+    for (let index = 0; index < 7; index += 1) {
+      await putDbTask(task({
+        id: `fal-recoverable-${index}`,
+        apiProvider: 'fal',
+        apiProfileId: 'fal-profile',
+        apiProfileName: 'fal',
+        status: 'error',
+        error: '连接已断开，等待自动恢复',
+        falRequestId: `fal-request-${index}`,
+        falEndpoint: 'fal-endpoint',
+        falRecoverable: true,
+        createdAt: Date.now(),
+        finishedAt: null,
+        elapsed: null,
+      }))
+    }
+    vi.mocked(getFalQueuedImageResult).mockResolvedValue({
+      images: ['data:image/png;base64,fal-recovered'],
+      actualParams: {},
+      actualParamsList: [{}],
+      revisedPrompts: [],
+    })
+
+    await initStore()
+    for (let i = 0; i < 8; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(getFalQueuedImageResult).toHaveBeenCalledTimes(5)
   })
 })
 

@@ -13,6 +13,11 @@ npm --prefix web run dev -- --host 0.0.0.0 --port 8080
 npm --prefix web test -- --run
 npm --prefix web run build
 
+# Web production preview（资源占用/日常试用优先用这个判断，避免 Vite dev/HMR 放大）
+npm --prefix web run build
+npm --prefix web run preview -- --host 127.0.0.1 --port 4173
+curl -sf http://127.0.0.1:4173/
+
 # 服务端开发 / smoke
 docker compose config
 docker compose build
@@ -25,6 +30,8 @@ docker compose exec api /app/vag project access set --enabled=true --key <api_ke
 docker compose exec api /app/vag project access add-key --name rollout --key <api_key>
 docker compose exec api /app/vag project access update-key --id <api_key_id> --enabled=false
 docker compose exec api /app/vag project access delete-key --id <api_key_id>
+docker compose exec api /app/vag project provider get
+docker compose exec api /app/vag project provider set --enabled=true --provider mock --model mock-image
 docker compose exec api /app/vag repair scan
 docker compose exec api /app/vag repair verify-asset <asset_id>
 docker compose exec api /app/vag audit list --limit 20
@@ -32,6 +39,7 @@ docker compose exec api /app/vag storage cleanup-preview --workspace ws_default 
 docker compose exec api /app/vag storage cleanup-execute --workspace ws_default --project prj_xhs_anime --campaign cmp_7day_cover --execute --dry-run-token <token>
 curl -H 'X-API-Key: <project_key>' http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-governance
 curl -H 'X-API-Key: <project_key>' http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-integrity
+curl -H 'X-API-Key: <project_key>' 'http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets?limit=24&source=mcp&session_id=<session_id>'
 
 # 基础限流配置（默认关闭）
 RATE_LIMIT_WINDOW_SECONDS=60
@@ -250,6 +258,30 @@ curl http://localhost:8081/api/assets/<asset_id>
 ```
 
 MCP 和 Web managed mode 优先使用 `select_image_asset` / `select` 命名；当前 Runbook 保留 `approve` 是为了匹配已实现 CLI。
+
+## Web Performance / Startup
+
+若浏览器提示 `High memory usage`，先区分开发模式和生产模式：
+
+```bash
+npm --prefix web test -- --run
+npm --prefix web run build
+npm --prefix web run preview -- --host 127.0.0.1 --port 4173
+curl -sf http://127.0.0.1:4173/
+```
+
+当前 P1 Web Performance / Startup 的验证结论：
+
+- Vite dev server 进程约 132-136 MB RSS，production preview 进程约 103 MB RSS；Vite dev/HMR 会放大资源占用，但不是浏览器约 1.1GB 提示的唯一来源。
+- Web 启动已避免 React StrictMode 或重复 mount 下重复执行 `initStore` 重活。
+- 本地 thumbnail backfill 有后台队列和每次启动处理上限；不会在启动时无限补建历史缩略图。
+- 本地 TaskGrid 首屏只挂载有限任务卡，并通过加载更多继续查看历史记录。
+- 服务端资产库默认分页/lazy loading，并最多保留 120 个已渲染资产节点。
+- fal/custom 历史恢复轮询限制为最多 5 个、6 小时内任务。
+- Scope 控制台统计仅在打开时加载，带 60s 缓存、扫描上限和关闭后的结果写回保护。
+- Agent workspace、Settings、Scope、Detail、Lightbox、Mask editor、Markdown/KaTeX 样式按需加载。
+
+诊断时不要为了复现性能差异直接清空 IndexedDB、删除资产或执行 storage cleanup。若 production preview 仍复现高内存，再单独做浏览器 heap snapshot、虚拟列表或历史数据规模专项。
 
 ## HTTP / API 审计日志
 
@@ -636,6 +668,141 @@ docker compose exec postgres psql -U agent -d agent_imageflow -P pager=off \
   -c \"select attempt_no,status,error_code,retry_after from task_attempt where task_id='${TASK_ID}' order by attempt_no;\"
 ```
 
+## Worker concurrency / provider reliability / benchmark
+
+当前 Docker Compose 默认使用 6 个 worker goroutine，但真实 provider 默认 cap 更保守：
+
+```bash
+WORKER_CONCURRENCY=6
+OPENAI_COMPATIBLE_MAX_CONCURRENCY=3
+FAL_MAX_CONCURRENCY=3
+PROVIDER_TIMEOUT_SECONDS=300
+OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECONDS=30
+OPENAI_COMPATIBLE_RESPONSE_HEADER_TIMEOUT_SECONDS=300
+OPENAI_COMPATIBLE_TOTAL_TIMEOUT_SECONDS=300
+```
+
+含义：
+
+- `WORKER_CONCURRENCY` 控制 Worker 同时消费 Redis 任务的 goroutine 数。
+- `OPENAI_COMPATIBLE_MAX_CONCURRENCY` 控制同时进入 `provider=openai-compatible` 的请求数；设为 `0` 可禁用该 cap。
+- `FAL_MAX_CONCURRENCY` 控制同时进入 `provider=fal` 的请求数；设为 `0` 可禁用该 cap。
+- `PROVIDER_TIMEOUT_SECONDS` 仍作为旧配置兼容项，并作为 openai-compatible header/total timeout 的默认回退。
+- `OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECONDS` 区分连接阶段；`OPENAI_COMPATIBLE_RESPONSE_HEADER_TIMEOUT_SECONDS` 区分等待 headers/首字节阶段；`OPENAI_COMPATIBLE_TOTAL_TIMEOUT_SECONDS` 控制整体 provider 调用上限。
+- 当前平台代码层面没有固定只能 1 的硬上限；实际可用并发需要结合 provider 429/timeout、PostgreSQL、Redis 和本地 storage 压测确认。
+
+切换本地 worker 并发：
+
+```bash
+WORKER_CONCURRENCY=6 OPENAI_COMPATIBLE_MAX_CONCURRENCY=2 docker compose up -d --build worker
+docker compose logs --tail=20 worker
+```
+
+查看 task attempts：
+
+```bash
+docker compose exec api /app/vag task attempts "${TASK_ID}"
+curl -s "http://localhost:8081/api/tasks/${TASK_ID}/attempts" | jq
+```
+
+attempts 中的诊断字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `queue_wait_ms` | task 创建到当前 attempt 开始之间的等待时间 |
+| `provider_first_byte_ms` | openai-compatible 从发起请求到首字节/headers 的耗时 |
+| `provider_total_ms` | provider adapter 调用总耗时；拆分请求时会累计 |
+| `response_download_ms` | 读取 provider JSON body 或结果下载阶段耗时 |
+| `store_ms` | 资产文件、metadata 和缩略图写入的总耗时 |
+| `thumbnail_ms` | 缩略图生成耗时 |
+| `retry_count` | 当前 attempt 前已经重试过的次数 |
+| `error_stage` | `connect`、`provider_first_byte`、`provider_total`、`response_download`、`response_parse`、`store` 等诊断阶段 |
+| `response_bytes` | provider 响应体大小，主要用于排查异常大响应 |
+
+mock benchmark 不产生 provider 费用：
+
+```bash
+docker compose exec api /app/vag benchmark image-generation \
+  --provider mock \
+  --tasks 32 \
+  --requested-count 1 \
+  --mock-delay-ms 250 \
+  --poll-interval 250ms \
+  --timeout 120s \
+  --concurrency-label worker-4-delay250
+```
+
+benchmark 会写入 `metadata_json.session_id` 和 `metadata_json.batch_id`，值等于 `--run-id`。运行后可以按批次查看进度：
+
+```bash
+docker compose exec api /app/vag batch progress \
+  --project prj_xhs_anime \
+  --campaign cmp_7day_cover \
+  --session-id bench_p1_provider_rel_batch \
+  --batch-id bench_p1_provider_rel_batch \
+  --limit 100
+```
+
+真实 provider benchmark 可能产生费用，默认会被 CLI 拒绝。确认小样本后再显式开启：
+
+```bash
+docker compose exec api /app/vag benchmark image-generation \
+  --provider openai-compatible \
+  --tasks 8 \
+  --requested-count 1 \
+  --poll-interval 2s \
+  --timeout 30m \
+  --concurrency-label worker-2-provider-cap-2 \
+  --allow-paid-provider
+```
+
+推荐压测顺序：
+
+| 阶段 | Worker | Provider cap | 任务数 | 目标 |
+| --- | ---: | ---: | ---: | --- |
+| mock 基线 | 1 | n/a | 32 | 验证平台串行 queue wait |
+| mock 并发 | 4 | n/a | 32 | 验证平台自身吞吐 |
+| real 小样本 | 1 | 1 | 8 | 真实 provider 单请求耗时基线 |
+| real 小样本 | 2 | 2 | 8 | 推荐起步并发 |
+| real 小样本 | 3 | 3 | 8 | 当前默认建议档，观察 timeout/429 |
+| real 小样本 | 4 | 4 | 8 | 仅在 cap=3 稳定时尝试 |
+
+推荐判定：
+
+- 成功率 `>= 90%`。
+- timeout `<= 10%`。
+- 无持续 `429`。
+- 若 timeout 或 429 超过 `25%`，停止更高并发档。
+
+本地 mock 结果（2026-06-19）：
+
+| 场景 | 任务 | requested_count | mock_delay_ms | wall-clock | P95 queue wait | 结果 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| worker=1 | 32 | 1 | 250 | 12.427s | 10.987s | 32/32 completed |
+| worker=4 | 32 | 1 | 250 | 2.979s | 2.464s | 32/32 completed |
+| worker=4 | 8 | 4 | 250 | 1.318s | 0.527s | 8/8 completed |
+| worker=6 | 32 | 1 | 1000 | 8.204s | 4.534s | 32/32 completed |
+| worker=6 | 16 | 4 | 1000 | 4.112s | 2.564s | 16/16 completed |
+| worker=6 | 32 | 4 | 2000 | 14.239s | 9.138s | 32/32 completed |
+| P1 provider reliability | 3 | 2 | 50 | 0.221s | 0.007s | 3/3 completed，6 assets，0 retry/timeout |
+
+真实 provider 小样本结果（2026-06-19，prompt 为萌宠，临时 `WORKER_MAX_RETRIES=0` 防止失败自动重复调用）：
+
+| 场景 | 任务 | requested_count | Provider cap | wall-clock | P50 task | P95 task | 成功率 | timeout |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| openai-compatible worker=6 | 6 | 1 | 6 | 120.628s | 56.250s | 120.024s | 4/6 | 2/6 |
+
+资源峰值采样：
+
+| 容器 | CPU 峰值 | 内存峰值 |
+| --- | ---: | ---: |
+| api | 0.92% | 26.48MiB |
+| worker | 1.08% | 50.60MiB |
+| postgres | 2.17% | 99.86MiB |
+| redis | 4.05% | 13.36MiB |
+
+结论：平台自身在 mock worker=6 下吞吐正常，真实生图 worker=6/provider cap=6 时本机 CPU/内存仍很低；瓶颈在 provider 侧，当前 provider 6 并发出现 33.3% timeout，不满足成功率 `>= 90%`、timeout `<= 10%` 的推荐标准。因此运行默认已调整为 worker=6、provider cap=3、provider total timeout=300s。真实 provider 后续建议按 cap `2 -> 3 -> 4` 小样本确认稳定档，不要直接把 worker 并发等同于 provider 并发。
+
 ## Real thumbnail output
 
 服务端当前会基于原图统一生成缩略图，而不是直接保存 provider 返回的 thumbnail bytes。
@@ -805,6 +972,27 @@ BEST_OF_HTTP_SCORER_TIMEOUT_SECONDS=30
 
 其中 `candidates` 默认携带服务端缩略图生成的 `data:` URL；若缩略图缺失，则回退发送原图。响应可以直接返回 `selected_asset_id`，也可以返回带分数的 `scores[]`。仓库示例任务见 `/app/examples/tasks/sample-best-of-http-judge-task.json`。
 
+## Asset list query
+
+服务端资产库接口保持返回 asset array，旧客户端可以继续读取；P1 起支持筛选和分页：
+
+```bash
+curl -H 'X-API-Key: <project_key>' \
+  'http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets?limit=24&status=selected&source=mcp&session_id=session_001&batch_id=batch_001&keyword=cover'
+```
+
+支持参数：
+
+- `limit`: 默认 `50`，最大 `100`。
+- `offset`: 用于加载更多。
+- `status`: `generated` / `selected` 会兼容映射到当前内部 `draft` / `approved`，也接受 `rejected` / `published` 等内部状态。
+- `provider` / `model`: 按当前 asset version 过滤。
+- `source` / `session_id` / `batch_id`: 按 `generation_task.structured_input_json.metadata_json` 过滤。
+- `keyword`: 在 asset id、task id、asset name、prompt 和 task title 中搜索。
+- `created_from` / `created_to`: RFC3339 时间。
+
+Web 服务端资产库第一屏显式传 `limit=24`，图片使用 lazy loading，并通过“加载更多”追加读取。select/reject 后只更新当前 asset，不需要全量重拉。
+
 ## Quality profile
 
 项目级质量配置保存在 `project.metadata_json.quality_profile`，当前通过 REST 读取和更新：
@@ -838,6 +1026,123 @@ curl -X POST http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_an
 
 服务端会先渲染 `prompt_template`，再把有效配置快照写入 `structured_input_json.metadata_json.quality_profile_snapshot`。
 
+## Provider profile
+
+项目级 provider profile 保存在 `project.metadata_json.provider_profile`，第一版只保存非敏感默认值：
+
+```json
+{
+  "enabled": true,
+  "provider": "openai-compatible",
+  "model": "gpt-image-2",
+  "base_url": "https://api.openai.com/v1",
+  "generation_config": {
+    "quality": "high"
+  },
+  "use_project_quality_profile": true,
+  "max_n": 4,
+  "supports_url_result": true,
+  "preferred_response_format": "url",
+  "max_concurrency": 3,
+  "timeout_seconds": 300
+}
+```
+
+读取和更新：
+
+```bash
+curl -H 'X-API-Key: <project_key>' \
+  http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/provider-profile
+
+curl -X POST http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/provider-profile \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: <project_key>' \
+  -d '{"enabled":true,"provider":"mock","model":"mock-image","generation_config":{"quality":"high"},"use_project_quality_profile":true,"max_n":4,"preferred_response_format":"url"}'
+
+docker compose exec api /app/vag project provider set \
+  --provider mock \
+  --model mock-image \
+  --generation-config '{"quality":"high"}' \
+  --max-n 4 \
+  --preferred-response-format url
+```
+
+边界：
+
+- 不保存或回显真实 provider secret。
+- 未配置 profile 时继续使用服务端环境变量中的默认 provider。
+- 创建任务没有显式 `provider` 时，服务端会优先使用启用的项目 provider profile。
+- `provider_profile.model` 当前可覆盖 `openai-compatible` 的 model 和 `fal` 的 endpoint id；`base_url` 第一版只作为非敏感项目默认配置保存，真实 endpoint/key 存储策略需要单独确认。
+- `max_n` 表示单次 provider 请求建议承载的同 prompt 变体数，默认 4，服务端上限 10；`requested_count` 超过 `max_n` 时会拆成多次 provider 请求并保留同一个 task。
+- `supports_url_result`、`preferred_response_format`、`max_concurrency`、`timeout_seconds` 是项目经验配置，不代表 provider 一定支持；openai-compatible adapter 默认 URL 优先，会省略 `response_format`，仅在显式配置 `preferred_response_format=b64_json` 时请求 Base64 响应。
+
+## Codex batch asset production examples
+
+Agent ImageFlow 不读取故事脚本、不拆分内容、不发布小红书，也不维护内容日历。Codex、MCP client、REST 脚本或其他外部编排工具应先把脚本拆成图片任务，再把标准 `metadata_json` 传进来。
+
+萌宠账号示例：
+
+```bash
+docker compose exec api /app/vag task create \
+  --project prj_pet_account \
+  --campaign cmp_pet_story_batch_001 \
+  --file /app/examples/tasks/sample-codex-pet-story-task.json
+```
+
+嵌入式文章插图示例：
+
+```bash
+docker compose exec api /app/vag task create \
+  --project prj_embedded_diagrams \
+  --campaign cmp_rtos_sensor_pipeline \
+  --file /app/examples/tasks/sample-codex-embedded-architecture-task.json
+```
+
+MCP `create_image_task` 的核心参数形状：
+
+```json
+{
+  "workspace_id": "ws_default",
+  "project_id": "prj_pet_account",
+  "campaign_id": "cmp_pet_story_batch_001",
+  "prompt": "一只圆眼睛的小橘猫在窗边看雨，画面温暖、干净、适合小红书萌宠故事封面。",
+  "provider": "mock",
+  "requested_count": 2,
+  "selection_mode": "auto",
+  "metadata_json": {
+    "source": "codex",
+    "source_agent": "codex-cli",
+    "source_thread_id": "thread_pet_story_demo",
+    "session_id": "pet_story_session_2026_06_19",
+    "run_id": "run_scene_batch_001",
+    "batch_id": "pet_story_batch_001",
+    "story_id": "rainy_window_cat",
+    "scene_id": "scene_001",
+    "target_path": "assets/pet-story/rainy-window-cat/scene-001.png"
+  }
+}
+```
+
+生成后可按批次查询：
+
+```bash
+curl -H 'X-API-Key: <project_key>' \
+  'http://localhost:8081/api/projects/prj_pet_account/campaigns/cmp_pet_story_batch_001/assets?limit=24&source=codex&session_id=pet_story_session_2026_06_19&batch_id=pet_story_batch_001'
+```
+
+批量执行中可先看进度，不必等所有任务完成：
+
+```bash
+curl -H 'X-API-Key: <project_key>' \
+  'http://localhost:8081/api/projects/prj_pet_account/campaigns/cmp_pet_story_batch_001/batch-progress?session_id=pet_story_session_2026_06_19&batch_id=pet_story_batch_001&limit=100'
+
+docker compose exec api /app/vag batch progress \
+  --project prj_pet_account \
+  --campaign cmp_pet_story_batch_001 \
+  --session-id pet_story_session_2026_06_19 \
+  --batch-id pet_story_batch_001
+```
+
 ## OpenAI-compatible provider
 
 服务端 Worker 当前支持第一个真实 provider adapter：
@@ -852,13 +1157,19 @@ provider=openai-compatible
 OPENAI_COMPATIBLE_BASE_URL=https://api.openai.com/v1
 OPENAI_COMPATIBLE_API_KEY=<secret>
 OPENAI_COMPATIBLE_MODEL=gpt-image-2
-PROVIDER_TIMEOUT_SECONDS=120
+OPENAI_COMPATIBLE_MAX_CONCURRENCY=3
+PROVIDER_TIMEOUT_SECONDS=300
+OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECONDS=30
+OPENAI_COMPATIBLE_RESPONSE_HEADER_TIMEOUT_SECONDS=300
+OPENAI_COMPATIBLE_TOTAL_TIMEOUT_SECONDS=300
 ```
 
 说明：
 
 - 默认不启用真实 provider；未配置 base URL 或 API key 时，`provider=openai-compatible` 会在创建任务时返回明确错误。
-- adapter 调用 `{OPENAI_COMPATIBLE_BASE_URL}/images/generations`，解析 `data[].b64_json` 或 `data[].url`。
+- adapter 调用 `{OPENAI_COMPATIBLE_BASE_URL}/images/generations`，默认省略 `response_format` 并解析 `data[].url` 或 `data[].b64_json`；显式配置 `preferred_response_format=b64_json` 时会请求 Base64 响应。
+- 当任务存在已解析 reference/mask 输入时，adapter 调用 `{OPENAI_COMPATIBLE_BASE_URL}/images/edits`。
+- adapter 会从 `generation_config` 白名单透传 `quality`、`moderation`、`output_compression`；当前不透传 `stream` / `partial_images`。
 - 返回图片会在服务端规范化为 PNG，再进入现有 asset processor / storage / delivery。
 - 自动化验证使用本地 HTTP mock，不会触发真实外部 API。真实 smoke 需要用户自行配置密钥，并自行承担 provider 成本。
 
@@ -878,7 +1189,8 @@ FAL_REST_BASE_URL=https://rest.fal.ai
 FAL_API_KEY=<secret>
 FAL_MODEL=openai/gpt-image-2
 FAL_POLL_INTERVAL_MS=1000
-PROVIDER_TIMEOUT_SECONDS=120
+FAL_MAX_CONCURRENCY=3
+PROVIDER_TIMEOUT_SECONDS=300
 ```
 
 说明：

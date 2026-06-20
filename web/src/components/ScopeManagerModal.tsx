@@ -128,6 +128,11 @@ const EMPTY_DASHBOARD_STATS: ScopeDashboardStats = {
   campaigns: {},
 }
 
+const DASHBOARD_STATS_CACHE_MS = 60_000
+const DASHBOARD_MAX_WORKSPACES = 12
+const DASHBOARD_MAX_PROJECTS_PER_WORKSPACE = 20
+const DASHBOARD_MAX_CAMPAIGNS_PER_PROJECT = 30
+
 function cloneStats(stats: ScopeStats): ScopeStats {
   return { ...stats }
 }
@@ -426,6 +431,7 @@ export default function ScopeManagerModal() {
   const setConfirmDialog = useStore((state) => state.setConfirmDialog)
   const modalRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef(0)
+  const dashboardCacheRef = useRef<{ key: string; stats: ScopeDashboardStats; error: string | null; createdAt: number } | null>(null)
 
   const [loading, setLoading] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -467,6 +473,24 @@ export default function ScopeManagerModal() {
   const selectedCampaign = campaigns.find((campaign) => campaign.campaign_id === selectedCampaignId) ?? null
 
   const loadDashboardStats = useCallback(async (workspaceItems: AgentImageflowWorkspace[], requestId: number) => {
+    const cacheKey = [
+      baseUrl,
+      normalizedSettings.imageflowApiKey ? 'api-key:1' : 'api-key:0',
+      normalizedSettings.imageflowBasicUsername ? 'basic-user:1' : 'basic-user:0',
+      normalizedSettings.imageflowBasicPassword ? 'basic-pass:1' : 'basic-pass:0',
+      normalizedSettings.imageflowWorkspaceId,
+      normalizedSettings.imageflowProjectId,
+      normalizedSettings.imageflowCampaignId,
+      workspaceItems.map((workspace) => `${workspace.workspace_id}:${workspace.archived ? '1' : '0'}`).join('|'),
+    ].join('\n')
+    const cached = dashboardCacheRef.current
+    if (cached?.key === cacheKey && Date.now() - cached.createdAt < DASHBOARD_STATS_CACHE_MS) {
+      setDashboardStats(cached.stats)
+      setDashboardError(cached.error)
+      setDashboardLoading(false)
+      return
+    }
+
     setDashboardLoading(true)
     setDashboardError(null)
     try {
@@ -475,9 +499,9 @@ export default function ScopeManagerModal() {
         projects: {},
         campaigns: {},
       }
-      let partialStatsFailed = false
+      let partialStatsFailed = workspaceItems.length > DASHBOARD_MAX_WORKSPACES
 
-      for (const workspace of workspaceItems) {
+      for (const workspace of workspaceItems.slice(0, DASHBOARD_MAX_WORKSPACES)) {
         const workspaceStats = cloneStats(EMPTY_SCOPE_STATS)
         let projectResponse: Awaited<ReturnType<typeof listAgentImageflowProjects>>
         try {
@@ -490,7 +514,8 @@ export default function ScopeManagerModal() {
         if (requestRef.current !== requestId) return
 
         workspaceStats.projectCount = projectResponse.projects.length
-        for (const project of projectResponse.projects) {
+        if (projectResponse.projects.length > DASHBOARD_MAX_PROJECTS_PER_WORKSPACE) partialStatsFailed = true
+        for (const project of projectResponse.projects.slice(0, DASHBOARD_MAX_PROJECTS_PER_WORKSPACE)) {
           const projectStats = cloneStats(EMPTY_SCOPE_STATS)
           let campaignResponse: Awaited<ReturnType<typeof listAgentImageflowCampaigns>>
           try {
@@ -507,8 +532,9 @@ export default function ScopeManagerModal() {
 
           projectStats.campaignCount = campaignResponse.campaigns.length
           workspaceStats.campaignCount += campaignResponse.campaigns.length
+          if (campaignResponse.campaigns.length > DASHBOARD_MAX_CAMPAIGNS_PER_PROJECT) partialStatsFailed = true
 
-          for (const campaign of campaignResponse.campaigns) {
+          for (const campaign of campaignResponse.campaigns.slice(0, DASHBOARD_MAX_CAMPAIGNS_PER_PROJECT)) {
             const campaignStats = cloneStats(EMPTY_SCOPE_STATS)
             let assets: AgentImageflowAssetResponse[] = []
             try {
@@ -560,7 +586,14 @@ export default function ScopeManagerModal() {
 
       if (requestRef.current !== requestId) return
       setDashboardStats(nextStats)
-      setDashboardError(partialStatsFailed ? '部分 project/campaign 需要 API key，已跳过对应统计。' : null)
+      const nextError = partialStatsFailed ? '部分 project/campaign 需要 API key，已跳过对应统计。' : null
+      setDashboardError(nextError)
+      dashboardCacheRef.current = {
+        key: cacheKey,
+        stats: nextStats,
+        error: nextError,
+        createdAt: Date.now(),
+      }
     } catch (nextError) {
       if (requestRef.current !== requestId) return
       setDashboardError(nextError instanceof Error ? nextError.message : String(nextError))
@@ -570,7 +603,22 @@ export default function ScopeManagerModal() {
         setDashboardLoading(false)
       }
     }
-  }, [auth, baseUrl])
+  }, [
+    auth,
+    baseUrl,
+    normalizedSettings.imageflowApiKey,
+    normalizedSettings.imageflowBasicPassword,
+    normalizedSettings.imageflowBasicUsername,
+    normalizedSettings.imageflowCampaignId,
+    normalizedSettings.imageflowProjectId,
+    normalizedSettings.imageflowWorkspaceId,
+  ])
+
+  useEffect(() => {
+    if (open) return
+    requestRef.current += 1
+    setDashboardLoading(false)
+  }, [open])
 
   useEffect(() => {
     setWorkspaceNameDraft(selectedWorkspace?.name ?? '')
@@ -949,7 +997,10 @@ export default function ScopeManagerModal() {
               </button>
               <button
                 type="button"
-                onClick={() => void reloadHierarchy(selectedWorkspaceId, selectedProjectId, selectedCampaignId)}
+                onClick={() => {
+                  dashboardCacheRef.current = null
+                  void reloadHierarchy(selectedWorkspaceId, selectedProjectId, selectedCampaignId)
+                }}
                 disabled={loading}
                 className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200/70 bg-white px-3 text-xs font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-400"
               >

@@ -550,6 +550,22 @@ func (s *PostgresStore) GetProjectAccessConfigByProjectID(ctx context.Context, p
 	return accessConfigFromProjectMetadata(metadataRaw)
 }
 
+func (s *PostgresStore) GetProjectProviderProfile(ctx context.Context, workspaceID, projectID string) (domain.ProjectProviderProfile, error) {
+	var metadataRaw []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT metadata_json
+		FROM project
+		WHERE workspace_id = $1 AND id = $2
+	`, workspaceID, projectID).Scan(&metadataRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ProjectProviderProfile{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.ProjectProviderProfile{}, err
+	}
+	return providerProfileFromProjectMetadata(metadataRaw)
+}
+
 func (s *PostgresStore) UpdateProjectQualityProfile(ctx context.Context, workspaceID, projectID string, profile domain.QualityProfile) (domain.QualityProfile, error) {
 	profileRaw, err := json.Marshal(profile)
 	if err != nil {
@@ -594,6 +610,28 @@ func (s *PostgresStore) UpdateProjectAccessConfig(ctx context.Context, workspace
 		return domain.ProjectAccessConfig{}, err
 	}
 	return accessConfigFromProjectMetadata(metadataRaw)
+}
+
+func (s *PostgresStore) UpdateProjectProviderProfile(ctx context.Context, workspaceID, projectID string, profile domain.ProjectProviderProfile) (domain.ProjectProviderProfile, error) {
+	profileRaw, err := json.Marshal(profile)
+	if err != nil {
+		return domain.ProjectProviderProfile{}, err
+	}
+	var metadataRaw []byte
+	err = s.db.QueryRowContext(ctx, `
+		UPDATE project
+		SET metadata_json = jsonb_set(metadata_json, '{provider_profile}', $3::jsonb, true),
+			updated_at = now()
+		WHERE workspace_id = $1 AND id = $2
+		RETURNING metadata_json
+	`, workspaceID, projectID, profileRaw).Scan(&metadataRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ProjectProviderProfile{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.ProjectProviderProfile{}, err
+	}
+	return providerProfileFromProjectMetadata(metadataRaw)
 }
 
 func (s *PostgresStore) FindTaskByIdempotency(ctx context.Context, scope domain.Scope, key string) (domain.Task, string, bool, error) {
@@ -672,16 +710,74 @@ func (s *PostgresStore) ListAssetsByTask(ctx context.Context, taskID string) ([]
 	return scanAssetRows(rows)
 }
 
-func (s *PostgresStore) ListAssetsByCampaign(ctx context.Context, projectID, campaignID string) ([]domain.AssetWithVersion, error) {
-	rows, err := s.db.QueryContext(ctx, assetWithVersionSelect()+`
-		WHERE a.project_id = $1 AND a.campaign_id = $2
-		ORDER BY a.created_at DESC
-	`, projectID, campaignID)
+func (s *PostgresStore) ListAssetsByCampaign(ctx context.Context, query domain.AssetListQuery) ([]domain.AssetWithVersion, error) {
+	sqlText, args := buildListAssetsByCampaignQuery(query)
+	rows, err := s.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanAssetRows(rows)
+}
+
+func buildListAssetsByCampaignQuery(query domain.AssetListQuery) (string, []any) {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = domain.DefaultAssetListLimit
+	}
+	if limit > domain.MaxAssetListLimit {
+		limit = domain.MaxAssetListLimit
+	}
+	offset := query.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := []any{query.ProjectID, query.CampaignID}
+	conditions := []string{"a.project_id = $1", "a.campaign_id = $2"}
+	addStringCondition := func(sqlExpr string, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(sqlExpr, len(args)))
+	}
+	addStringCondition("a.status = $%d", query.Status)
+	addStringCondition("v.provider = $%d", query.Provider)
+	addStringCondition("v.model = $%d", query.Model)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'source' = $%d", query.Source)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'session_id' = $%d", query.SessionID)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'batch_id' = $%d", query.BatchID)
+	if keyword := strings.TrimSpace(query.Keyword); keyword != "" {
+		args = append(args, "%"+strings.ToLower(keyword)+"%")
+		placeholder := len(args)
+		conditions = append(conditions, fmt.Sprintf(`(
+			LOWER(a.id) LIKE $%[1]d OR
+			LOWER(a.task_id) LIKE $%[1]d OR
+			LOWER(a.name) LIKE $%[1]d OR
+			LOWER(v.prompt) LIKE $%[1]d OR
+			LOWER(t.title) LIKE $%[1]d
+		)`, placeholder))
+	}
+	if query.CreatedFrom != nil {
+		args = append(args, *query.CreatedFrom)
+		conditions = append(conditions, fmt.Sprintf("a.created_at >= $%d", len(args)))
+	}
+	if query.CreatedTo != nil {
+		args = append(args, *query.CreatedTo)
+		conditions = append(conditions, fmt.Sprintf("a.created_at <= $%d", len(args)))
+	}
+	args = append(args, limit)
+	limitPlaceholder := len(args)
+	args = append(args, offset)
+	offsetPlaceholder := len(args)
+
+	return assetWithVersionSelect() + fmt.Sprintf(`
+		WHERE %s
+		ORDER BY a.created_at DESC, a.id DESC
+		LIMIT $%d OFFSET $%d
+	`, strings.Join(conditions, " AND "), limitPlaceholder, offsetPlaceholder), args
 }
 
 func (s *PostgresStore) GetAssetWithVersion(ctx context.Context, assetID string) (domain.AssetWithVersion, error) {
@@ -719,6 +815,239 @@ func (s *PostgresStore) CreateAttempt(ctx context.Context, task domain.Task) (st
 		VALUES ($1, $2, $3, $4, $5)
 	`, attemptID, task.ID, attemptNo, domain.AttemptRunning, task.Provider)
 	return attemptID, attemptNo, err
+}
+
+func (s *PostgresStore) ListTaskAttempts(ctx context.Context, taskID string) ([]domain.TaskAttempt, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, task_id, attempt_no, status, provider, provider_request_id,
+			started_at, finished_at, latency_ms, queue_wait_ms, provider_first_byte_ms,
+			provider_total_ms, response_download_ms, store_ms, thumbnail_ms, retry_count,
+			error_stage, response_bytes, retry_after, error_code, error_message
+		FROM task_attempt
+		WHERE task_id = $1
+		ORDER BY attempt_no ASC
+	`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []domain.TaskAttempt{}
+	for rows.Next() {
+		var item domain.TaskAttempt
+		var providerRequestID sql.NullString
+		var finishedAt sql.NullTime
+		var latencyMs sql.NullInt64
+		var queueWaitMs sql.NullInt64
+		var providerFirstByteMs sql.NullInt64
+		var providerTotalMs sql.NullInt64
+		var responseDownloadMs sql.NullInt64
+		var storeMs sql.NullInt64
+		var thumbnailMs sql.NullInt64
+		var retryCount sql.NullInt64
+		var errorStage sql.NullString
+		var responseBytes sql.NullInt64
+		var retryAfter sql.NullTime
+		var errorCode sql.NullString
+		var errorMessage sql.NullString
+		if err := rows.Scan(
+			&item.ID,
+			&item.TaskID,
+			&item.AttemptNo,
+			&item.Status,
+			&item.Provider,
+			&providerRequestID,
+			&item.StartedAt,
+			&finishedAt,
+			&latencyMs,
+			&queueWaitMs,
+			&providerFirstByteMs,
+			&providerTotalMs,
+			&responseDownloadMs,
+			&storeMs,
+			&thumbnailMs,
+			&retryCount,
+			&errorStage,
+			&responseBytes,
+			&retryAfter,
+			&errorCode,
+			&errorMessage,
+		); err != nil {
+			return nil, err
+		}
+		if providerRequestID.Valid {
+			item.ProviderRequestID = providerRequestID.String
+		}
+		if finishedAt.Valid {
+			item.FinishedAt = &finishedAt.Time
+		}
+		if latencyMs.Valid {
+			value := int(latencyMs.Int64)
+			item.LatencyMs = &value
+		}
+		if queueWaitMs.Valid {
+			value := int(queueWaitMs.Int64)
+			item.QueueWaitMs = &value
+		}
+		if providerFirstByteMs.Valid {
+			value := int(providerFirstByteMs.Int64)
+			item.ProviderFirstByteMs = &value
+		}
+		if providerTotalMs.Valid {
+			value := int(providerTotalMs.Int64)
+			item.ProviderTotalMs = &value
+		}
+		if responseDownloadMs.Valid {
+			value := int(responseDownloadMs.Int64)
+			item.ResponseDownloadMs = &value
+		}
+		if storeMs.Valid {
+			value := int(storeMs.Int64)
+			item.StoreMs = &value
+		}
+		if thumbnailMs.Valid {
+			value := int(thumbnailMs.Int64)
+			item.ThumbnailMs = &value
+		}
+		if retryCount.Valid {
+			item.RetryCount = int(retryCount.Int64)
+		}
+		if errorStage.Valid {
+			item.ErrorStage = errorStage.String
+		}
+		if responseBytes.Valid {
+			item.ResponseBytes = responseBytes.Int64
+		}
+		if retryAfter.Valid {
+			item.RetryAfter = &retryAfter.Time
+		}
+		if errorCode.Valid {
+			item.ErrorCode = &errorCode.String
+		}
+		if errorMessage.Valid {
+			item.ErrorMessage = &errorMessage.String
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetBatchProgress(ctx context.Context, query domain.BatchProgressQuery) (domain.BatchProgressResponse, error) {
+	query.ProjectID = strings.TrimSpace(query.ProjectID)
+	query.CampaignID = strings.TrimSpace(query.CampaignID)
+	query.SessionID = strings.TrimSpace(query.SessionID)
+	query.BatchID = strings.TrimSpace(query.BatchID)
+	if query.Limit <= 0 {
+		query.Limit = domain.DefaultBatchProgressLimit
+	}
+	if query.Limit > domain.MaxBatchProgressLimit {
+		query.Limit = domain.MaxBatchProgressLimit
+	}
+	if query.ProjectID == "" || query.CampaignID == "" {
+		return domain.BatchProgressResponse{}, fmt.Errorf("project_id and campaign_id are required")
+	}
+	if query.SessionID == "" && query.BatchID == "" {
+		return domain.BatchProgressResponse{}, fmt.Errorf("session_id or batch_id is required")
+	}
+
+	args := []any{query.ProjectID, query.CampaignID}
+	conditions := []string{"gt.project_id = $1", "gt.campaign_id = $2"}
+	if query.SessionID != "" {
+		args = append(args, query.SessionID)
+		conditions = append(conditions, fmt.Sprintf("gt.structured_input_json->'metadata_json'->>'session_id' = $%d", len(args)))
+	}
+	if query.BatchID != "" {
+		args = append(args, query.BatchID)
+		conditions = append(conditions, fmt.Sprintf("gt.structured_input_json->'metadata_json'->>'batch_id' = $%d", len(args)))
+	}
+	args = append(args, query.Limit)
+	limitPlaceholder := len(args)
+
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT gt.id, gt.status, gt.created_at, gt.updated_at, gt.error_code, gt.error_message,
+			COUNT(DISTINCT a.id) AS asset_count,
+			COUNT(DISTINCT ta.id) AS attempt_count,
+			COALESCE(BOOL_OR(ta.retry_after > now()), false) AS retrying,
+			COALESCE(MAX(NULLIF(ta.error_stage, '')), '') AS error_stage
+		FROM generation_task gt
+		LEFT JOIN asset a ON a.task_id = gt.id
+		LEFT JOIN task_attempt ta ON ta.task_id = gt.id
+		WHERE %s
+		GROUP BY gt.id, gt.status, gt.created_at, gt.updated_at, gt.error_code, gt.error_message
+		ORDER BY gt.created_at DESC, gt.id DESC
+		LIMIT $%d
+	`, strings.Join(conditions, " AND "), limitPlaceholder), args...)
+	if err != nil {
+		return domain.BatchProgressResponse{}, err
+	}
+	defer rows.Close()
+
+	response := domain.BatchProgressResponse{
+		GeneratedAt: time.Now().UTC(),
+		ProjectID:   query.ProjectID,
+		CampaignID:  query.CampaignID,
+		SessionID:   query.SessionID,
+		BatchID:     query.BatchID,
+		Tasks:       []domain.BatchProgressTask{},
+	}
+	for rows.Next() {
+		var item domain.BatchProgressTask
+		var assetCount int64
+		var attemptCount int64
+		var errorStage string
+		var errorCode sql.NullString
+		var errorMessage sql.NullString
+		if err := rows.Scan(
+			&item.TaskID,
+			&item.Status,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+			&errorCode,
+			&errorMessage,
+			&assetCount,
+			&attemptCount,
+			&item.Retrying,
+			&errorStage,
+		); err != nil {
+			return domain.BatchProgressResponse{}, err
+		}
+		item.AssetCount = int(assetCount)
+		item.AttemptCount = int(attemptCount)
+		item.ErrorStage = strings.TrimSpace(errorStage)
+		if errorCode.Valid {
+			item.ErrorCode = &errorCode.String
+		}
+		if errorMessage.Valid {
+			item.ErrorMessage = &errorMessage.String
+		}
+		response.Tasks = append(response.Tasks, item)
+		addBatchProgressTaskCounts(&response.Counts, item)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.BatchProgressResponse{}, err
+	}
+	return response, nil
+}
+
+func addBatchProgressTaskCounts(counts *domain.BatchProgressCounts, item domain.BatchProgressTask) {
+	counts.TaskCount++
+	counts.AssetCount += item.AssetCount
+	counts.AttemptCount += item.AttemptCount
+	if item.Retrying {
+		counts.RetryingCount++
+	}
+	switch item.Status {
+	case domain.TaskQueued:
+		counts.QueuedCount++
+	case domain.TaskRunning:
+		counts.RunningCount++
+	case domain.TaskCompleted:
+		counts.SucceededCount++
+	case domain.TaskPartiallyCompleted:
+		counts.PartialCount++
+	case domain.TaskFailed, domain.TaskEnqueueFailed:
+		counts.FailedCount++
+	}
 }
 
 func (s *PostgresStore) UpdateTaskStatus(ctx context.Context, taskID, status string, code, message *string) error {
@@ -1075,17 +1404,30 @@ func (s *PostgresStore) DeleteCleanupAssetCandidate(ctx context.Context, scope d
 	return item, nil
 }
 
-func (s *PostgresStore) FinishAttempt(ctx context.Context, attemptID, status string, result provider.Result, started time.Time, code, message *string, retryAfter *time.Time) error {
+func (s *PostgresStore) FinishAttempt(ctx context.Context, attemptID, status string, result provider.Result, started time.Time, metrics domain.AttemptMetrics, code, message *string, retryAfter *time.Time) error {
 	latency := int(time.Since(started).Milliseconds())
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE task_attempt
 		SET status = $2, provider_request_id = $3, finished_at = now(), latency_ms = $4,
 			error_code = $5, error_message = $6, raw_response_json = $7::jsonb, cost_json = $8::jsonb,
-			retry_after = $9
+			retry_after = $9, queue_wait_ms = $10, provider_first_byte_ms = $11,
+			provider_total_ms = $12, response_download_ms = $13, store_ms = $14,
+			thumbnail_ms = $15, retry_count = $16, error_stage = $17, response_bytes = $18
 		WHERE id = $1
 	`, attemptID, status, result.ProviderRequestID, latency, code, message,
-		jsonOrEmpty(result.RawResponse), jsonOrEmpty(result.CostRaw), retryAfter)
+		jsonOrEmpty(result.RawResponse), jsonOrEmpty(result.CostRaw), retryAfter,
+		nullablePositiveInt(metrics.QueueWaitMs), nullablePositiveInt(metrics.ProviderFirstByteMs),
+		nullablePositiveInt(metrics.ProviderTotalMs), nullablePositiveInt(metrics.ResponseDownloadMs),
+		nullablePositiveInt(metrics.StoreMs), nullablePositiveInt(metrics.ThumbnailMs),
+		metrics.RetryCount, strings.TrimSpace(metrics.ErrorStage), metrics.ResponseBytes)
 	return err
+}
+
+func nullablePositiveInt(value int64) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
 }
 
 func (s *PostgresStore) InsertAssetWithVersion(ctx context.Context, task domain.Task, file provider.GeneratedFile, stored storage.StoredAssetFile) (domain.AssetWithVersion, error) {
@@ -1386,9 +1728,10 @@ func selectionModeFromStructuredInput(raw []byte) string {
 }
 
 type projectMetadata struct {
-	QualityProfile domain.QualityProfile      `json:"quality_profile"`
-	AccessConfig   domain.ProjectAccessConfig `json:"access_config"`
-	ArchivedAt     *time.Time                 `json:"archived_at,omitempty"`
+	QualityProfile  domain.QualityProfile         `json:"quality_profile"`
+	AccessConfig    domain.ProjectAccessConfig    `json:"access_config"`
+	ProviderProfile domain.ProjectProviderProfile `json:"provider_profile"`
+	ArchivedAt      *time.Time                    `json:"archived_at,omitempty"`
 }
 
 type scopeMetadata struct {
@@ -1446,6 +1789,14 @@ func accessConfigFromProjectMetadata(raw []byte) (domain.ProjectAccessConfig, er
 		return domain.ProjectAccessConfig{}, err
 	}
 	return metadata.AccessConfig.Normalize(), nil
+}
+
+func providerProfileFromProjectMetadata(raw []byte) (domain.ProjectProviderProfile, error) {
+	metadata, err := parseProjectMetadata(raw)
+	if err != nil {
+		return domain.ProjectProviderProfile{}, err
+	}
+	return metadata.ProviderProfile, nil
 }
 
 func (m projectMetadata) Archived() bool {

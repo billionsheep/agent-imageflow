@@ -131,6 +131,10 @@ func (s *Server) emitHTTPAuditEvent(r *http.Request, parts []string, started tim
 
 func enrichHTTPAuditEvent(event *domain.HTTPAuditEvent, parts []string, responseBody []byte) {
 	switch {
+	case match(parts, "api", "tasks", "*", "attempts"):
+		if event.TaskID == "" {
+			event.TaskID = parts[2]
+		}
 	case match(parts, "api", "tasks", "*"):
 		if event.TaskID == "" {
 			event.TaskID = parts[2]
@@ -222,14 +226,22 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/quality-profile", "get_quality_profile"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/quality-profile", "update_quality_profile"
+	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/provider-profile", "get_provider_profile"
+	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/provider-profile", "update_provider_profile"
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/access-config", "get_access_config"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/access-config", "update_access_config"
+	case isRead && match(parts, "api", "tasks", "*", "attempts"):
+		return "/api/tasks/{task_id}/attempts", "list_task_attempts"
 	case isRead && match(parts, "api", "tasks", "*"):
 		return "/api/tasks/{task_id}", "get_task"
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "assets"):
 		return "/api/projects/{project_id}/campaigns/{campaign_id}/assets", "list_assets"
+	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
+		return "/api/projects/{project_id}/campaigns/{campaign_id}/batch-progress", "get_batch_progress"
 	case isRead && match(parts, "api", "assets", "*"):
 		return "/api/assets/{asset_id}", "get_asset"
 	case method == http.MethodPost && match(parts, "api", "assets", "*", "approve"):

@@ -18,7 +18,7 @@ const protocolVersion = "2025-11-25"
 type Service interface {
 	CreateTask(context.Context, domain.Scope, domain.CreateTaskRequest) (domain.TaskResponse, error)
 	GetTask(context.Context, string) (domain.TaskResponse, error)
-	ListAssets(context.Context, string, string) ([]domain.AssetResponse, error)
+	ListAssets(context.Context, domain.AssetListQuery) ([]domain.AssetResponse, error)
 	GetAsset(context.Context, string) (domain.AssetResponse, error)
 	ReviewAsset(context.Context, string, string) (domain.AssetResponse, error)
 }
@@ -180,7 +180,10 @@ func (s *Server) executeTool(ctx context.Context, call toolCallParams) (any, err
 		}
 		projectID := firstNonEmpty(args.ProjectID, s.defaults.ProjectID)
 		campaignID := firstNonEmpty(args.CampaignID, s.defaults.CampaignID)
-		return s.service.ListAssets(ctx, projectID, campaignID)
+		return s.service.ListAssets(ctx, domain.AssetListQuery{
+			ProjectID:  projectID,
+			CampaignID: campaignID,
+		})
 	case "select_image_asset":
 		var args assetIDArgs
 		if err := decodeArgs(call.Arguments, &args); err != nil {
@@ -284,7 +287,7 @@ func (s *Server) tools() []toolDefinition {
 				"use_project_quality_profile": map[string]any{"type": "boolean", "description": "Apply the project-level quality profile before enqueueing."},
 				"aspect_ratio":                stringProp("Aspect ratio such as 1:1, 3:4, or 16:9."),
 				"output_format":               stringProp("Output format. Defaults to png."),
-				"requested_count":             map[string]any{"type": "integer", "minimum": 1, "maximum": 4, "description": "Number of candidate images to generate."},
+				"requested_count":             map[string]any{"type": "integer", "minimum": 1, "maximum": 10, "description": "Number of candidate images to generate."},
 				"provider":                    stringProp("Provider id. Use mock or a configured provider such as openai-compatible."),
 				"selection_mode":              stringProp("Optional product-level selection mode such as manual_optional or auto."),
 				"review_required":             map[string]any{"type": "boolean", "description": "Compatibility flag; first MCP slice normally leaves this false."},

@@ -2,8 +2,8 @@
 
 ## Current Phase
 
-- Phase: MVP 核心闭环、scope 管理、真实输入复用、best-of auto reject、HTTP 基础限流、本地审计日志、项目级多 key 策略、第二阶段 P0 visibility 和 P1 Storage Governance 均已完成。
-- Goal: 服务端资产闭环、Web 托管、高级输入、真实 edit/mask、repair/reconcile、自动 retry/backoff、真实缩略图、项目级鉴权、自托管文档、独立 scope 管理、OpenAI-compatible / fal 输入复用、限流、审计、多 key 生产 hardening，以及 Web 服务端资产同步、最小资产库、Scope Dashboard、source/session metadata 标准都已可验证；当前 P1 已补 storage usage scanner、只读 storage-governance API、Web 存储占用展示、cleanup dry-run preview、受控 cleanup execute 和只读 storage-integrity 治理视图，后续重点是资产库筛选、session/source tracking、project provider profile、参考图/prompt 留存、云端安全和对外开通路径。
+- Phase: MVP 核心闭环、scope 管理、真实输入复用、best-of auto reject、HTTP 基础限流、本地审计日志、项目级多 key 策略、第二阶段 P0 visibility、P1 Storage Governance、P1 Asset Production Readiness、P1 Web Performance / Startup、并发性能专项和 P1 Provider Throughput & Reliability 均已完成。
+- Goal: 服务端资产闭环、Web 托管、高级输入、真实 edit/mask、repair/reconcile、自动 retry/backoff、真实缩略图、项目级鉴权、自托管文档、独立 scope 管理、OpenAI-compatible / fal 输入复用、限流、审计、多 key 生产 hardening，以及 Web 服务端资产同步、最小资产库、Scope Dashboard、source/session metadata 标准都已可验证；当前已补 storage usage scanner、只读 storage-governance API、Web 存储占用展示、cleanup dry-run preview、受控 cleanup execute、只读 storage-integrity 治理视图、资产筛选分页、source/session/batch 查询、项目级非敏感 provider profile、Web 首屏 render budget、启动性能护栏、Codex 批量生产示例、可控 Worker/provider 并发、独立 provider cap、timeout profile、task attempts 阶段指标、diagnostic benchmark 和 batch progress，下一步先用 production preview 与经确认的小样本真实 provider benchmark 试用完整流程，再决定是否进入 Reference Library / Prompt Recipe / edit lineage 等 P2 需求澄清，以及云端安全和对外开通路径。
 - Status: 输入/输出 v0.1 已冻结；业务隔离模型已冻结；核心业务流程已选定为内容系统批量生成封面图；架构评审已合并；Web 底座已导入；Go + PostgreSQL + Redis + 本地文件系统 + Docker Compose 的 mock 资产闭环已跑通；MCP stdio server 已接入并通过 smoke；服务端 OpenAI-compatible provider adapter 已接入并通过本地 HTTP mock 集成 smoke；服务端 `provider=fal` 已接入 queue + rest storage adapter，并通过本地 Docker smoke 验证 `GET /remote.png`、两次 `POST /rest/storage/upload/initiate`、`POST /queue/openai/gpt-image-2/edit` 和 `task_0dbae47c6d0459cd8c2c -> asset_96d78f9da6b1fcdb0cca`；Web 已新增服务端托管模式，可创建服务端 `ImageTask`、轮询 assets、展示服务端候选图并执行 select/reject；服务端已支持项目级 quality profile 保存/读取，并可在 REST/MCP/Web 托管任务创建时复用 prompt template、style preset、reference image 参数、generation config 和 `best_of_config`；`selection_mode=auto` / `best_of` 已可在 Worker 完成候选资产登记后自动 selected 一张推荐图，当前 scorer registry 支持 `local_metadata_v1` 与 `http_judge_v1`，也支持 `best_of_config.auto_reject_non_selected=true` 将未入选候选自动标记为 rejected；本地 smoke 已验证 `task_79ee5fdfe639cd532805` 产生 1 张 selected + 2 张 rejected，并可将 auto rejected 的 `asset_5d207d1a89b3ba6d6793` 手动重新 select 为 approved/selected；Web/MCP/REST 已能提交 reference image、mask/edit descriptor 和更多 generation config，asset `parameters_json` 会保留这些高级输入快照；本地 `vag repair scan/requeue/verify-asset` 已能发现入队失败任务、重入队修复并校验资产文件；Worker 遇到 provider 瞬时失败时会写入 `task_attempt.retry_after`、进入 Redis delayed queue，并按指数退避自动重试；服务端缩略图现在基于原图统一生成 `.webp`，按配置宽高约束落盘并通过 `GET /api/assets/{id}/thumbnail` 交付；实例级 Basic Auth、项目级 API key、CLI/Web 鉴权透传、access-config 管理接口，以及 Web 设置页的 scope 同步/快速新建能力均已完成并通过 Docker smoke；当前 scope 内 `input-files` 上传/取回和 OpenAI-compatible `/images/edits` multipart 已打通，Docker smoke 已验证 `task_dd1a410a094e30f06fc5 -> asset_fb9f0bbe559c4c95aa88`；服务端创建任务现在还能解析匿名 remote URL 和当前项目 `asset_id`，Docker smoke 已验证 `GET /remote.png`、`POST /v1/images/edits image_count=2` 和 `task_91237d5d15aa7252bed4 -> asset_9ab0aeca719c6e9a2f66`；独立 Web scope 管理入口、workspace/project/campaign rename/archive/delete，以及 archived scope 过滤与 delete 清理链路均已完成并通过 smoke；README 与 Runbook 已补 quickstart、demo、自托管最小暴露面和反向代理/TLS 样例，`docker compose config`、`curl -sf http://localhost:8081/healthz` 和 `docker compose ps` 已验证通过；HTTP API 基础限流现已接入，`RATE_LIMIT_INSTANCE_MAX_REQUESTS` / `RATE_LIMIT_PROJECT_MAX_REQUESTS` 可返回 `429` 与 `Retry-After`，Docker smoke 已验证实例级与 project 级阈值都能生效；HTTP / API 第一版结构化审计日志也已接入，本地 Docker smoke 已验证 `create_task` / `get_task` 和 `404 not_found` 请求都会写入 `STORAGE_ROOT/audit/http-api/YYYY-MM-DD.jsonl`，并可通过 `vag audit list` 按 project / task / status 过滤查询；项目级多 key 策略也已接入，Docker smoke 已验证 `prj_multi_key_1781784728` 可同时接受 `default` 与 `rollout` 两把 key，旧 key disable/delete 后新 key 仍可访问同一 `task_fc9e1275b4dcb665e766`，且审计里会记录命中的 `rollout` key 名称。
 - Product update: 第一版已弱化人工审核，默认采用轻量选优/状态标记。质量优先通过 prompt 模板、style preset、参考图、生成参数和后续 best-of 自动选优保证。
 
@@ -25,7 +25,7 @@
 12. Best-of auto reject: Done. `best_of_config.auto_reject_non_selected=true` 时，未入选候选会自动 rejected，且人工仍可重新 select。
 13. Production hardening: Done. 基础限流、本地审计日志和项目级多 key 策略均已完成。
 14. Local dev hygiene: Done. 已补本地 Web `.vite/` 生成目录的 ignore 规则，避免运行态缓存长期出现在 `git status`。
-15. Scenario-driven next stage planning: P0 done, P1 Storage Governance done. 已根据真实试用反馈形成第二阶段需求，并完成 P0 visibility CSV 与 P1 storage governance CSV；后续 P1 可继续执行资产库筛选、session/source tracking、provider profile / cloud safety 和 Web performance，详见 `docs/project/FUTURE_REQUIREMENTS_AND_SCENARIOS.md` 和 `docs/project/NEXT_PHASE_REQUIREMENTS.md`。
+15. Scenario-driven next stage planning: P0 done, P1 Storage Governance done, P1 Asset Production Readiness done, P1 Web Performance / Startup done, Concurrency/Benchmark done, P1 Provider Throughput & Reliability done. 已根据真实试用反馈形成第二阶段需求，并完成 P0 visibility CSV、P1 storage governance CSV、合并后的 asset production readiness CSV、Web performance CSV、并发性能专项与 provider reliability hardening；下一步先试用 production preview 和经确认的小样本真实 provider benchmark，再决定是否生成 P2 Reference Library / Prompt Recipe / edit lineage CSV。
 
 ## Direction Lock
 
@@ -97,7 +97,7 @@ Web/REST/CLI 创建 ImageTask
 
 - Web 托管模式下生成结果进入 PostgreSQL asset registry。
 - Web 详情页可展示服务端候选资产并执行 select/reject。
-- Web 主界面已新增服务端资产库，可同步当前 scope 下来自 Web / MCP / REST / CLI 的服务端资产，并展示 thumbnail、prompt、provider、model、status、source、task_id、asset_id、created_at 和 delivery links。
+- Web 主界面已新增服务端资产库，可同步当前 scope 下来自 Web / MCP / REST / CLI 的服务端资产，并展示 thumbnail、prompt、provider、model、status、source、task_id、asset_id、created_at 和 delivery links；P1 起支持 status、provider、source、session_id、batch_id、keyword 筛选，首屏默认有限加载、图片 lazy loading 和加载更多。
 - Web 顶栏已可打开独立 scope 管理入口，对 workspace / project / campaign 执行 rename/archive/delete。
 - Scope 管理已升级为控制台视图，可显示 workspace / project / campaign 的 project/campaign/asset 数、selected/rejected 数和最近活动；遇到需要项目 API key 的 scope 会跳过对应统计并提示。
 - P1 Storage Governance 已完成：服务端可只读统计 instance/workspace/project/campaign 的存储占用和 task/asset/failed counts；Web Scope 管理可展示 project/campaign storage/original/thumbnail/metadata/input-files 分类；`vag storage cleanup-preview` 可 dry-run 预览 rejected/generated/tmp/orphan 清理候选；`vag storage cleanup-execute` 需要 `--execute` 加匹配 dry-run token 或显式 `--confirm`，仅清理 draft/rejected 及 tmp/orphan 文件，selected/published/approved 默认 protected；`storage-integrity` 可只读展示缺失文件、invalid current_version 和 stale queued/running 摘要且不暴露本地路径。
@@ -105,6 +105,10 @@ Web/REST/CLI 创建 ImageTask
 - 服务端 `provider=fal` 已支持 queue 文生图，以及基于 scope `input-files`、匿名 remote URL、当前项目 `asset_id` 的 edit 输入复用。
 - 服务端 best-of 已支持 `best_of_config`、`local_metadata_v1`、`http_judge_v1` 和可选 auto reject；外部 judge 失败时自动回退到本地启发式，auto rejected 候选仍可人工重新 select。
 - Asset response 已暴露任务输入中的 `metadata_json`，资产库可显示 `source/session/batch/story/scene/target_path`。
+- REST/CLI/Web 资产库已支持 `limit/status/provider/model/source/session_id/batch_id/keyword/created_from/created_to` 查询参数；服务端默认 limit=50、max=100，Web 服务端资产库默认 limit=24。
+- 项目级 provider profile 已接入 `project.metadata_json.provider_profile`，只保存 `enabled/provider/model/base_url/generation_config/use_project_quality_profile` 等非敏感默认值；创建任务未显式传 provider 时可复用项目默认 provider/model，真实 provider secret 仍只走环境变量或后续确认的安全策略。
+- provider profile 已扩展非敏感 capability 字段：`max_n`、`supports_url_result`、`preferred_response_format`、`max_concurrency`、`timeout_seconds`；`requested_count` 超过 `max_n` 时按同 task 拆分 provider 请求，多 scene 仍由外部编排为独立 task。
+- P1 Web Performance / Startup 已完成：`initStore` 幂等、thumbnail backfill 后台预算、本地 TaskGrid 渲染预算、服务端资产库节点上限、fal/custom 恢复轮询上限、Scope 控制台统计缓存/边界，以及 Agent/Settings/Scope/Detail/Lightbox/Mask/Markdown/KaTeX 的按需加载都已接入。
 
 当前尚未接入：
 
@@ -285,6 +289,25 @@ Status: done. 当前服务端已支持 remote URL 抓取、当前项目 `asset_i
 - 项目级鉴权接受任意一把启用 key，并把命中的 key 名称带入审计 actor。
 
 Status: done. 当前 Docker smoke 已验证 `prj_multi_key_1781784728` 下的 `default` 与 `rollout` 两把 key 都能访问同一 project 资源；disabled/deleted `default` 后，`rollout` 仍可继续读取 `task_fc9e1275b4dcb665e766`，并可通过 `vag audit list --project prj_multi_key_1781784728` 查到命中的 `rollout` actor。
+
+### Phase 6.4: Concurrency and benchmark hardening
+
+- 让 `WORKER_CONCURRENCY` 通过环境变量覆盖，避免平台默认只能实际串行处理任务。
+- 增加 `OPENAI_COMPATIBLE_MAX_CONCURRENCY` provider 级 backpressure，避免 worker 并发升高后直接打爆真实 provider。
+- 暴露 task attempts 的只读 API/CLI/Web 摘要，用于定位 provider latency、timeout、retry_after 和失败原因。
+- 增加 `vag benchmark image-generation`，支持 mock 无费用压测和真实 provider 小样本费用保护压测。
+
+Status: done. 本地 Docker 已验证 worker=1 与 worker=4 的 mock 延迟压测：32 个任务、`mock_delay_ms=250` 下 wall-clock 从 12.427s 降到 2.979s，提升约 4.17x；真实 provider benchmark 未自动执行，需用户确认费用后运行。
+
+### Phase 6.5: Provider throughput and reliability hardening
+
+- 将真实 provider 默认入口 cap 收敛为 `OPENAI_COMPATIBLE_MAX_CONCURRENCY=3`、`FAL_MAX_CONCURRENCY=3`，保留 `WORKER_CONCURRENCY=6`。
+- 将默认 provider timeout 提升为 `300s`，并为 openai-compatible 增加 connect/header/total timeout profile。
+- `task_attempt` 新增 queue/provider/download/store/thumbnail/retry/error_stage/response_bytes 阶段指标。
+- `provider_profile` 增加非敏感 capability 字段；`requested_count` 可在同 prompt 场景下按 `max_n` 拆分 provider 请求。
+- `vag benchmark image-generation` 输出诊断指标和调参建议，并用 `session_id/batch_id=run_id` 支持 `vag batch progress`。
+
+Status: done. Docker `go test ./...`、`npm --prefix web test -- --run`、`npm --prefix web run build`、`docker compose config` 均通过；mock benchmark `bench_p1_provider_rel_batch` 3 任务 / 6 资产全部完成，batch progress 返回 `task_count=3`、`succeeded_count=3`、`asset_count=6`、`attempt_count=3`；真实 provider benchmark 未运行，仍需用户确认费用。
 
 ### 30-day portfolio version
 

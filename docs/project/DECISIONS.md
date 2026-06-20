@@ -204,3 +204,15 @@
 - Decision: 保持当前 `docker-compose.yml` 为本地开发友好配置；生产自托管默认通过反向代理/TLS 暴露 UI/API，对外只开放反向代理入口，不直接公网暴露 PostgreSQL 和 Redis。
 - Reason: 本片目标是补齐 README/demo/自托管说明，而不是重写部署拓扑。开发环境需要低摩擦启动，生产环境则需要更小暴露面和更清晰的域名入口。
 - Impact: README 与 Runbook 明确要求在公网部署时设置 `PUBLIC_BASE_URL`、启用 Basic Auth 和 project API key，并通过反向代理承接 `/api/*`；后续如果需要更强生产安全能力，再继续补限流、审计和多 key 策略。
+
+## 2026-06-19: 并发专项先优化 Images API 正式资产路径
+
+- Decision: 本轮把优化目标锁定为平台吞吐和可控并发：保留 openai-compatible 的 `/images/generations` / `/images/edits` 正式资产路径，新增 Worker 并发覆盖、provider 级 backpressure、attempt 可观测和 benchmark 工具；暂不实现 Responses API image_generation adapter 或 streaming partial images 状态机。
+- Reason: 当前慢的主要根因是 worker 实际串行、同步 provider timeout/retry/backoff 放大总耗时，以及缺少 attempt/benchmark 数据。Images API 路径更直接、成本结构更清晰、落盘闭环更简单，适合作为正式资产生产基线；Responses/streaming 更适合交互体感和进度预览，需要另行设计半成品状态机。
+- Impact: `WORKER_CONCURRENCY` 可按环境变量调到 2/4；真实 provider 建议先从 provider cap=2 小样本压测，成功率、timeout 和 429 稳定后再评估更高档。后续 P1 Provider Throughput & Reliability 已将自托管默认收敛为 provider cap=3。
+
+## 2026-06-19: P1 Provider Throughput & Reliability 收紧真实 provider 默认值
+
+- Decision: 保留 `WORKER_CONCURRENCY=6` 作为平台吞吐默认，但将真实 provider 默认入口 cap 调整为 `OPENAI_COMPATIBLE_MAX_CONCURRENCY=3`、`FAL_MAX_CONCURRENCY=3`，并将 `PROVIDER_TIMEOUT_SECONDS` 默认提升到 `300`；openai-compatible 额外拆分 connect/header/total timeout profile，task attempt 写入 queue/provider/download/store/thumbnail 阶段指标，benchmark run 自动带 `session_id/batch_id` 以便 batch progress 查询。
+- Reason: mock benchmark 已证明平台本地 worker/storage 不是主要瓶颈；真实 provider cap=6 小样本出现 2/6 timeout，说明把 worker 并发直接等同于 provider 并发风险较高。cap=3 + 300s total timeout 更适合作为自托管默认安全档，后续真实 provider 应按 cap `2 -> 3 -> 4` 小样本确认。
+- Impact: provider 生产吞吐会更保守，但 timeout/429 风险降低；需要更高吞吐时应使用 `vag benchmark image-generation --allow-paid-provider` 在用户确认费用后验证。仍不做 streaming、partial images、adaptive backpressure 或复杂 provider probe。

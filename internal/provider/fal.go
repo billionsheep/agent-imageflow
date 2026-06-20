@@ -87,7 +87,8 @@ func (p FalProvider) Generate(ctx context.Context, task domain.Task) (Result, er
 		}, err
 	}
 
-	endpointID := p.endpointID(editInput != nil)
+	model := taskProviderModel(task, FalProviderID, p.model)
+	endpointID := falEndpointID(model, editInput != nil)
 	requestMode := "generation"
 	if editInput != nil {
 		requestMode = "edit"
@@ -137,7 +138,7 @@ func (p FalProvider) Generate(ctx context.Context, task domain.Task) (Result, er
 		}, err
 	}
 
-	files, err := p.generatedFilesFromPayload(ctx, task, requestMode, endpointID, requestInput["image_size"], submitStatus.RequestID, finalStatus.Metrics, payload)
+	files, err := p.generatedFilesFromPayload(ctx, task, requestMode, model, endpointID, requestInput["image_size"], submitStatus.RequestID, finalStatus.Metrics, payload)
 	if err != nil {
 		return Result{
 			ProviderRequestID: submitStatus.RequestID,
@@ -163,7 +164,7 @@ func (p FalProvider) createRequestInput(ctx context.Context, task domain.Task, e
 		"prompt":        task.Prompt,
 		"image_size":    falImageSize(task.AspectRatio),
 		"quality":       falQuality(task),
-		"num_images":    max(1, min(task.RequestedCount, maxFalInputImages)),
+		"num_images":    max(1, min(task.RequestedCount, taskProviderMaxN(task, FalProviderID, maxFalInputImages))),
 		"output_format": falOutputFormat(task.OutputFormat),
 	}
 	if task.NegativePrompt != "" {
@@ -298,6 +299,7 @@ func (p FalProvider) generatedFilesFromPayload(
 	ctx context.Context,
 	task domain.Task,
 	requestMode string,
+	model string,
 	endpointID string,
 	imageSize any,
 	requestID string,
@@ -322,7 +324,7 @@ func (p FalProvider) generatedFilesFromPayload(
 		}
 		parameters := taskProviderParameters(task, map[string]any{
 			"provider":      FalProviderID,
-			"model":         p.model,
+			"model":         model,
 			"endpoint_id":   endpointID,
 			"request_mode":  requestMode,
 			"slot":          index,
@@ -339,7 +341,7 @@ func (p FalProvider) generatedFilesFromPayload(
 			Height:        height,
 			ThumbnailW:    width,
 			ThumbnailH:    height,
-			Model:         p.model,
+			Model:         model,
 			ParametersRaw: parameters,
 			CostRaw:       costRaw,
 		})
@@ -421,8 +423,8 @@ func (p FalProvider) requestJSON(ctx context.Context, method, targetURL string, 
 	return raw, nil
 }
 
-func (p FalProvider) endpointID(isEdit bool) string {
-	model := strings.TrimSpace(p.model)
+func falEndpointID(model string, isEdit bool) string {
+	model = strings.TrimSpace(model)
 	if !isEdit || strings.HasSuffix(model, "/edit") {
 		return model
 	}

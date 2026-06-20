@@ -86,6 +86,15 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			raw_response_json JSONB NOT NULL DEFAULT '{}'::jsonb,
 			cost_json JSONB NOT NULL DEFAULT '{}'::jsonb
 		)`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS queue_wait_ms INTEGER`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS provider_first_byte_ms INTEGER`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS provider_total_ms INTEGER`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS response_download_ms INTEGER`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS store_ms INTEGER`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS thumbnail_ms INTEGER`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS error_stage TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE task_attempt ADD COLUMN IF NOT EXISTS response_bytes BIGINT NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS asset (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL REFERENCES workspace(id),

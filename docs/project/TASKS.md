@@ -2,16 +2,14 @@
 
 ## Todo
 
-- [ ] 执行 P1 Asset Library Filters CSV：`issues/next-phase-p1-asset-library-filters.csv`。
-- [ ] 执行 P1 Session / Source Tracking CSV：`issues/next-phase-p1-session-source-tracking.csv`。
-- [ ] 执行 P1 Provider Profile / Cloud Safety CSV：`issues/next-phase-p1-provider-profile-cloud-safety.csv`。
-- [ ] 下一轮可选：执行 P1 Web Performance / Startup CSV：`issues/next-phase-p1-web-performance-startup.csv`，用于治理打开 Web 时 CPU 偏高、首屏全量渲染、缩略图 backfill 和历史任务恢复轮询。
+- [ ] 旧 P1 拆分 CSV 保留为历史参考，不再作为下一轮主入口：`issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv`。
+- [ ] 用 production preview 路径继续试用 Web，观察是否仍出现 Chrome `High memory usage`；若仍复现，再单独做浏览器 heap/virtualized list 专项。
 - [ ] 规划并拆分 Reference Library / Prompt Recipe / 账号主形象留存 P2：保留萌宠账号等场景的原始形象、参考图、prompt 和 edit lineage。
 - [ ] 澄清嵌入式架构图场景：若需要 Mermaid/D2/SVG 可编辑源，需要补 Diagram source track；若只作为图片资产，可沿用当前资产闭环。
 
 ## Doing
 
-- [ ] 下一步可选择执行 P1 Asset Library Filters、P1 Session / Source Tracking、P1 Provider Profile / Cloud Safety，或 P1 Web Performance / Startup。
+- [ ] 当前建议先试用 P1 资产生产、Web performance 和 Provider Throughput & Reliability 结果，再决定是否进入 P2 Reference Library / Prompt Recipe。
 
 ## Done
 
@@ -67,10 +65,19 @@
 - [x] 生成下一阶段 P1 CSV 工单：`issues/next-phase-p1-storage-governance.csv`、`issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv`。
 - [x] 将 Web 打开 CPU 偏高问题纳入下一轮 P1，生成性能专项工单：`issues/next-phase-p1-web-performance-startup.csv`。
 - [x] 完成 P1 Storage Governance：新增 storage usage scanner、只读 storage-governance API、Web Scope 管理存储占用展示、`vag storage cleanup-preview` dry-run、受控 `vag storage cleanup-execute` 执行、CLI 审计日志，以及只读 `storage-integrity` 治理视图。
+- [x] 生成合并后的 P1 Asset Production Readiness CSV：`issues/next-phase-p1-asset-production-readiness.csv`，将资产库筛选、session/source 追踪、最小 provider profile 和首屏性能保护收束为下一轮主线。
+- [x] 新增项目状态可视化文档：`docs/project/PROJECT_STATUS_MAP.md`，用脑图和表格说明已完成、未完成、暂缓和不做的场景。
+- [x] 完成 P1 Asset Production Readiness：REST/CLI 资产列表支持 limit/status/provider/model/source/session_id/batch_id/keyword/date 筛选；Web 服务端资产库支持筛选、加载更多、图片 lazy loading 和 metadata/parameters 摘要；`metadata_json` 标准化 source/session/run/batch/story/scene/target_path；新增非敏感 project provider profile；补 Codex 批量资产生产示例。
+- [x] 完成 P1 Web Performance / Startup：`initStore` 幂等、thumbnail backfill 预算、本地任务画廊渲染预算、服务端资产库节点上限、恢复轮询上限、Scope 统计缓存/边界、Markdown/Agent/Modal 懒加载均已接入；前端测试和 production build 通过。
+- [x] 完成并发与生图性能专项基线：验证 `WORKER_CONCURRENCY=6` 下平台本地 worker/storage 吞吐正常；新增 task attempts API/CLI/Web 展示、openai-compatible 参数透传和 `vag benchmark image-generation`。mock 延迟压测验证 worker=6 可稳定处理 32 任务 / 128 mock 资产；真实 openai-compatible c6 小样本 6 任务中 4 成功、2 个 120s timeout，说明本机资源不是瓶颈，provider 侧 6 并发不稳定。
+- [x] 完成 P1 Provider Throughput & Reliability：默认保留 `WORKER_CONCURRENCY=6`，真实 provider 默认收敛为 `OPENAI_COMPATIBLE_MAX_CONCURRENCY=3`、`FAL_MAX_CONCURRENCY=3`、`PROVIDER_TIMEOUT_SECONDS=300`；openai-compatible 增加 connect/header/total timeout profile；task attempts 新增 queue/provider/download/store/thumbnail 阶段指标；provider profile 增加 `max_n` 等非敏感 capability；`requested_count` 超过 `max_n` 时按同 task 拆分 provider 请求；benchmark 报告增强并新增 `vag batch progress`。
 
 ## Acceptance Criteria For Next Step
 
 - 下一步不要继续扩 P0 visibility；它已完成并在 `issues/next-phase-p0-visibility.csv` 记录 evidence。
-- 后续优先执行 P1：Storage Governance 已完成；下一步可从资产库筛选、session/source tracking、project provider profile、云端安全或 Web 性能专项中选一个 CSV 继续。
-- 若继续执行实现，选择一个 P1 CSV，用 `/goal @issues/<next>.csv` 逐条推进；涉及删除、provider key 或公网暴露策略的任务需先确认。
+- 合并后的 P1 Asset Production Readiness 已完成，下一步试用资产库筛选、分页、provider profile 和 batch progress。
+- P1 Web Performance / Startup 已完成，日常试用优先用 production preview 判断真实资源占用；Vite dev/HMR 只用于开发。
+- P1 Provider Throughput & Reliability 已完成，当前推荐默认是 `WORKER_CONCURRENCY=6`、真实 provider cap `3`、provider timeout `300s`；真实 provider 后续按 cap `2 -> 3 -> 4` 小样本复测稳定档，且必须先确认费用。
+- 若继续执行 P2，建议先重新生成独立 CSV；涉及 provider key、公网暴露策略或真实 secret 存储的任务需先确认。
 - 若当前已有线程在执行某个 P1 CSV，不要并行改同一 CSV；Web CPU 偏高问题已作为独立 P1 performance CSV 纳入下一次推进。
+- 旧 P1 拆分 CSV 保留用于溯源，不再作为下一轮主入口；项目全局状态优先查看 `docs/project/PROJECT_STATUS_MAP.md`。
