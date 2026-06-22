@@ -10,13 +10,18 @@ import {
   resolveAgentImageflowDeliveryUrl,
   selectAgentImageflowAsset,
   type AgentImageflowAuth,
-  type AgentImageflowAssetResponse,
   type AgentImageflowBatchStorySummaryResponse,
   type AgentImageflowBatchStorySummaryAsset,
   type AgentImageflowBatchStorySummaryScene,
   type AgentImageflowBatchStorySummaryTask,
   type AgentImageflowSceneRegenerationResponse,
 } from '../lib/agentImageflowApi'
+import {
+  applyPendingReviewsToBatchSummary,
+  getReviewFriendlyErrorMessage,
+  reconcileReviewedAssetInBatchSummary,
+  type PendingAssetReviewMap,
+} from '../lib/reviewFeedback'
 import { CloseIcon, LinkIcon, RefreshIcon } from './icons'
 
 interface ProductionViewFilters {
@@ -96,22 +101,6 @@ function getTaskErrorSummary(tasks: AgentImageflowBatchStorySummaryTask[]): stri
   return [errorTask.error_stage, errorTask.error_code, errorTask.error_message].filter(Boolean).join(' · ')
 }
 
-function getTimestamp(value?: string): number {
-  if (!value) return 0
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? timestamp : 0
-}
-
-function pickPrimarySelectedAssetId(assets: AgentImageflowBatchStorySummaryAsset[]): string | undefined {
-  const selectedAssets = assets.filter((asset) => asset.status === 'selected')
-  if (selectedAssets.length === 0) return undefined
-  return [...selectedAssets].sort((left, right) => {
-    const timeDelta = getTimestamp(right.created_at) - getTimestamp(left.created_at)
-    if (timeDelta !== 0) return timeDelta
-    return right.asset_id.localeCompare(left.asset_id)
-  })[0]?.asset_id
-}
-
 function getManifestModeLabel(mode: ManifestMode): string {
   if (mode === 'selected') return '已选 manifest'
   if (mode === 'includeRejected') return '全部含拒绝'
@@ -132,71 +121,6 @@ function downloadManifestJson(payload: unknown, fileName: string) {
   anchor.click()
   anchor.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
-function toSummaryAsset(
-  current: AgentImageflowBatchStorySummaryAsset,
-  response: AgentImageflowAssetResponse,
-): AgentImageflowBatchStorySummaryAsset {
-  return {
-    ...current,
-    status: response.status,
-    provider: response.provider ?? current.provider,
-    model: response.model ?? current.model,
-    prompt: response.prompt ?? current.prompt,
-    download_url: response.delivery?.download_url ?? current.download_url,
-    thumbnail_url: response.delivery?.thumbnail_url ?? current.thumbnail_url,
-    metadata_url: response.delivery?.metadata_url ?? current.metadata_url,
-    created_at: response.created_at ?? current.created_at,
-  }
-}
-
-function updateSummaryWithReviewedAsset(
-  current: AgentImageflowBatchStorySummaryResponse,
-  sceneKey: string,
-  assetId: string,
-  response: AgentImageflowAssetResponse,
-): AgentImageflowBatchStorySummaryResponse {
-  const scenes = current.scenes.map((scene) => {
-    if (`${scene.story_id}:${scene.scene_id}` !== sceneKey) return scene
-    const assets = scene.assets.map((asset) => asset.asset_id === assetId ? toSummaryAsset(asset, response) : asset)
-    const selectedAssetCount = assets.filter((asset) => asset.status === 'selected').length
-    const rejectedAssetCount = assets.filter((asset) => asset.status === 'rejected').length
-    return {
-      ...scene,
-      primary_selected_asset_id: pickPrimarySelectedAssetId(assets),
-      counts: {
-        ...scene.counts,
-        asset_count: assets.length,
-        selected_asset_count: selectedAssetCount,
-        rejected_asset_count: rejectedAssetCount,
-      },
-      assets,
-    }
-  })
-  const sceneWithSelectedCount = scenes.filter((scene) => scene.counts.selected_asset_count > 0).length
-  const allAssets = scenes.flatMap((scene) => scene.assets)
-  const stories = current.stories.map((story) => {
-    const storyScenes = scenes.filter((scene) => scene.story_id === story.story_id)
-    return {
-      ...story,
-      selected_scene_count: storyScenes.filter((scene) => scene.counts.selected_asset_count > 0).length,
-    }
-  })
-  return {
-    ...current,
-    counts: {
-      ...current.counts,
-      scene_with_selected_count: sceneWithSelectedCount,
-      scene_missing_selected_count: Math.max(current.counts.scene_count - sceneWithSelectedCount, 0),
-      asset_count: allAssets.length,
-      generated_asset_count: allAssets.filter((asset) => asset.status === 'generated').length,
-      selected_asset_count: allAssets.filter((asset) => asset.status === 'selected').length,
-      rejected_asset_count: allAssets.filter((asset) => asset.status === 'rejected').length,
-    },
-    stories,
-    scenes,
-  }
 }
 
 function SummaryStat({ label, value, tone = 'default' }: { label: string; value: unknown; tone?: 'default' | 'good' | 'bad' }) {
@@ -236,6 +160,23 @@ function FilterInput({ label, value, placeholder, onChange }: { label: string; v
       />
     </label>
   )
+}
+
+function assetCardClassName(status: string, pending: boolean): string {
+  const base = 'min-w-0 rounded-lg border p-2 transition'
+  if (pending && status === 'selected') {
+    return `${base} border-emerald-300 bg-emerald-50/70 dark:border-emerald-400/30 dark:bg-emerald-500/12`
+  }
+  if (pending && status === 'rejected') {
+    return `${base} border-red-300 bg-red-50/70 dark:border-red-400/30 dark:bg-red-500/12`
+  }
+  if (status === 'selected') {
+    return `${base} border-emerald-200 bg-emerald-50/40 dark:border-emerald-500/20 dark:bg-emerald-500/6`
+  }
+  if (status === 'rejected') {
+    return `${base} border-red-200 bg-red-50/40 dark:border-red-500/20 dark:bg-red-500/6`
+  }
+  return `${base} border-gray-200 bg-gray-50/70 dark:border-white/[0.08] dark:bg-white/[0.03]`
 }
 
 function SceneCard({
@@ -408,14 +349,14 @@ function SceneCard({
           {scene.assets.length > 0 && (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {scene.assets.map((asset) => (
-                <div key={asset.asset_id} className="min-w-0 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <div key={asset.asset_id} className={assetCardClassName(asset.status, Boolean(pendingAssetIds[asset.asset_id]))}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate text-xs font-medium text-gray-700 dark:text-gray-200" title={asset.asset_id}>{asset.asset_id}</div>
                       <div className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400" title={asset.prompt}>{asset.prompt || asset.provider || '-'}</div>
                     </div>
                     <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClassName(asset.status)}`}>
-                      {asset.status}
+                      {pendingAssetIds[asset.asset_id] ? `${asset.status} · 保存中` : asset.status}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -490,6 +431,7 @@ export default function ProductionViewModal() {
   const [loading, setLoading] = useState(false)
   const [unauthorized, setUnauthorized] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingReviews, setPendingReviews] = useState<PendingAssetReviewMap>({})
   const [pendingAssetIds, setPendingAssetIds] = useState<Record<string, boolean>>({})
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({})
   const [regenerationReasons, setRegenerationReasons] = useState<Record<string, string>>({})
@@ -503,14 +445,20 @@ export default function ProductionViewModal() {
   useEffect(() => {
     if (!productionViewSeed) return
     setFilters(mergeSeedFilters(productionViewSeed))
-    setSummary(null)
     setError(null)
     setUnauthorized(false)
+    setPendingReviews({})
+    setPendingAssetIds({})
+    setActionErrors({})
     setManifestError(null)
   }, [productionViewSeed])
 
   const queryReady = Boolean(filters.sessionId.trim() || filters.batchId.trim())
   const filtersActive = Object.values(filters).some((value) => typeof value === 'boolean' ? value : value.trim())
+  const displaySummary = useMemo(
+    () => summary ? applyPendingReviewsToBatchSummary(summary, pendingReviews) : null,
+    [pendingReviews, summary],
+  )
 
   const updateFilter = <K extends keyof ProductionViewFilters>(key: K, value: ProductionViewFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -551,7 +499,7 @@ export default function ProductionViewModal() {
         setUnauthorized(true)
         setError(null)
       } else {
-        setError(nextError instanceof Error ? nextError.message : String(nextError))
+        setError(getReviewFriendlyErrorMessage(nextError))
       }
     } finally {
       if (requestRef.current === requestId) setLoading(false)
@@ -615,7 +563,7 @@ export default function ProductionViewModal() {
     } catch (nextError) {
       const message = isAgentImageflowUnauthorizedError(nextError)
         ? '未授权 / 需要重新登录'
-        : nextError instanceof Error ? nextError.message : String(nextError)
+        : getReviewFriendlyErrorMessage(nextError)
       if (isAgentImageflowUnauthorizedError(nextError)) setUnauthorized(true)
       setManifestError(message)
       showToast(message, 'error')
@@ -634,6 +582,12 @@ export default function ProductionViewModal() {
     action: AssetReviewAction,
   ) => {
     const sceneKey = `${scene.story_id}:${scene.scene_id}`
+    setPendingReviews((current) => ({
+      ...current,
+      [asset.asset_id]: {
+        nextStatus: action === 'select' ? 'selected' : 'rejected',
+      },
+    }))
     setPendingAssetIds((current) => ({ ...current, [asset.asset_id]: true }))
     setActionErrors((current) => {
       const next = { ...current }
@@ -645,16 +599,21 @@ export default function ProductionViewModal() {
       const response = action === 'select'
         ? await selectAgentImageflowAsset(baseUrl, asset.asset_id, auth)
         : await rejectAgentImageflowAsset(baseUrl, asset.asset_id, auth)
-      setSummary((current) => current ? updateSummaryWithReviewedAsset(current, sceneKey, asset.asset_id, response) : current)
+      setSummary((current) => current ? reconcileReviewedAssetInBatchSummary(current, sceneKey, asset.asset_id, response) : current)
       showToast(action === 'select' ? '已标记为选中' : '已标记为拒绝', 'success')
     } catch (nextError) {
       const message = isAgentImageflowUnauthorizedError(nextError)
         ? '未授权 / 需要重新登录'
-        : nextError instanceof Error ? nextError.message : String(nextError)
+        : getReviewFriendlyErrorMessage(nextError)
       if (isAgentImageflowUnauthorizedError(nextError)) setUnauthorized(true)
       setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
       showToast(message, 'error')
     } finally {
+      setPendingReviews((current) => {
+        const next = { ...current }
+        delete next[asset.asset_id]
+        return next
+      })
       setPendingAssetIds((current) => {
         const next = { ...current }
         delete next[asset.asset_id]
@@ -694,7 +653,7 @@ export default function ProductionViewModal() {
     } catch (nextError) {
       const message = isAgentImageflowUnauthorizedError(nextError)
         ? '未授权 / 需要重新登录'
-        : nextError instanceof Error ? nextError.message : String(nextError)
+        : getReviewFriendlyErrorMessage(nextError)
       if (isAgentImageflowUnauthorizedError(nextError)) setUnauthorized(true)
       setRegenerationErrors((current) => ({ ...current, [sceneKey]: message }))
       showToast(message, 'error')
@@ -707,8 +666,8 @@ export default function ProductionViewModal() {
     }
   }, [auth, baseUrl, loadSummary, regenerationReasons, scope.campaignId, scope.projectId, showToast])
 
-  const selectedCoverage = summary
-    ? `${summary.counts.scene_with_selected_count}/${Math.max(summary.counts.scene_count, 0)}`
+  const selectedCoverage = displaySummary
+    ? `${displaySummary.counts.scene_with_selected_count}/${Math.max(displaySummary.counts.scene_count, 0)}`
     : '0/0'
 
   return (
@@ -819,40 +778,40 @@ export default function ProductionViewModal() {
               未授权 / 需要登录。请重新登录控制台，或确认当前 project 的外部调用凭据可用。
             </div>
           )}
-          {loading && summary && (
+          {loading && displaySummary && (
             <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
               正在刷新批次摘要，当前结果会保留到新结果返回。
             </div>
           )}
 
-          {!summary && loading ? (
+          {!displaySummary && loading ? (
             <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
               正在加载 batch / story / scene 摘要...
             </div>
-          ) : !summary && !loading && !unauthorized && !error ? (
+          ) : !displaySummary && !loading && !unauthorized && !error ? (
             <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
               {queryReady ? '已带入 batch / session 筛选，点击查询查看批次摘要。' : '输入 session_id 或 batch_id 后查询批次摘要。'}
             </div>
-          ) : summary ? (
+          ) : displaySummary ? (
             <div className="mt-4 space-y-4">
               <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-8">
-                <SummaryStat label="故事" value={summary.counts.story_count} />
-                <SummaryStat label="场景" value={summary.counts.scene_count} />
-                <SummaryStat label="选中覆盖" value={selectedCoverage} tone={summary.counts.scene_missing_selected_count === 0 ? 'good' : 'bad'} />
-                <SummaryStat label="任务" value={summary.counts.task_count} />
-                <SummaryStat label="资产" value={summary.counts.asset_count} />
-                <SummaryStat label="运行中" value={summary.counts.running_count} />
-                <SummaryStat label="失败" value={summary.counts.failed_count} tone={summary.counts.failed_count > 0 ? 'bad' : 'default'} />
-                <SummaryStat label="排除准备" value={summary.counts.excluded_setup_task_count} />
+                <SummaryStat label="故事" value={displaySummary.counts.story_count} />
+                <SummaryStat label="场景" value={displaySummary.counts.scene_count} />
+                <SummaryStat label="选中覆盖" value={selectedCoverage} tone={displaySummary.counts.scene_missing_selected_count === 0 ? 'good' : 'bad'} />
+                <SummaryStat label="任务" value={displaySummary.counts.task_count} />
+                <SummaryStat label="资产" value={displaySummary.counts.asset_count} />
+                <SummaryStat label="运行中" value={displaySummary.counts.running_count} />
+                <SummaryStat label="失败" value={displaySummary.counts.failed_count} tone={displaySummary.counts.failed_count > 0 ? 'bad' : 'default'} />
+                <SummaryStat label="排除准备" value={displaySummary.counts.excluded_setup_task_count} />
               </div>
 
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="space-y-3">
-                  {summary.scenes.length === 0 ? (
+                  {displaySummary.scenes.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
                       当前查询没有场景生产记录。
                     </div>
-                  ) : summary.scenes.map((scene) => (
+                  ) : displaySummary.scenes.map((scene) => (
                     <SceneCard
                       key={`${scene.story_id}:${scene.scene_id}`}
                       actionErrors={actionErrors}
@@ -873,21 +832,21 @@ export default function ProductionViewModal() {
                   <div className="rounded-lg border border-gray-200/80 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
                     <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">批次</div>
                     <div className="mt-3 grid gap-2">
-                      <Field label="生成时间" value={formatDate(summary.generated_at)} />
-                      <Field label="项目" value={summary.project_id} />
-                      <Field label="生产批次" value={summary.campaign_id} />
-                      <Field label="Session" value={summary.session_id} />
-                      <Field label="Batch" value={summary.batch_id} />
-                      <Field label="来源" value={summary.source} />
-                      <Field label="故事筛选" value={summary.story_id} />
+                      <Field label="生成时间" value={formatDate(displaySummary.generated_at)} />
+                      <Field label="项目" value={displaySummary.project_id} />
+                      <Field label="生产批次" value={displaySummary.campaign_id} />
+                      <Field label="Session" value={displaySummary.session_id} />
+                      <Field label="Batch" value={displaySummary.batch_id} />
+                      <Field label="来源" value={displaySummary.source} />
+                      <Field label="故事筛选" value={displaySummary.story_id} />
                     </div>
                   </div>
                   <div className="rounded-lg border border-gray-200/80 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
                     <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">故事</div>
                     <div className="mt-3 space-y-2">
-                      {summary.stories.length === 0 ? (
+                      {displaySummary.stories.length === 0 ? (
                         <div className="text-xs text-gray-400 dark:text-gray-500">暂无故事</div>
-                      ) : summary.stories.map((story) => (
+                      ) : displaySummary.stories.map((story) => (
                         <div key={story.story_id} className="min-w-0 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
                           <div className="truncate text-xs font-medium text-gray-700 dark:text-gray-200" title={story.story_id}>{story.story_id}</div>
                           <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">

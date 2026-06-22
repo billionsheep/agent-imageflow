@@ -31,6 +31,11 @@ import {
   getLocalhostMismatchWarning,
   getProductionFiltersFromAsset,
 } from '../lib/operatorReview'
+import {
+  applyPendingReviewsToAssetList,
+  getReviewFriendlyErrorMessage,
+  type PendingAssetReviewMap,
+} from '../lib/reviewFeedback'
 import { CopyIcon, LinkIcon, RefreshIcon } from './icons'
 
 const ASSET_PAGE_SIZE = 24
@@ -136,15 +141,26 @@ function pickScopeId<T>(items: T[], preferredId: string, getId: (item: T) => str
   return fallback ? getId(fallback) : ''
 }
 
-function getRateLimitFriendlyMessage(error: unknown): string {
-  if (error instanceof AgentImageflowApiError && error.status === 429) {
-    return '请求太快，服务端正在限流。请稍后重试，或缩小筛选/刷新频率。'
+function cardClassName(status: string, pending: boolean): string {
+  const base = 'overflow-hidden rounded-lg border transition'
+  if (pending && status === 'selected') {
+    return `${base} border-emerald-300 bg-emerald-50/60 dark:border-emerald-400/30 dark:bg-emerald-500/10`
   }
-  return error instanceof Error ? error.message : String(error)
+  if (pending && status === 'rejected') {
+    return `${base} border-red-300 bg-red-50/60 dark:border-red-400/30 dark:bg-red-500/10`
+  }
+  if (status === 'selected') {
+    return `${base} border-emerald-200 bg-emerald-50/40 dark:border-emerald-500/20 dark:bg-emerald-500/5`
+  }
+  if (status === 'rejected') {
+    return `${base} border-red-200 bg-red-50/40 dark:border-red-500/20 dark:bg-red-500/5`
+  }
+  return `${base} border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40`
 }
 
 interface ServerAssetCardProps {
   asset: AgentImageflowAssetResponse
+  actionError?: string
   baseUrl: string
   busy: boolean
   onSelectAsset: (asset: AgentImageflowAssetResponse) => void
@@ -157,6 +173,7 @@ interface ServerAssetCardProps {
 
 const ServerAssetCard = memo(function ServerAssetCard({
   asset,
+  actionError,
   baseUrl,
   busy,
   onSelectAsset,
@@ -174,9 +191,10 @@ const ServerAssetCard = memo(function ServerAssetCard({
   const thumbnailUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.thumbnail_url)
   const originalUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.download_url)
   const metadataUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.metadata_url)
+  const displayedStatus = busy ? `${asset.status} · 保存中` : asset.status
 
   return (
-    <article className="overflow-hidden rounded-lg border border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40">
+    <article className={cardClassName(asset.status, busy)}>
       <div className="aspect-[4/3] bg-gray-100 dark:bg-white/[0.04]">
         <img src={thumbnailUrl} alt={reviewTitle || asset.asset_id} className="h-full w-full object-cover" loading="lazy" />
       </div>
@@ -188,7 +206,7 @@ const ServerAssetCard = memo(function ServerAssetCard({
             </div>
           </div>
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClassName(asset.status)}`}>
-            {asset.status}
+            {displayedStatus}
           </span>
         </div>
 
@@ -304,6 +322,11 @@ const ServerAssetCard = memo(function ServerAssetCard({
             </button>
           )}
         </div>
+        {actionError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200">
+            {actionError}
+          </div>
+        )}
       </div>
     </article>
   )
@@ -352,7 +375,8 @@ export default function ServerAssetLibrary() {
   const [assets, setAssets] = useState<AgentImageflowAssetResponse[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [actionAssetId, setActionAssetId] = useState<string | null>(null)
+  const [pendingReviews, setPendingReviews] = useState<PendingAssetReviewMap>({})
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [unauthorized, setUnauthorized] = useState(false)
   const [hasMore, setHasMore] = useState(false)
@@ -370,6 +394,7 @@ export default function ServerAssetLibrary() {
   const [campaigns, setCampaigns] = useState<AgentImageflowCampaign[]>([])
   const requestRef = useRef(0)
   const scopeRequestRef = useRef(0)
+  const inflightQueryRef = useRef<string | null>(null)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -415,7 +440,7 @@ export default function ServerAssetLibrary() {
       .catch((nextError) => {
         if (!cancelled) {
           setRuntimeStatus(null)
-          setRuntimeError(getRateLimitFriendlyMessage(nextError))
+          setRuntimeError(getReviewFriendlyErrorMessage(nextError))
         }
       })
     return () => {
@@ -483,7 +508,7 @@ export default function ServerAssetLibrary() {
       commitScope(nextWorkspaceId, nextProjectId, nextCampaignId)
     } catch (nextError) {
       if (scopeRequestRef.current !== requestId) return
-      setScopeError(getRateLimitFriendlyMessage(nextError))
+      setScopeError(getReviewFriendlyErrorMessage(nextError))
     } finally {
       if (scopeRequestRef.current === requestId) setScopeLoading(false)
     }
@@ -511,12 +536,23 @@ export default function ServerAssetLibrary() {
     const libraryMode = mode
     if (libraryMode === 'scope' && !scopeReady) {
       requestRef.current += 1
+      inflightQueryRef.current = null
       setHasMore(false)
       setLoading(false)
       setLoadingMore(false)
       return
     }
+    const querySignature = JSON.stringify({
+      loadMode,
+      offset,
+      libraryMode,
+      projectId: scope.projectId,
+      campaignId: scope.campaignId,
+      filters,
+    })
+    if (loadMode === 'replace' && inflightQueryRef.current === querySignature) return
     const requestId = ++requestRef.current
+    inflightQueryRef.current = querySignature
     if (loadMode === 'append') {
       setLoadingMore(true)
     } else {
@@ -546,13 +582,14 @@ export default function ServerAssetLibrary() {
         setUnauthorized(true)
         setError(null)
       } else {
-        setError(getRateLimitFriendlyMessage(nextError))
+        setError(getReviewFriendlyErrorMessage(nextError))
       }
       if (loadMode === 'replace') {
         setHasMore(false)
       }
     } finally {
       if (requestRef.current === requestId) {
+        inflightQueryRef.current = null
         setLoading(false)
         setLoadingMore(false)
       }
@@ -564,7 +601,10 @@ export default function ServerAssetLibrary() {
   }, [loadAssets])
 
   useEffect(() => {
-    void refreshAssets()
+    const timer = window.setTimeout(() => {
+      void refreshAssets()
+    }, 120)
+    return () => window.clearTimeout(timer)
   }, [refreshAssets])
 
   const updateAsset = useCallback((nextAsset: AgentImageflowAssetResponse) => {
@@ -572,26 +612,48 @@ export default function ServerAssetLibrary() {
   }, [])
 
   const selectAsset = useCallback(async (asset: AgentImageflowAssetResponse) => {
-    setActionAssetId(asset.asset_id)
+    setPendingReviews((current) => ({ ...current, [asset.asset_id]: { nextStatus: 'selected' } }))
+    setActionErrors((current) => {
+      const next = { ...current }
+      delete next[asset.asset_id]
+      return next
+    })
     try {
       updateAsset(await selectAgentImageflowAsset(baseUrl, asset.asset_id, auth))
       showToast('已标记为选中', 'success')
     } catch (nextError) {
-      showToast(getRateLimitFriendlyMessage(nextError), 'error')
+      const message = getReviewFriendlyErrorMessage(nextError)
+      setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
+      showToast(message, 'error')
     } finally {
-      setActionAssetId(null)
+      setPendingReviews((current) => {
+        const next = { ...current }
+        delete next[asset.asset_id]
+        return next
+      })
     }
   }, [auth, baseUrl, showToast, updateAsset])
 
   const rejectAsset = useCallback(async (asset: AgentImageflowAssetResponse) => {
-    setActionAssetId(asset.asset_id)
+    setPendingReviews((current) => ({ ...current, [asset.asset_id]: { nextStatus: 'rejected' } }))
+    setActionErrors((current) => {
+      const next = { ...current }
+      delete next[asset.asset_id]
+      return next
+    })
     try {
       updateAsset(await rejectAgentImageflowAsset(baseUrl, asset.asset_id, auth))
       showToast('已标记为 rejected', 'success')
     } catch (nextError) {
-      showToast(getRateLimitFriendlyMessage(nextError), 'error')
+      const message = getReviewFriendlyErrorMessage(nextError)
+      setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
+      showToast(message, 'error')
     } finally {
-      setActionAssetId(null)
+      setPendingReviews((current) => {
+        const next = { ...current }
+        delete next[asset.asset_id]
+        return next
+      })
     }
   }, [auth, baseUrl, showToast, updateAsset])
 
@@ -673,8 +735,12 @@ export default function ServerAssetLibrary() {
     setFilters(EMPTY_ASSET_FILTERS)
   }
 
-  const selectedCount = assets.filter((asset) => asset.status === 'selected').length
-  const rejectedCount = assets.filter((asset) => asset.status === 'rejected').length
+  const displayAssets = useMemo(
+    () => applyPendingReviewsToAssetList(assets, pendingReviews, filters.status),
+    [assets, filters.status, pendingReviews],
+  )
+  const selectedCount = displayAssets.filter((asset) => asset.status === 'selected').length
+  const rejectedCount = displayAssets.filter((asset) => asset.status === 'rejected').length
   const filtersActive = Object.values(draftFilters).some((value) => value.trim())
   const adminConfigured = adminSession?.configured !== false
   const adminAuthenticated = Boolean(adminSession?.authenticated)
@@ -689,7 +755,7 @@ export default function ServerAssetLibrary() {
     : runtimeError || '状态不可用'
   const summaryText = unauthorized
     ? '未授权'
-    : `${assets.length} 张 · ${selectedCount} 已选中 · ${rejectedCount} 已拒绝${loading && assets.length > 0 ? ' · 刷新中' : ''}`
+    : `${displayAssets.length} 张 · ${selectedCount} 已选中 · ${rejectedCount} 已拒绝${loading && displayAssets.length > 0 ? ' · 刷新中' : ''}`
   const emptyText = filtersActive
     ? '当前筛选没有匹配资产。'
     : mode === 'recent'
@@ -888,7 +954,7 @@ export default function ServerAssetLibrary() {
           {error}
         </div>
       )}
-      {loading && assets.length > 0 && (
+      {loading && displayAssets.length > 0 && (
         <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
           正在刷新服务端资产，当前列表会保留到新结果返回。
         </div>
@@ -915,23 +981,24 @@ export default function ServerAssetLibrary() {
         <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
           当前没有完整 scope，暂不能同步服务端资产。
         </div>
-      ) : assets.length === 0 && loading ? (
+      ) : displayAssets.length === 0 && loading ? (
         <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
           正在同步服务端资产...
         </div>
-      ) : assets.length === 0 && !loading ? (
+      ) : displayAssets.length === 0 && !loading ? (
         <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
           {emptyText}
         </div>
       ) : (
         <>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {assets.map((asset) => (
+            {displayAssets.map((asset) => (
               <ServerAssetCard
                 key={asset.asset_id}
                 asset={asset}
+                actionError={actionErrors[asset.asset_id]}
                 baseUrl={baseUrl}
-                busy={actionAssetId === asset.asset_id}
+                busy={Boolean(pendingReviews[asset.asset_id])}
                 onSelectAsset={selectAsset}
                 onRejectAsset={rejectAsset}
                 onMarkAsReference={markAsReference}

@@ -8,6 +8,7 @@ import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, 
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { getProjectContextPanelSummary } from '../lib/projectContextPanel'
+import { getReviewFriendlyErrorMessage } from '../lib/reviewFeedback'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
@@ -894,7 +895,7 @@ export default function InputBar() {
       })
       .catch((error) => {
         if (cancelled) return
-        setProjectContextError(isAgentImageflowUnauthorizedError(error) ? 'Project Context unauthorized' : error instanceof Error ? error.message : String(error))
+        setProjectContextError(isAgentImageflowUnauthorizedError(error) ? 'Project Context unauthorized' : getReviewFriendlyErrorMessage(error))
       })
       .finally(() => {
         if (!cancelled) setProjectContextLoading(false)

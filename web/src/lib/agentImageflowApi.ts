@@ -728,12 +728,14 @@ export interface AgentImageflowAssetResponse {
 export class AgentImageflowApiError extends Error {
   status: number
   errorCode?: string
+  retryAfterSeconds?: number
 
-  constructor(message: string, status: number, errorCode?: string) {
+  constructor(message: string, status: number, errorCode?: string, retryAfterSeconds?: number) {
     super(message)
     this.name = 'AgentImageflowApiError'
     this.status = status
     this.errorCode = errorCode
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -1565,7 +1567,13 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const message = typeof payload?.error_message === 'string' ? payload.error_message : `HTTP ${response.status}`
     const errorCode = typeof payload?.error_code === 'string' ? payload.error_code : undefined
-    throw new AgentImageflowApiError(message, response.status, errorCode)
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    throw new AgentImageflowApiError(
+      message,
+      response.status,
+      errorCode,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    )
   }
   return payload as T
 }
@@ -1577,6 +1585,12 @@ async function requestEmpty(url: string, init?: RequestInit): Promise<void> {
   if (!response.ok) {
     const message = typeof payload?.error_message === 'string' ? payload.error_message : `HTTP ${response.status}`
     const errorCode = typeof payload?.error_code === 'string' ? payload.error_code : undefined
-    throw new AgentImageflowApiError(message, response.status, errorCode)
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    throw new AgentImageflowApiError(
+      message,
+      response.status,
+      errorCode,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    )
   }
 }
