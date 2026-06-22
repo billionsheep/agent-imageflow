@@ -32,6 +32,8 @@ docker compose exec api /app/vag project access update-key --id <api_key_id> --e
 docker compose exec api /app/vag project access delete-key --id <api_key_id>
 docker compose exec api /app/vag project provider get
 docker compose exec api /app/vag project provider set --enabled=true --provider mock --model mock-image
+docker compose exec api /app/vag project context get
+docker compose exec api /app/vag project context set --file /app/examples/tasks/sample-project-visual-context.json
 docker compose exec api /app/vag repair scan
 docker compose exec api /app/vag repair verify-asset <asset_id>
 docker compose exec api /app/vag audit list --limit 20
@@ -40,6 +42,24 @@ docker compose exec api /app/vag storage cleanup-execute --workspace ws_default 
 curl -H 'X-API-Key: <project_key>' http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-governance
 curl -H 'X-API-Key: <project_key>' http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-integrity
 curl -H 'X-API-Key: <project_key>' 'http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets?limit=24&source=mcp&session_id=<session_id>'
+
+# Project Visual Context smoke（mock provider，无外部费用）
+STAMP=$(date +%s)
+PRJ=prj_pctx_smoke_${STAMP}
+CMP=cmp_pctx_smoke_${STAMP}
+curl -X POST http://localhost:8081/api/workspaces/ws_default/projects \
+  -H 'Content-Type: application/json' \
+  -d "{\"project_id\":\"${PRJ}\",\"name\":\"PCTX Smoke Project\"}"
+curl -X POST http://localhost:8081/api/workspaces/ws_default/projects/${PRJ}/campaigns \
+  -H 'Content-Type: application/json' \
+  -d "{\"campaign_id\":\"${CMP}\",\"name\":\"PCTX Smoke Campaign\"}"
+docker compose exec -T api /app/vag project context set \
+  --project ${PRJ} \
+  --file /app/examples/tasks/sample-project-visual-context.json
+docker compose exec -T api /app/vag task create \
+  --project ${PRJ} \
+  --campaign ${CMP} \
+  --file /app/examples/tasks/sample-pet-story-visual-context-task.json
 
 # 基础限流配置（默认关闭）
 RATE_LIMIT_WINDOW_SECONDS=60
@@ -283,6 +303,37 @@ curl -sf http://127.0.0.1:4173/
 
 诊断时不要为了复现性能差异直接清空 IndexedDB、删除资产或执行 storage cleanup。若 production preview 仍复现高内存，再单独做浏览器 heap snapshot、虚拟列表或历史数据规模专项。
 
+## Web UX Smoothness
+
+用户反馈按钮点击时若出现屏幕闪烁，优先用 production preview 复现，而不是 Vite dev/HMR：
+
+```bash
+npm --prefix web test -- --run
+npm --prefix web run build
+npm --prefix web run preview -- --host 127.0.0.1 --port 4173
+curl -I http://127.0.0.1:4173/
+curl -sf http://localhost:8081/healthz
+```
+
+当前 P1 Web UX Smoothness P1-UX-001 到 P1-UX-009 已完成：
+
+- 服务端资产库只订阅 Agent ImageFlow 相关 settings 字段，避免无关设置变化触发资产列表重拉。
+- Recent Assets / Scope 资产刷新、普通错误和 scope incomplete 路径不会再直接 `setAssets([])` 把已有列表闪空；刷新中会保留旧列表并显示状态。
+- provider/source/session/batch/keyword 文本筛选使用 300ms debounce；旧请求通过 request 序号忽略，避免晚返回覆盖新结果。
+- 资产卡 `Scope` 操作会一次性写入必要 workspace/project/campaign 字段，不再把整份 settings 展开写回。
+- Settings 托管 scope selector 和手动兜底 ID 输入只在本地 draft 中保留不完整 workspace/project/campaign；只有三段完整后才提交全局 settings，关闭 Settings 时会保留上一份完整 scope。
+- Scope 管理 modal 的“设为当前托管 scope”只写入 `imageflowManagedMode`、workspace、project 和 campaign 字段。
+- Scope 管理 modal 的层级请求和 dashboard stats 请求已分离；层级列表先渲染，stats 延迟 180ms 后台启动，关闭或刷新时会取消/忽略旧 stats 写回，资产统计扫描显式使用 `limit=24`。
+- AgentWorkspace、Detail、Lightbox、Settings、ScopeManager、MaskEditor 的 lazy `Suspense` fallback 不再为 `null`，首次加载会显示稳定 overlay/skeleton。
+- Header Settings/Scope/Agent、TaskGrid/AgentWorkspace 任务卡、InputBar 图片预览/Mask/无配置提交入口会在 hover/focus/pointerdown 时预加载对应 chunk。
+- `TaskCard` 使用 `React.memo` 并只订阅 `settings.alwaysShowRetryButton`；`TaskGrid` 的单卡事件由 memo 化 `TaskGridItem` 稳定；服务端资产库使用 memo 化 `ServerAssetCard` 和稳定 select/reject/copy/scope callbacks，减少单卡操作牵动整页卡片重绘。
+- production preview/browser 回归已完成：Settings 打开不触发 `/api/*` 请求；Scope 管理打开保持主框架可见，首轮只观察到 `/api/workspaces`；Recent + 同步保持 root/library 可见，请求数量受控。
+
+仍待后续：
+
+- 本专项已关闭。若手测仍复现闪烁，应记录具体按钮、当前 URL host、Admin 登录状态、筛选条件、mode、scope 和是否正在刷新资产，再新建针对性 follow-up。
+- 若 Recent Assets 显示 `unauthorized`，优先检查 Web URL host 与 API/admin session cookie host 是否一致，以及是否已用同一 host 登录 Admin Console；不要把该状态误判为历史图片丢失或资产库空列表。
+
 ## HTTP / API 审计日志
 
 第一版 HTTP / API 审计日志只覆盖 `/api/*` 请求，不包含 `/healthz` 与 `OPTIONS` 预检：
@@ -431,17 +482,52 @@ imageflow.example.com {
 
 如果当前实例只给 MCP、CLI、自动化脚本或内网后台使用，可以不公开 Web UI，只反代 `/api/*`。
 
-## Project API key / Basic Auth
+## Project API key / Basic Auth / Admin Console
 
 服务端当前支持两层最小鉴权：
 
 - 实例级 Basic Auth：通过 `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` 保护整个 HTTP 入口。
 - 项目级 API key：通过 `project.metadata_json.access_config` 保存兼容视图和 `api_keys` 列表，可同时维护多把命名 key。
+- 轻量 Admin Console session：通过 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录 Web 控制台，使用 HttpOnly cookie 查看控制台安全资源；未单独配置时可回退复用 Basic Auth 用户名和密码。
 
 Docker Compose 启用示例：
 
 ```bash
-BASIC_AUTH_USERNAME=admin BASIC_AUTH_PASSWORD=secret docker compose up -d --force-recreate api worker
+BASIC_AUTH_USERNAME=admin BASIC_AUTH_PASSWORD=secret \
+ADMIN_USERNAME=admin ADMIN_PASSWORD=secret \
+docker compose up -d --force-recreate api worker
+```
+
+Admin session 可选环境变量：
+
+```text
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<console_password>
+ADMIN_SESSION_SECRET=<long_random_secret>
+ADMIN_SESSION_TTL_SECONDS=43200
+```
+
+说明：
+
+- Admin session 只用于 Web 控制台和管理读取路径，不替代 project API key。
+- Provider API key 固定在服务端环境变量中，不返回给 Web、不写入 localStorage、不进入响应 JSON。
+- MCP / CLI / REST 外部 project 级调用继续使用 project API key，也可按需叠加 Basic Auth。
+- 如果启用了 Admin credentials，scope 管理、Recent Assets 和控制台读取路径需要 Admin session 或 Basic Auth。
+- 本地浏览器手测时不要混用 `127.0.0.1` Web origin 和 `localhost` API base；Admin cookie 绑定 host，建议统一使用 `http://localhost:8080` + `http://localhost:8081`。
+
+Admin login smoke：
+
+```bash
+curl -i -c /tmp/agent-imageflow-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"secret"}' \
+  http://localhost:8081/api/admin/login
+
+curl -b /tmp/agent-imageflow-admin.cookie \
+  http://localhost:8081/api/admin/me
+
+curl -b /tmp/agent-imageflow-admin.cookie \
+  'http://localhost:8081/api/admin/assets/recent?limit=24'
 ```
 
 配置 project key：
@@ -507,11 +593,82 @@ docker compose exec -T api /app/vag project access delete-key --project prj_xhs_
 注意：
 
 - 当前 scope 管理接口属于实例级管理能力。
-- 如果启用了 `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD`，这些接口只要求 Basic Auth。
+- 如果启用了 `ADMIN_USERNAME` / `ADMIN_PASSWORD`，Web 控制台优先使用 Admin session；Basic Auth 仍可作为实例级管理调用方式。
 - workspace / project / campaign 的 rename、archive/unarchive、delete 与 list/create 一样，都属于实例级管理能力。
 - 当前不要求 project API key 来列出或创建 workspace/project/campaign；更细权限控制留给后续 hardening。
 - `input-files` 接口属于 project/campaign 级资源；如果 project API key 已启用，上传、读取 metadata 和读取 content 都要求 project API key。
 - 当前不会追踪单把 key 的 usage/last_used；轮换和清理依赖管理员自行确认。
+
+## Project Visual Context
+
+P1 Project Production Context 第一版使用 `project.metadata_json.visual_context`，不新增数据库表，也不保存 provider secret。它只服务 project 级长期视觉生产上下文：
+
+- `characters`: 角色/主形象卡，包含 `id/name/status/role/appearance/personality/forbidden/primary_asset_id/reference_asset_ids`。
+- `references`: 复用已有 asset 的 reference binding，包含 `asset_id/purpose/label/weight/notes/character_id/status`；删除或归档 binding 不删除原 asset。
+- `prompt_recipes`: prompt recipe，包含 `prompt_blocks/negative_prompt/default_aspect_ratio/default_output_format/default_provider/default_model/generation_config`。
+
+REST 入口：
+
+```bash
+curl http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/visual-context
+curl -X POST http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/visual-context \
+  -H 'Content-Type: application/json' \
+  -d '{"visual_context":{"characters":[],"references":[],"prompt_recipes":[]}}'
+```
+
+CLI 入口：
+
+```bash
+docker compose exec -T api /app/vag project context get
+docker compose exec -T api /app/vag project context set --file /app/examples/tasks/sample-project-visual-context.json
+docker compose exec -T api /app/vag task create --file /app/examples/tasks/sample-pet-story-visual-context-task.json
+docker compose exec -T api /app/vag task create --file /app/examples/tasks/sample-pet-story-visual-context-scene-002.json
+docker compose exec -T api /app/vag task create --file /app/examples/tasks/sample-pet-story-visual-context-scene-003.json
+```
+
+任务创建时可传：
+
+```json
+{
+  "character_ids": ["dog_mochi"],
+  "reference_asset_ids": ["asset_existing"],
+  "prompt_recipe_id": "pet_story_cover",
+  "use_project_visual_context": true
+}
+```
+
+服务端会在 `CreateTask` 阶段展开角色、reference 和 recipe，写入 `structured_input_json.visual_context_snapshot`，并让 asset `parameters_json.visual_context_snapshot` 保留关键快照。显式任务字段优先于 recipe/project 默认值；跨 workspace/project 的 `asset_id` 会被拒绝。
+
+示例文件：
+
+- `examples/tasks/project-visual-context-usage.md`: CLI / REST / MCP 使用说明。
+- `examples/tasks/sample-project-visual-context.json`: 三个萌宠角色和 `pet_story_cover` recipe。
+- `examples/tasks/sample-pet-story-visual-context-task.json`: CLI scene 001。
+- `examples/tasks/sample-pet-story-visual-context-scene-002.json`: CLI scene 002。
+- `examples/tasks/sample-pet-story-visual-context-scene-003.json`: CLI scene 003。
+- `examples/tasks/sample-pet-story-visual-context-rest-create-task.json`: REST create task body。
+- `examples/tasks/sample-pet-story-visual-context-mcp-call.json`: JSONL-compatible MCP `tools/call` 示例。
+
+REST 示例：
+
+```bash
+curl -X POST \
+  http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/tasks \
+  -H 'Content-Type: application/json' \
+  --data @examples/tasks/sample-pet-story-visual-context-rest-create-task.json
+```
+
+MCP 示例：
+
+```bash
+docker compose exec -T api /app/mcp < examples/tasks/sample-pet-story-visual-context-mcp-call.json
+```
+
+注意：
+
+- 如果 project 已启用 project API key，REST/CLI 调用方需要自行提供现有 `X-API-Key` / Bearer；不要把 key 写进示例文件或日志。
+- MCP stdio 逐行读取 JSON-RPC，因此 `sample-pet-story-visual-context-mcp-call.json` 保持为单行 JSON。
+- 若正在使用旧的已运行 Docker image，新增 examples 需要 rebuild 后才会出现在 `/app/examples/tasks/`；未 rebuild 时可以用 host-side REST 示例或临时 `docker compose cp` 到容器内验证。
 
 ## Managed input files / real edit
 
@@ -750,9 +907,25 @@ docker compose exec api /app/vag benchmark image-generation \
   --provider openai-compatible \
   --tasks 8 \
   --requested-count 1 \
+  --model gpt-image-2 \
   --poll-interval 2s \
   --timeout 30m \
   --concurrency-label worker-2-provider-cap-2 \
+  --allow-paid-provider
+```
+
+对照 Responses API streaming 时，用任务级 `--model` 覆盖环境中的 Images 模型，避免 `/responses` 被显式的 `OPENAI_COMPATIBLE_MODEL=gpt-image-2` 路由失败：
+
+```bash
+docker compose exec api /app/vag benchmark image-generation \
+  --provider openai-compatible \
+  --tasks 5 \
+  --requested-count 1 \
+  --api-mode responses \
+  --stream true \
+  --partial-images 1 \
+  --model gpt-5.5 \
+  --timeout-seconds 600 \
   --allow-paid-provider
 ```
 
@@ -883,6 +1056,9 @@ Selection mode: auto
 - 如果“使用项目质量配置”开启，创建任务时会传 `use_project_quality_profile=true`，服务端会应用项目级 prompt template / style preset / reference 参数 / generation config。
 - 托管模式默认传 `selection_mode=auto`；多候选任务完成后，服务端会按任务输入或项目级 quality profile 中的 `best_of_config` 自动 selected 一张候选。
 - 如果服务端启用了 Basic Auth 或项目级 API key，Web 会自动附带 `Authorization: Basic ...` 和 `X-API-Key`。
+- Web 服务端资产库默认展示 Recent Assets；用户使用 Admin 登录后，不需要手填 project API key 也可以看到 MCP / CLI / REST / Web 生成的最近资产。
+- 资产卡会显示 workspace / project / campaign，并可点击 `Scope` 切换当前 scope；`Scope` 视图仍可查看当前 campaign 的资产。
+- 未登录或 401 会显示 unauthorized/login 状态，不再和真实空列表、筛选无结果混成 `0 shown`。
 - Web 会轮询 `GET /api/tasks/{task_id}` 并展示服务端候选资产。
 - 任务详情页可以对当前候选资产执行 Select / Reject。
 - Original / Metadata 按钮会打开服务端 delivery URL。
@@ -993,6 +1169,15 @@ curl -H 'X-API-Key: <project_key>' \
 
 Web 服务端资产库第一屏显式传 `limit=24`，图片使用 lazy loading，并通过“加载更多”追加读取。select/reject 后只更新当前 asset，不需要全量重拉。
 
+Web 控制台 Recent Assets 使用 Admin session 读取跨 scope 最近资产：
+
+```bash
+curl -b /tmp/agent-imageflow-admin.cookie \
+  'http://localhost:8081/api/admin/assets/recent?limit=24&source=rest&session_id=session_001'
+```
+
+该接口返回同一套 asset response shape，但按 `created_at desc` 跨 workspace/project/campaign 排序。它用于控制台发现资产，不改变 project API key 作为外部 MCP/CLI/REST project 级访问凭据的规则。
+
 ## Quality profile
 
 项目级质量配置保存在 `project.metadata_json.quality_profile`，当前通过 REST 读取和更新：
@@ -1037,9 +1222,15 @@ curl -X POST http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_an
   "model": "gpt-image-2",
   "base_url": "https://api.openai.com/v1",
   "generation_config": {
-    "quality": "high"
+    "quality": "high",
+    "api_mode": "images",
+    "stream": false,
+    "partial_images": 0
   },
   "use_project_quality_profile": true,
+  "api_mode": "images",
+  "stream": false,
+  "partial_images": 0,
   "max_n": 4,
   "supports_url_result": true,
   "preferred_response_format": "url",
@@ -1057,12 +1248,15 @@ curl -H 'X-API-Key: <project_key>' \
 curl -X POST http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/provider-profile \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: <project_key>' \
-  -d '{"enabled":true,"provider":"mock","model":"mock-image","generation_config":{"quality":"high"},"use_project_quality_profile":true,"max_n":4,"preferred_response_format":"url"}'
+  -d '{"enabled":true,"provider":"mock","model":"mock-image","generation_config":{"quality":"high"},"use_project_quality_profile":true,"api_mode":"images","stream":false,"partial_images":0,"max_n":4,"preferred_response_format":"url"}'
 
 docker compose exec api /app/vag project provider set \
   --provider mock \
   --model mock-image \
   --generation-config '{"quality":"high"}' \
+  --api-mode images \
+  --stream false \
+  --partial-images 0 \
   --max-n 4 \
   --preferred-response-format url
 ```
@@ -1073,7 +1267,8 @@ docker compose exec api /app/vag project provider set \
 - 未配置 profile 时继续使用服务端环境变量中的默认 provider。
 - 创建任务没有显式 `provider` 时，服务端会优先使用启用的项目 provider profile。
 - `provider_profile.model` 当前可覆盖 `openai-compatible` 的 model 和 `fal` 的 endpoint id；`base_url` 第一版只作为非敏感项目默认配置保存，真实 endpoint/key 存储策略需要单独确认。
-- `max_n` 表示单次 provider 请求建议承载的同 prompt 变体数，默认 4，服务端上限 10；`requested_count` 超过 `max_n` 时会拆成多次 provider 请求并保留同一个 task。
+- `api_mode` 可选 `images` / `responses`；`stream` 控制是否请求 SSE；`partial_images` 控制 partial image event 数量，范围 0-3。任务 `generation_config` 中同名字段优先于项目 provider profile。
+- `max_n` 表示单次 provider 请求建议承载的同 prompt 变体数，默认值按 provider 保守选择：mock 为 4，openai-compatible 为 1，服务端上限 10；`requested_count` 超过 `max_n` 时会拆成多次 provider 请求并保留同一个 task。
 - `supports_url_result`、`preferred_response_format`、`max_concurrency`、`timeout_seconds` 是项目经验配置，不代表 provider 一定支持；openai-compatible adapter 默认 URL 优先，会省略 `response_format`，仅在显式配置 `preferred_response_format=b64_json` 时请求 Base64 响应。
 
 ## Codex batch asset production examples
@@ -1156,7 +1351,7 @@ provider=openai-compatible
 ```bash
 OPENAI_COMPATIBLE_BASE_URL=https://api.openai.com/v1
 OPENAI_COMPATIBLE_API_KEY=<secret>
-OPENAI_COMPATIBLE_MODEL=gpt-image-2
+OPENAI_COMPATIBLE_MODEL=
 OPENAI_COMPATIBLE_MAX_CONCURRENCY=3
 PROVIDER_TIMEOUT_SECONDS=300
 OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECONDS=30
@@ -1167,9 +1362,12 @@ OPENAI_COMPATIBLE_TOTAL_TIMEOUT_SECONDS=300
 说明：
 
 - 默认不启用真实 provider；未配置 base URL 或 API key 时，`provider=openai-compatible` 会在创建任务时返回明确错误。
+- adapter 支持 Images API 同步、Images API streaming 和 Responses API `image_generation` streaming。Images API 默认模型为 `gpt-image-2`；当未显式配置 `OPENAI_COMPATIBLE_MODEL` 且 `api_mode=responses` 时，Responses API 默认模型为 `gpt-5.5`。
 - adapter 调用 `{OPENAI_COMPATIBLE_BASE_URL}/images/generations`，默认省略 `response_format` 并解析 `data[].url` 或 `data[].b64_json`；显式配置 `preferred_response_format=b64_json` 时会请求 Base64 响应。
 - 当任务存在已解析 reference/mask 输入时，adapter 调用 `{OPENAI_COMPATIBLE_BASE_URL}/images/edits`。
-- adapter 会从 `generation_config` 白名单透传 `quality`、`moderation`、`output_compression`；当前不透传 `stream` / `partial_images`。
+- 当 `api_mode=responses` 时，adapter 调用 `{OPENAI_COMPATIBLE_BASE_URL}/responses`，使用 `tools:[{"type":"image_generation"}]` 和 `tool_choice:"required"`。
+- adapter 会从 `generation_config` 白名单透传 `quality`、`moderation`、`output_compression`；`api_mode`、`stream`、`partial_images`、`preferred_response_format`、`timeout_seconds`、`max_n` 优先使用任务 `generation_config`，再使用项目 provider profile。
+- openai-compatible 默认 `max_n=1`，多图会走多个受 provider cap 限制的并发 `n=1` 请求；只有在目标 provider 已验证 `n>1` 会返回完整多图时，才建议显式配置 `max_n`。
 - 返回图片会在服务端规范化为 PNG，再进入现有 asset processor / storage / delivery。
 - 自动化验证使用本地 HTTP mock，不会触发真实外部 API。真实 smoke 需要用户自行配置密钥，并自行承担 provider 成本。
 

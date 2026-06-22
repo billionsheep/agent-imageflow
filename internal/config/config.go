@@ -21,6 +21,10 @@ type Config struct {
 	DefaultProvider                string
 	BasicAuthUsername              string
 	BasicAuthPassword              string
+	AdminUsername                  string
+	AdminPassword                  string
+	AdminSessionSecret             string
+	AdminSessionTTLSeconds         int
 	FalBaseURL                     string
 	FalRestBaseURL                 string
 	FalAPIKey                      string
@@ -62,6 +66,10 @@ func Load() Config {
 		DefaultProvider:                env("DEFAULT_PROVIDER", "mock"),
 		BasicAuthUsername:              env("BASIC_AUTH_USERNAME", ""),
 		BasicAuthPassword:              env("BASIC_AUTH_PASSWORD", ""),
+		AdminUsername:                  env("ADMIN_USERNAME", env("BASIC_AUTH_USERNAME", "")),
+		AdminPassword:                  env("ADMIN_PASSWORD", env("BASIC_AUTH_PASSWORD", "")),
+		AdminSessionSecret:             env("ADMIN_SESSION_SECRET", ""),
+		AdminSessionTTLSeconds:         envInt("ADMIN_SESSION_TTL_SECONDS", 12*60*60),
 		FalBaseURL:                     strings.TrimRight(env("FAL_BASE_URL", "https://queue.fal.run"), "/"),
 		FalRestBaseURL:                 strings.TrimRight(env("FAL_REST_BASE_URL", "https://rest.fal.ai"), "/"),
 		FalAPIKey:                      env("FAL_API_KEY", ""),
@@ -70,7 +78,7 @@ func Load() Config {
 		FalPollIntervalMs:              envInt("FAL_POLL_INTERVAL_MS", 1000),
 		OpenAICompatibleBaseURL:        strings.TrimRight(env("OPENAI_COMPATIBLE_BASE_URL", ""), "/"),
 		OpenAICompatibleAPIKey:         env("OPENAI_COMPATIBLE_API_KEY", ""),
-		OpenAICompatibleModel:          env("OPENAI_COMPATIBLE_MODEL", "gpt-image-2"),
+		OpenAICompatibleModel:          env("OPENAI_COMPATIBLE_MODEL", ""),
 		OpenAICompatibleMaxConcurrency: envNonNegativeInt("OPENAI_COMPATIBLE_MAX_CONCURRENCY", 3),
 		OpenAICompatibleConnectTimeout: envInt("OPENAI_COMPATIBLE_CONNECT_TIMEOUT_SECONDS", 30),
 		OpenAICompatibleHeaderTimeout:  envInt("OPENAI_COMPATIBLE_RESPONSE_HEADER_TIMEOUT_SECONDS", providerTimeout),

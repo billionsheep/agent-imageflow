@@ -4,12 +4,13 @@
 
 - [ ] 旧 P1 拆分 CSV 保留为历史参考，不再作为下一轮主入口：`issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv`。
 - [ ] 用 production preview 路径继续试用 Web，观察是否仍出现 Chrome `High memory usage`；若仍复现，再单独做浏览器 heap/virtualized list 专项。
-- [ ] 规划并拆分 Reference Library / Prompt Recipe / 账号主形象留存 P2：保留萌宠账号等场景的原始形象、参考图、prompt 和 edit lineage。
+- [ ] 继续执行 `issues/next-phase-p1-project-production-context.csv` 的后续项：P1-PCTX-001 到 P1-PCTX-007 已完成服务端核心和自动化 examples；下一步按 CSV 推进 P1-PCTX-008 到 P1-PCTX-009，不把范围扩成通用 DAM、账号运营系统或导出平台。
+- [ ] 后续再规划 Batch / Story / Scene View、Export Pack、NAS/WebDAV/SMB 等能力；这些不进入 Project Visual Context 第一轮核心实现。
 - [ ] 澄清嵌入式架构图场景：若需要 Mermaid/D2/SVG 可编辑源，需要补 Diagram source track；若只作为图片资产，可沿用当前资产闭环。
 
 ## Doing
 
-- [ ] 当前建议先试用 P1 资产生产、Web performance 和 Provider Throughput & Reliability 结果，再决定是否进入 P2 Reference Library / Prompt Recipe。
+- [ ] 当前建议主线推进 `issues/next-phase-p1-project-production-context.csv` 的 P1-PCTX-008 到 P1-PCTX-009，完成最小 Web context 面板和萌宠故事多 scene 回归。
 
 ## Done
 
@@ -71,6 +72,18 @@
 - [x] 完成 P1 Web Performance / Startup：`initStore` 幂等、thumbnail backfill 预算、本地任务画廊渲染预算、服务端资产库节点上限、恢复轮询上限、Scope 统计缓存/边界、Markdown/Agent/Modal 懒加载均已接入；前端测试和 production build 通过。
 - [x] 完成并发与生图性能专项基线：验证 `WORKER_CONCURRENCY=6` 下平台本地 worker/storage 吞吐正常；新增 task attempts API/CLI/Web 展示、openai-compatible 参数透传和 `vag benchmark image-generation`。mock 延迟压测验证 worker=6 可稳定处理 32 任务 / 128 mock 资产；真实 openai-compatible c6 小样本 6 任务中 4 成功、2 个 120s timeout，说明本机资源不是瓶颈，provider 侧 6 并发不稳定。
 - [x] 完成 P1 Provider Throughput & Reliability：默认保留 `WORKER_CONCURRENCY=6`，真实 provider 默认收敛为 `OPENAI_COMPATIBLE_MAX_CONCURRENCY=3`、`FAL_MAX_CONCURRENCY=3`、`PROVIDER_TIMEOUT_SECONDS=300`；openai-compatible 增加 connect/header/total timeout profile；task attempts 新增 queue/provider/download/store/thumbnail 阶段指标；provider profile 增加 `max_n` 等非敏感 capability；`requested_count` 超过 `max_n` 时按同 task 拆分 provider 请求；benchmark 报告增强并新增 `vag batch progress`。
+- [x] 完成 P1 Web Console Auth & Asset Visibility：新增轻量 Admin session、`/api/admin/assets/recent` 跨 scope 最近资产、Web Admin 登录态和未授权/空列表/筛选无结果状态区分；Web 登录后不需要手填 project API key 即可查看 MCP/CLI/REST 生成的最近资产，资产卡显示 workspace/project/campaign 并支持一键切换 scope；project API key 仍保留给外部 REST/MCP/CLI。
+- [x] 生成下一阶段 P1 Project Production Context 核心 CSV：`issues/next-phase-p1-project-production-context.csv`，范围限定为 Character/Mascot Profile、Project Reference Library、Prompt Recipe / Quality Profile 2.0、Task Input Integration、最小 Web 面板和萌宠故事 mock 回归；Batch/Export/NAS 能力后置。
+- [x] 完成 P1 Project Production Context 基线和契约确认：只读复核 AGENTS、docs/project、CSV 和现有源码后，确认本轮主入口为 `issues/next-phase-p1-project-production-context.csv`；第一版 Project Visual Context 复用 `project.metadata_json.visual_context`，字段覆盖 character profiles、reference bindings、prompt recipes、quality defaults 和任务快照规则，未触发新增表、迁移或破坏性接口变更。
+- [x] 完成 P1 Project Production Context 服务端核心闭环 P1-PCTX-003 到 P1-PCTX-006：`project.metadata_json.visual_context` 已支持 Character/Mascot Profile、Project Reference Library、Prompt Recipe / Quality Profile 2.0 和 CreateTask visual context expansion；REST `GET/POST /visual-context`、CLI `vag project context get/set`、MCP `create_image_task` visual context 字段、`structured_input_json` / asset `parameters_json` 快照均已接入；mock smoke 验证 `task_099adb62c6c7d7cb25cb -> asset_84172190f72d61f701c2` 和 MCP `task_582c7440fd46425545cc -> asset_50d7842428660394d469`。
+- [x] 完成 P1-PCTX-007 MCP REST CLI contract and examples：新增 `examples/tasks/project-visual-context-usage.md`、scene 002/003 CLI task 示例、REST create task body 示例和 JSONL-compatible MCP `tools/call` 示例；JSON parse 验证 6 个示例文件通过；mock smoke 在 `prj_pctx_smoke_1781964012 / cmp_pctx_smoke_1781964012` 下创建 CLI `task_d1bdf01c13450287d6d2`、REST `task_bf41909b09cdb53c7387`、MCP `task_7efdece0e104a504f613`，batch progress 返回 `task_count=4`、`succeeded_count=4`、`asset_count=8`；默认 project 正确要求 project API key，本轮未读取或打印任何 key。
+- [x] 生成 P1 Web UX Smoothness 专项 CSV：`issues/next-phase-p1-web-ux-smoothness.csv`。子代理只读审视指出闪烁高概率来自 `settings/scope/filter` 与资产库刷新耦合、scope 分步写入、刷新时清空 assets、筛选请求无 debounce、lazy modal 空 fallback 和局部更新重绘，本 CSV 已拆分 P0/P1 修复与验收。
+- [x] 完成 P1 Web UX Smoothness 第一批资产库稳定性修复：`ServerAssetLibrary` 已避免订阅整份 settings；刷新/error/scope incomplete 不再直接清空现有资产；文本筛选增加 300ms debounce 并继续用 request 序号忽略旧响应；资产卡 Scope 切换改为一次性写入必要 scope 字段。`npm --prefix web test -- --run` 通过 17 files / 224 tests，`npm --prefix web run build` 通过且仅有既有 chunk warning；本轮未运行真实 provider，浏览器自动化因工具元数据错误未完成视觉验收。
+- [x] 完成 P1-UX-004 Atomic scope switching：Settings 托管 scope selector 和手动兜底 ID 输入现在只在本地 draft 中保存不完整 workspace/project/campaign，完整后才一次性提交到全局 settings；关闭 Settings 时会保留上一份完整 scope，避免把空 project/campaign 归一化为默认示例 scope；Scope 管理 modal 的“设为当前托管 scope”只写入必要的完整 scope 字段。`npm --prefix web test -- --run` 通过 17 files / 224 tests，`npm --prefix web run build` 通过且仅有既有 chunk warning；浏览器 Network/Performance 视觉回归已由 P1-UX-009 收口。
+- [x] 完成 P1-UX-007 Stable lazy modal fallback and preload：`App` 的 AgentWorkspace、Detail、Lightbox、Settings、ScopeManager、MaskEditor lazy fallback 不再为 `null`，首次加载会显示稳定 overlay/skeleton；新增 lazy module preload helper，Header Settings/Scope/Agent、TaskGrid/AgentWorkspace 任务卡、InputBar 图片预览/Mask/无配置提交入口会在 hover/focus/pointerdown 时预加载对应 chunk。`npm --prefix web test -- --run` 通过 17 files / 224 tests，`npm --prefix web run build` 通过且 lazy chunks 仍拆分，仅有既有 chunk warning；`curl -I http://127.0.0.1:4173/` 返回 200；最终视觉回归已由 P1-UX-009 收口。
+- [x] 完成 P1-UX-006 Scope dashboard stats background loading：Scope 管理 modal 的层级加载和 dashboard stats 现在使用独立 request id；层级列表渲染后延迟 180ms 启动统计，关闭或重新加载时取消 timer 并忽略旧统计写回；统计扫描资产列表使用明确 `limit=24`，继续保留 60s 缓存和扫描上限。`npm --prefix web test -- --run` 通过 17 files / 224 tests，`npm --prefix web run build` 通过且仅有既有 chunk warning；`git diff --check` 通过；`curl -I http://127.0.0.1:4173/` 返回 200；浏览器 Network/Performance 视觉回归已由 P1-UX-009 收口。
+- [x] 完成 P1-UX-008 Task and asset card render containment：`TaskCard` 改为 `React.memo` 并只订阅 `settings.alwaysShowRetryButton`；`TaskGrid` 把每张可见卡片包进 memo 化 `TaskGridItem`，稳定 click/reuse/edit/delete handlers；`ServerAssetLibrary` 抽出 memo 化 `ServerAssetCard`，select/reject/copy/scope action callbacks 稳定，metadata/parameters 摘要在卡片内 `useMemo`。`npm --prefix web test -- --run` 通过 17 files / 224 tests，`npm --prefix web run build` 通过且仅有既有 chunk warning；`git diff --check` 通过；`curl -I http://127.0.0.1:4173/` 返回 200；浏览器 Profiler/Network 证据已由 P1-UX-009 补充。
+- [x] 完成 P1-UX-009 UX smoothness regression and docs：`npm --prefix web test -- --run` 通过 17 files / 224 tests，`npm --prefix web run build` 通过且仅有既有 chunk warning，`git diff --check` 通过，`curl -I http://127.0.0.1:4173/` 返回 200；`agent-browser-cli` 回归确认 production preview root 与服务端资产库可见，Settings 打开不触发 `/api/*` 请求，Scope 管理打开主框架保持可见且首轮只观察到 `/api/workspaces`，Recent + 同步保持 root/library 可见且只有 1 个 recent 请求；当前浏览器 Recent Assets 显示明确 `unauthorized`，更符合 Admin session/API host 状态问题而非渲染空白。
 
 ## Acceptance Criteria For Next Step
 
@@ -78,6 +91,8 @@
 - 合并后的 P1 Asset Production Readiness 已完成，下一步试用资产库筛选、分页、provider profile 和 batch progress。
 - P1 Web Performance / Startup 已完成，日常试用优先用 production preview 判断真实资源占用；Vite dev/HMR 只用于开发。
 - P1 Provider Throughput & Reliability 已完成，当前推荐默认是 `WORKER_CONCURRENCY=6`、真实 provider cap `3`、provider timeout `300s`；真实 provider 后续按 cap `2 -> 3 -> 4` 小样本复测稳定档，且必须先确认费用。
+- P1 Web Console Auth & Asset Visibility 已完成，Web 控制台建议用 Admin session 查看 Recent Assets；project API key 继续用于 MCP/CLI/REST，不应放进 Web 作为日常查看资产的前置条件。
+- P1 Web UX Smoothness 已完成，日常试用时若仍复现整屏闪烁，应记录具体按钮、URL host、Admin 登录状态、当前 mode/filter/scope 和是否正在刷新资产，再另起针对性 follow-up；不要把已关闭的 P1-UX-001 到 P1-UX-009 重复排期。
 - 若继续执行 P2，建议先重新生成独立 CSV；涉及 provider key、公网暴露策略或真实 secret 存储的任务需先确认。
 - 若当前已有线程在执行某个 P1 CSV，不要并行改同一 CSV；Web CPU 偏高问题已作为独立 P1 performance CSV 纳入下一次推进。
 - 旧 P1 拆分 CSV 保留用于溯源，不再作为下一轮主入口；项目全局状态优先查看 `docs/project/PROJECT_STATUS_MAP.md`。

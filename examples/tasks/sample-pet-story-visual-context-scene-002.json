@@ -1,0 +1,21 @@
+{
+  "idempotency_key": "sample-pet-story-visual-context-scene-002-v1",
+  "title": "Pet Story Scene 002",
+  "purpose": "cute pet story interior scene",
+  "prompt": "Mochi bravely sniffs the glowing moon cake while Biscuit guards the blanket fort and Orange Nap watches from a cushion",
+  "character_ids": ["dog_mochi", "dog_biscuit", "cat_orange"],
+  "prompt_recipe_id": "pet_story_cover",
+  "use_project_visual_context": true,
+  "requested_count": 2,
+  "selection_mode": "auto",
+  "review_required": false,
+  "metadata_json": {
+    "source": "cli",
+    "source_agent": "codex",
+    "session_id": "sample_pet_story_visual_context",
+    "batch_id": "sample_pet_story_visual_context_batch",
+    "story_id": "pet_story_moon_cake",
+    "scene_id": "scene_002",
+    "target_path": "stories/pet_story_moon_cake/scene_002_blanket_fort.png"
+  }
+}

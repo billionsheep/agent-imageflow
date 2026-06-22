@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +18,129 @@ type fakeRateLimiter struct {
 	decisions map[string]RateLimitDecision
 	errs      map[string]error
 	calls     []rateLimitCall
+}
+
+func TestAdminLoginMeLogoutSessionFlow(t *testing.T) {
+	server := &Server{
+		options: Options{
+			AdminUsername:   "admin",
+			AdminPassword:   "secret",
+			AdminSessionTTL: time.Hour,
+		},
+	}
+
+	loginRecorder := httptest.NewRecorder()
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/admin/login", bytes.NewBufferString(`{"username":"admin","password":"secret"}`))
+	server.ServeHTTP(loginRecorder, loginRequest)
+	if loginRecorder.Code != http.StatusOK {
+		t.Fatalf("login status = %d body=%s", loginRecorder.Code, loginRecorder.Body.String())
+	}
+	setCookie := loginRecorder.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, adminSessionCookieName+"=") || !strings.Contains(setCookie, "HttpOnly") {
+		t.Fatalf("expected admin session HttpOnly cookie, got %q", setCookie)
+	}
+
+	cookies := loginRecorder.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected login cookie")
+	}
+	meRecorder := httptest.NewRecorder()
+	meRequest := httptest.NewRequest(http.MethodGet, "/api/admin/me", nil)
+	meRequest.AddCookie(cookies[0])
+	server.ServeHTTP(meRecorder, meRequest)
+	if meRecorder.Code != http.StatusOK {
+		t.Fatalf("me status = %d body=%s", meRecorder.Code, meRecorder.Body.String())
+	}
+	var me adminSessionResponse
+	if err := json.Unmarshal(meRecorder.Body.Bytes(), &me); err != nil {
+		t.Fatalf("decode me response: %v", err)
+	}
+	if !me.Authenticated || me.Username != "admin" || !me.Configured {
+		t.Fatalf("unexpected me response: %#v", me)
+	}
+
+	logoutRecorder := httptest.NewRecorder()
+	logoutRequest := httptest.NewRequest(http.MethodPost, "/api/admin/logout", nil)
+	server.ServeHTTP(logoutRecorder, logoutRequest)
+	if logoutRecorder.Code != http.StatusOK {
+		t.Fatalf("logout status = %d body=%s", logoutRecorder.Code, logoutRecorder.Body.String())
+	}
+	if !strings.Contains(logoutRecorder.Header().Get("Set-Cookie"), "Max-Age=0") {
+		t.Fatalf("expected logout to clear cookie, got %q", logoutRecorder.Header().Get("Set-Cookie"))
+	}
+}
+
+func TestAdminLoginDisabledWithoutPassword(t *testing.T) {
+	server := &Server{options: Options{AdminUsername: "admin"}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/login", bytes.NewBufferString(`{"username":"admin","password":"secret"}`))
+
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected admin_not_configured status 503, got %d", recorder.Code)
+	}
+}
+
+func TestAuthorizeRequestAllowsAdminSessionForRecentAssets(t *testing.T) {
+	server := &Server{
+		options: Options{
+			AdminUsername:   "admin",
+			AdminPassword:   "secret",
+			AdminSessionTTL: time.Hour,
+		},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/assets/recent?limit=24", nil)
+	request.AddCookie(server.newAdminSessionCookie("admin", time.Now().Add(time.Hour)))
+	recorder := httptest.NewRecorder()
+
+	authorized, scope, actor, err := server.authorizeRequest(recorder, request, []string{"api", "admin", "assets", "recent"})
+	if err != nil {
+		t.Fatalf("authorizeRequest returned error: %v", err)
+	}
+	if !authorized {
+		t.Fatalf("expected admin session to authorize recent assets, status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !scope.RequireAdmin || !scope.AllowAdmin {
+		t.Fatalf("expected recent assets scope to require admin: %#v", scope)
+	}
+	if actor.AuthMode != "admin_session" || actor.Actor != "admin" {
+		t.Fatalf("unexpected audit actor: %#v", actor)
+	}
+}
+
+func TestAuthorizeRequestRejectsAnonymousRecentAssets(t *testing.T) {
+	server := &Server{}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/assets/recent?limit=24", nil)
+
+	authorized, _, _, err := server.authorizeRequest(recorder, request, []string{"api", "admin", "assets", "recent"})
+	if err != nil {
+		t.Fatalf("authorizeRequest returned error: %v", err)
+	}
+	if authorized {
+		t.Fatal("expected anonymous recent assets request to be rejected")
+	}
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestSetCORSEchoesOriginWhenCredentialsAreAllowed(t *testing.T) {
+	server := &Server{}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodOptions, "/api/admin/me", nil)
+	request.Header.Set("Origin", "http://localhost:8080")
+
+	server.setCORS(recorder, request)
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:8080" {
+		t.Fatalf("unexpected CORS origin %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("expected credentials CORS header, got %q", got)
+	}
+	if methods := recorder.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(methods, "PATCH") || !strings.Contains(methods, "DELETE") {
+		t.Fatalf("expected PATCH/DELETE in CORS methods, got %q", methods)
+	}
 }
 
 type rateLimitCall struct {
@@ -253,6 +378,14 @@ func TestInferAuditRoute(t *testing.T) {
 	}
 	if action != "get_batch_progress" {
 		t.Fatalf("unexpected batch-progress action %q", action)
+	}
+
+	route, action = inferAuditRoute([]string{"api", "admin", "assets", "recent"}, http.MethodGet)
+	if route != "/api/admin/assets/recent" {
+		t.Fatalf("unexpected recent assets route %q", route)
+	}
+	if action != "list_recent_assets" {
+		t.Fatalf("unexpected recent assets action %q", action)
 	}
 }
 

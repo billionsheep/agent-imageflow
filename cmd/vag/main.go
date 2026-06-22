@@ -308,6 +308,7 @@ type benchmarkRequestShape struct {
 	APIMode              string `json:"api_mode"`
 	Endpoint             string `json:"endpoint,omitempty"`
 	RequestMode          string `json:"request_mode"`
+	Model                string `json:"model,omitempty"`
 	Stream               bool   `json:"stream"`
 	PartialImages        int    `json:"partial_images"`
 	ResponseFormat       string `json:"response_format"`
@@ -369,6 +370,13 @@ func benchmarkImageGenerationCmd(args []string) error {
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "task polling interval")
 	prompt := fs.String("prompt", "Agent ImageFlow benchmark image", "prompt prefix")
 	mockDelayMs := fs.Int("mock-delay-ms", 0, "mock provider artificial latency per task in milliseconds")
+	model := fs.String("model", "", "model override for benchmark tasks")
+	apiMode := fs.String("api-mode", "", "openai-compatible api mode override for benchmark tasks: images or responses")
+	stream := fs.String("stream", "", "openai-compatible stream override for benchmark tasks: true or false")
+	partialImages := fs.Int("partial-images", -1, "openai-compatible partial_images override, 0-3")
+	preferredResponseFormat := fs.String("preferred-response-format", "", "openai-compatible response format override: url or b64_json")
+	maxN := fs.Int("max-n", 0, "provider max_n override for benchmark tasks")
+	timeoutSeconds := fs.Int("timeout-seconds", 0, "provider timeout_seconds override for benchmark tasks")
 	allowPaidProvider := fs.Bool("allow-paid-provider", false, "allow non-mock provider benchmark that may incur cost")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -392,6 +400,15 @@ func benchmarkImageGenerationCmd(args []string) error {
 	}
 	if *mockDelayMs < 0 || *mockDelayMs > 10_000 {
 		return fmt.Errorf("--mock-delay-ms must be between 0 and 10000")
+	}
+	if *partialImages < -1 || *partialImages > 3 {
+		return fmt.Errorf("--partial-images must be between 0 and 3")
+	}
+	if *maxN < 0 || *maxN > 10 {
+		return fmt.Errorf("--max-n must be between 0 and 10")
+	}
+	if *timeoutSeconds < 0 {
+		return fmt.Errorf("--timeout-seconds must be >= 0")
 	}
 	if providerName != provider.MockProviderID && !*allowPaidProvider {
 		return fmt.Errorf("provider %q may incur real API cost; rerun with --allow-paid-provider after confirming the small sample size", providerName)
@@ -425,9 +442,42 @@ func benchmarkImageGenerationCmd(args []string) error {
 		ProjectID:   strings.TrimSpace(*projectID),
 		CampaignID:  strings.TrimSpace(*campaignID),
 	}
-	var generationConfig json.RawMessage
+	generationConfigMap := map[string]any{}
 	if providerName == provider.MockProviderID && *mockDelayMs > 0 {
-		raw, err := json.Marshal(map[string]any{"mock_delay_ms": *mockDelayMs})
+		generationConfigMap["mock_delay_ms"] = *mockDelayMs
+	}
+	if trimmed := strings.TrimSpace(*model); trimmed != "" {
+		generationConfigMap["model"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(*apiMode); trimmed != "" {
+		if trimmed != "images" && trimmed != "responses" {
+			return fmt.Errorf("--api-mode must be images or responses")
+		}
+		generationConfigMap["api_mode"] = trimmed
+	}
+	if parsed, ok, err := parseOptionalBoolFlag(*stream, "--stream"); err != nil {
+		return err
+	} else if ok {
+		generationConfigMap["stream"] = parsed
+	}
+	if *partialImages >= 0 {
+		generationConfigMap["partial_images"] = *partialImages
+	}
+	if trimmed := strings.TrimSpace(*preferredResponseFormat); trimmed != "" {
+		if trimmed != "url" && trimmed != "b64_json" {
+			return fmt.Errorf("--preferred-response-format must be url or b64_json")
+		}
+		generationConfigMap["preferred_response_format"] = trimmed
+	}
+	if *maxN > 0 {
+		generationConfigMap["max_n"] = *maxN
+	}
+	if *timeoutSeconds > 0 {
+		generationConfigMap["timeout_seconds"] = *timeoutSeconds
+	}
+	var generationConfig json.RawMessage
+	if len(generationConfigMap) > 0 {
+		raw, err := json.Marshal(generationConfigMap)
 		if err != nil {
 			return err
 		}
@@ -722,16 +772,33 @@ func inferBenchmarkRequestShape(providerName string, requestedCount int, cfg con
 	}
 
 	maxN := benchmarkProviderMaxN(task, providerName)
-	shape.APIMode = "images"
+	apiMode := benchmarkAPIMode(task, providerName)
+	shape.APIMode = apiMode
 	shape.Endpoint = "/images/generations"
-	shape.Stream = false
-	shape.PartialImages = 0
+	if apiMode == "responses" {
+		shape.Endpoint = "/responses"
+	}
+	shape.Model = benchmarkModel(task, providerName, apiMode, cfg)
+	shape.Stream = benchmarkStream(task, providerName, apiMode)
+	shape.PartialImages = benchmarkPartialImages(task, providerName, shape.Stream)
 	shape.SplitCounts = benchmarkSplitCounts(requestedCount, maxN)
 	if len(shape.SplitCounts) > 0 {
 		shape.N = shape.SplitCounts[0]
 	}
 	shape.TimeoutSeconds = firstPositiveInt(cfg.OpenAICompatibleTotalTimeout, cfg.ProviderTimeoutSeconds)
-	if benchmarkPreferredResponseFormat(task, providerName) == "b64_json" {
+	if configuredTimeout := benchmarkTimeoutSeconds(task, providerName); configuredTimeout > 0 {
+		shape.TimeoutSeconds = configuredTimeout
+	}
+	if apiMode == "responses" {
+		shape.RequestMode = provider.OpenAICompatibleRequestModeResponsesStream
+		shape.ResponseFormat = "omitted"
+	} else if shape.Stream {
+		shape.RequestMode = provider.OpenAICompatibleRequestModeImagesStream
+		shape.ResponseFormat = "omitted"
+		if benchmarkPreferredResponseFormat(task, providerName) == "b64_json" {
+			shape.ResponseFormat = "b64_json"
+		}
+	} else if benchmarkPreferredResponseFormat(task, providerName) == "b64_json" {
 		shape.RequestMode = provider.OpenAICompatibleRequestModeImagesSyncB64
 		shape.ResponseFormat = "b64_json"
 	} else {
@@ -743,14 +810,22 @@ func inferBenchmarkRequestShape(providerName string, requestedCount int, cfg con
 
 func benchmarkProviderMaxN(task domain.Task, providerName string) int {
 	maxN := 4
-	var input struct {
-		ProviderProfile domain.ProjectProviderProfile `json:"provider_profile"`
+	if providerName == provider.OpenAICompatibleProviderID {
+		maxN = 1
 	}
-	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil &&
-		input.ProviderProfile.Enabled &&
-		strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
-		input.ProviderProfile.MaxN > 0 {
-		maxN = input.ProviderProfile.MaxN
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
+			input.ProviderProfile.MaxN > 0 {
+			maxN = input.ProviderProfile.MaxN
+		}
+		if value, ok := benchmarkGenerationConfigInt(input.GenerationConfig, "max_n", 1, 10); ok {
+			maxN = value
+		}
 	}
 	if maxN < 1 {
 		return 1
@@ -763,15 +838,137 @@ func benchmarkProviderMaxN(task domain.Task, providerName string) int {
 
 func benchmarkPreferredResponseFormat(task domain.Task, providerName string) string {
 	var input struct {
-		ProviderProfile domain.ProjectProviderProfile `json:"provider_profile"`
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
 	}
-	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil &&
-		input.ProviderProfile.Enabled &&
-		strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
-		strings.TrimSpace(input.ProviderProfile.PreferredResponseFormat) == "b64_json" {
-		return "b64_json"
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
+			strings.TrimSpace(input.ProviderProfile.PreferredResponseFormat) == "b64_json" {
+			return "b64_json"
+		}
+		if value := benchmarkGenerationConfigString(input.GenerationConfig, "preferred_response_format"); value == "b64_json" || value == "url" {
+			return value
+		}
 	}
 	return "url"
+}
+
+func benchmarkAPIMode(task domain.Task, providerName string) string {
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		mode := "images"
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
+			strings.TrimSpace(input.ProviderProfile.APIMode) == "responses" {
+			mode = "responses"
+		}
+		if value := benchmarkGenerationConfigString(input.GenerationConfig, "api_mode"); value == "images" || value == "responses" {
+			mode = value
+		}
+		return mode
+	}
+	return "images"
+}
+
+func benchmarkModel(task domain.Task, providerName string, apiMode string, cfg config.Config) string {
+	model := ""
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName {
+			model = strings.TrimSpace(input.ProviderProfile.Model)
+		}
+		if value := benchmarkGenerationConfigString(input.GenerationConfig, "model"); value != "" {
+			model = value
+		}
+	}
+	if model != "" {
+		return model
+	}
+	if providerName == provider.OpenAICompatibleProviderID {
+		if configured := strings.TrimSpace(cfg.OpenAICompatibleModel); configured != "" {
+			return configured
+		}
+		if apiMode == "responses" {
+			return "gpt-5.5"
+		}
+		return "gpt-image-2"
+	}
+	return ""
+}
+
+func benchmarkStream(task domain.Task, providerName string, apiMode string) bool {
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	stream := apiMode == "responses"
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
+			input.ProviderProfile.Stream != nil {
+			stream = *input.ProviderProfile.Stream
+		}
+		if value, ok := benchmarkGenerationConfigBool(input.GenerationConfig, "stream"); ok {
+			stream = value
+		}
+	}
+	return stream
+}
+
+func benchmarkPartialImages(task domain.Task, providerName string, stream bool) int {
+	if !stream {
+		return 0
+	}
+	partialImages := 1
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
+			input.ProviderProfile.PartialImages != nil {
+			partialImages = *input.ProviderProfile.PartialImages
+		}
+		if value, ok := benchmarkGenerationConfigInt(input.GenerationConfig, "partial_images", 0, 3); ok {
+			partialImages = value
+		}
+	}
+	if partialImages < 0 {
+		return 0
+	}
+	if partialImages > 3 {
+		return 3
+	}
+	return partialImages
+}
+
+func benchmarkTimeoutSeconds(task domain.Task, providerName string) int {
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		timeout := 0
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == providerName &&
+			input.ProviderProfile.TimeoutSeconds > 0 {
+			timeout = input.ProviderProfile.TimeoutSeconds
+		}
+		if value, ok := benchmarkGenerationConfigInt(input.GenerationConfig, "timeout_seconds", 1, 3600); ok {
+			timeout = value
+		}
+		return timeout
+	}
+	return 0
 }
 
 func benchmarkQualityAndModeration(raw json.RawMessage) (string, string) {
@@ -793,6 +990,72 @@ func benchmarkConfigString(config map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(value)
+}
+
+func benchmarkGenerationConfigString(raw json.RawMessage, key string) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var config map[string]any
+	if json.Unmarshal(raw, &config) != nil {
+		return ""
+	}
+	return benchmarkConfigString(config, key)
+}
+
+func benchmarkGenerationConfigBool(raw json.RawMessage, key string) (bool, bool) {
+	if len(raw) == 0 {
+		return false, false
+	}
+	var config map[string]any
+	if json.Unmarshal(raw, &config) != nil {
+		return false, false
+	}
+	value, ok := config[key]
+	if !ok || value == nil {
+		return false, false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		parsed, ok, err := parseOptionalBoolFlag(typed, key)
+		if err != nil {
+			return false, false
+		}
+		return parsed, ok
+	default:
+		return false, false
+	}
+}
+
+func benchmarkGenerationConfigInt(raw json.RawMessage, key string, minValue, maxValue int) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var config map[string]any
+	if json.Unmarshal(raw, &config) != nil {
+		return 0, false
+	}
+	value, ok := config[key]
+	if !ok || value == nil {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case float64:
+		intValue := int(typed)
+		if typed != float64(intValue) || intValue < minValue || intValue > maxValue {
+			return 0, false
+		}
+		return intValue, true
+	case int:
+		if typed < minValue || typed > maxValue {
+			return 0, false
+		}
+		return typed, true
+	default:
+		return 0, false
+	}
 }
 
 func benchmarkSplitCounts(requestedCount, maxPerRequest int) []int {
@@ -865,6 +1128,21 @@ func firstNonEmptyString(value, fallback string) string {
 		return strings.TrimSpace(value)
 	}
 	return fallback
+}
+
+func parseOptionalBoolFlag(value, name string) (bool, bool, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return false, false, nil
+	}
+	switch trimmed {
+	case "true", "1", "yes", "y":
+		return true, true, nil
+	case "false", "0", "no", "n":
+		return false, true, nil
+	default:
+		return false, false, fmt.Errorf("%s must be true or false", name)
+	}
 }
 
 func isTerminalTaskStatus(status string) bool {
@@ -943,16 +1221,80 @@ func percentileInt64(values []int64, percentile int) int64 {
 
 func projectCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: vag project access|provider")
+		return fmt.Errorf("usage: vag project access|provider|context")
 	}
 	switch args[0] {
 	case "access":
 		return projectAccessCmd(args[1:])
 	case "provider":
 		return projectProviderCmd(args[1:])
+	case "context":
+		return projectContextCmd(args[1:])
 	default:
 		return fmt.Errorf("unknown project command %q", args[0])
 	}
+}
+
+func projectContextCmd(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: vag project context get|set")
+	}
+	switch args[0] {
+	case "get":
+		fs := flag.NewFlagSet("vag project context get", flag.ExitOnError)
+		apiURL := fs.String("api-url", defaultAPIURL(), "API base URL")
+		workspaceID := fs.String("workspace", env("DEFAULT_WORKSPACE_ID", "ws_default"), "workspace id")
+		projectID := fs.String("project", env("DEFAULT_PROJECT_ID", "prj_xhs_anime"), "project id")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		path := fmt.Sprintf("/api/workspaces/%s/projects/%s/visual-context", *workspaceID, *projectID)
+		return request("GET", *apiURL, path, nil)
+	case "set":
+		fs := flag.NewFlagSet("vag project context set", flag.ExitOnError)
+		apiURL := fs.String("api-url", defaultAPIURL(), "API base URL")
+		workspaceID := fs.String("workspace", env("DEFAULT_WORKSPACE_ID", "ws_default"), "workspace id")
+		projectID := fs.String("project", env("DEFAULT_PROJECT_ID", "prj_xhs_anime"), "project id")
+		file := fs.String("file", "", "project visual context JSON file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if strings.TrimSpace(*file) == "" {
+			return fmt.Errorf("--file is required")
+		}
+		body, err := os.ReadFile(*file)
+		if err != nil {
+			return err
+		}
+		wrapped, err := wrapProjectVisualContextPayload(body)
+		if err != nil {
+			return err
+		}
+		path := fmt.Sprintf("/api/workspaces/%s/projects/%s/visual-context", *workspaceID, *projectID)
+		return request("POST", *apiURL, path, wrapped)
+	default:
+		return fmt.Errorf("unknown project context command %q", args[0])
+	}
+}
+
+func wrapProjectVisualContextPayload(raw []byte) ([]byte, error) {
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("project visual context file must be valid JSON")
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("project visual context file must be a JSON object: %w", err)
+	}
+	if _, ok := payload["visual_context"]; ok {
+		return raw, nil
+	}
+	wrapped, err := json.Marshal(map[string]json.RawMessage{
+		"visual_context": json.RawMessage(raw),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return wrapped, nil
 }
 
 func projectProviderCmd(args []string) error {
@@ -981,6 +1323,9 @@ func projectProviderCmd(args []string) error {
 		baseURL := fs.String("base-url", "", "non-sensitive provider base URL reference")
 		generationConfig := fs.String("generation-config", "", "generation config JSON object")
 		useQualityProfile := fs.Bool("use-quality-profile", false, "default to project quality profile when creating tasks")
+		apiMode := fs.String("api-mode", "", "provider API mode metadata: images or responses")
+		stream := fs.String("stream", "", "streaming preference metadata: true or false")
+		partialImages := fs.Int("partial-images", -1, "partial image event count metadata, 0-3")
 		maxN := fs.Int("max-n", 0, "maximum images per provider request")
 		supportsURLResult := fs.Bool("supports-url-result", false, "record whether this provider profile supports URL result payloads")
 		preferredResponseFormat := fs.String("preferred-response-format", "", "preferred response format metadata: b64_json or url")
@@ -995,11 +1340,21 @@ func projectProviderCmd(args []string) error {
 			Model:                    strings.TrimSpace(*model),
 			BaseURL:                  strings.TrimSpace(*baseURL),
 			UseProjectQualityProfile: *useQualityProfile,
+			APIMode:                  strings.TrimSpace(*apiMode),
 			MaxN:                     *maxN,
 			SupportsURLResult:        *supportsURLResult,
 			PreferredResponseFormat:  strings.TrimSpace(*preferredResponseFormat),
 			MaxConcurrency:           *maxConcurrency,
 			TimeoutSeconds:           *timeoutSeconds,
+		}
+		if parsed, ok, err := parseOptionalBoolFlag(*stream, "--stream"); err != nil {
+			return err
+		} else if ok {
+			payload.Stream = &parsed
+		}
+		if *partialImages >= 0 {
+			value := *partialImages
+			payload.PartialImages = &value
 		}
 		if trimmed := strings.TrimSpace(*generationConfig); trimmed != "" {
 			if !json.Valid([]byte(trimmed)) {
@@ -1412,6 +1767,8 @@ func usage() {
   vag project access delete-key --id <api_key_id>
   vag project provider get
   vag project provider set --enabled=true --provider mock --model mock-image
+  vag project context get
+  vag project context set --file examples/tasks/sample-project-visual-context.json
   vag repair scan
   vag repair requeue <task_id>
   vag repair verify-asset <asset_id>`)

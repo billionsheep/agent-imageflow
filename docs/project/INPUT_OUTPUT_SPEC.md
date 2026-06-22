@@ -94,6 +94,10 @@ ImageTask:
 - prompt_template
 - template_variables
 - reference_images
+- character_ids
+- reference_asset_ids
+- prompt_recipe_id
+- use_project_visual_context
 - mask_image
 - generation_config
 - use_project_quality_profile
@@ -117,6 +121,7 @@ ImageTask:
 - `selection_mode` 默认 `manual_optional`，传 `auto` 或 `best_of` 时服务端可在多候选生成完成后自动标记一张 selected；这不表示强制人工审核。
 - `best_of_config` 用于控制自动选优策略，可由任务输入直接提供，也可通过项目级 quality profile 复用；当前支持 `local_metadata_v1`、`http_judge_v1` 和 `auto_reject_non_selected`。当 `auto_reject_non_selected=true` 且 `selection_mode=auto` / `best_of` 时，服务端会在自动选出推荐图后把其他候选标记为 rejected；这些候选后续仍可被人工重新 select。
 - `prompt_template`、`template_variables`、`reference_images`、`mask_image`、`generation_config` 用于质量复用和 provider 参数扩展；第一版可保存/传递这些参数，其中 `openai-compatible` 和 `fal` 已支持通过服务端上传输入文件、匿名远程 URL 和当前项目资产复用来真实执行 edit/mask。
+- `character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`use_project_visual_context` 用于复用 project 级长期视觉生产上下文；当前第一版从 `project.metadata_json.visual_context` 展开角色卡、reference binding 和 prompt recipe，展开快照写入 `structured_input_json.visual_context_snapshot` 和 asset `parameters_json.visual_context_snapshot`。
 - `reference_images` descriptor 可包含 `id`、`url`、`asset_id`、`input_file_id`、`role`、`source`、`mime_type`、`width`、`height`、`weight`。
 - `mask_image` descriptor 可包含 `id`、`url`、`asset_id`、`input_file_id`、`target_image_id`、`source`、`mime_type`、`width`、`height`、`has_mask`；当前 `openai-compatible` 和 `fal` 已支持三类输入来源，Web managed mode 默认仍优先先上传 reference / mask 到服务端 `input-files`，再提交 `input_file_id`。
 - 第一版不追求把所有业务字段都结构化成数据库列，避免过早膨胀。

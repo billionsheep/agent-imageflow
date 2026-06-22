@@ -1,5 +1,17 @@
 # Decisions
 
+## 2026-06-20: Project Visual Context 第一版复用 project.metadata_json
+
+- Decision: P1 Project Production Context 第一版不新增数据库表或迁移，统一使用 `project.metadata_json.visual_context` 保存 Character/Mascot Profile、Project Reference Library binding 和 Prompt Recipe；`CreateTask` 新增 `character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`use_project_visual_context`，在入队前展开为 `structured_input_json.visual_context_snapshot`，并进入 asset `parameters_json`。
+- Reason: 当前目标是让单个 project 承载长期视觉生产上下文，而不是建设通用 DAM、模板市场、账号运营系统或复杂权限体系。复用既有 metadata_json 能与 `quality_profile`、`provider_profile`、`access_config` 的策略保持一致，避免为了第一版上下文引入高风险 schema 迁移。
+- Impact: REST 新增 `GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/visual-context`，CLI 新增 `vag project context get/set`，MCP `create_image_task` 可传 visual context 引用字段。角色卡和 reference binding 只能引用同 workspace/project 下的 asset；删除或归档 binding 不删除原 asset；provider secret 仍只走服务端环境变量，不进入 visual context、响应 JSON 或日志。
+
+## 2026-06-20: Web 控制台采用轻量 Admin session + Recent Assets
+
+- Decision: Web 控制台新增轻量 Admin session，提供 `login/me/logout` 和跨 scope `Recent Assets` 读取路径；Web 登录后可查看 MCP/CLI/REST/Web 生成的最近资产，不再把 project API key 当作人工查看资产的前置条件。Project API key 继续保留给 MCP、CLI、REST 等外部 project 级调用。
+- Reason: 项目已经具备 project API key 和 scope 资产列表，但 Web 资产库仍容易困在当前 scope 或 401 状态，用户忘记 scope 或不想手填 key 时很难发现外部 agent 生成的资产。当前目标是自托管小团队/单人控制台，不需要完整账号系统、SaaS 注册、租户、RBAC 或 OAuth。
+- Impact: 新增 Admin cookie session 和 `/api/admin/assets/recent`，Web 服务端资产库默认走 Recent Assets 并区分 unauthorized、空列表、筛选无结果和加载错误。Provider key 仍只在服务端环境变量中，不能进入前端 bundle、localStorage、响应 JSON 或日志；生产公网暴露仍需反向代理/TLS、强 Admin 密码、Basic/project key、限流和审计。
+
 ## 2026-06-18: MVP 后续阶段转向资产库治理和真实场景验证
 
 - Decision: 当前 MVP 产品闭环不再继续盲目扩功能，后续先围绕真实场景试用收集需求，并把下一阶段聚焦到 Web 服务端资产同步、资产库治理、存储可视化、session/source tracking、参考图/prompt 留存、云端安全和对外开通路径。新增 `docs/project/FUTURE_REQUIREMENTS_AND_SCENARIOS.md` 作为后续拆分 CSV / vertical slices 的输入。

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -72,8 +73,8 @@ func TestOpenAICompatibleProviderGeneratesFromBase64Response(t *testing.T) {
 	if captured["quality"] != "high" || captured["moderation"] != "low" || int(captured["output_compression"].(float64)) != 80 {
 		t.Fatalf("generation_config passthrough missing from request body: %#v", captured)
 	}
-	if _, ok := captured["stream"]; ok {
-		t.Fatalf("stream should not be forwarded by server adapter: %#v", captured)
+	if captured["stream"] != true || int(captured["partial_images"].(float64)) != 2 {
+		t.Fatalf("streaming fields missing from request body: %#v", captured)
 	}
 	if len(result.Files) != 1 {
 		t.Fatalf("got %d files, want 1", len(result.Files))
@@ -92,7 +93,7 @@ func TestOpenAICompatibleProviderGeneratesFromBase64Response(t *testing.T) {
 	if params["revised_prompt"] != "revised" {
 		t.Fatalf("missing revised prompt in parameters: %#v", params)
 	}
-	if params["request_mode"] != OpenAICompatibleRequestModeImagesSyncURL || params["response_format"] != openAICompatibleResponseFormatOmit || params["endpoint"] != openAICompatibleEndpointGenerations {
+	if params["request_mode"] != OpenAICompatibleRequestModeImagesStream || params["response_format"] != openAICompatibleResponseFormatOmit || params["endpoint"] != openAICompatibleEndpointGenerations {
 		t.Fatalf("request shape missing from parameters: %#v", params)
 	}
 }
@@ -137,6 +138,34 @@ func TestOpenAICompatibleProviderGeneratesFromURLResponse(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleProviderDefaultsToSingleImageRequest(t *testing.T) {
+	sourcePNG := testPNG(t)
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"b64_json": base64.StdEncoding.EncodeToString(sourcePNG)}},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "image-model",
+	})
+	task := testTask("1:1")
+	task.RequestedCount = 10
+	if _, err := provider.Generate(context.Background(), task); err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if got := int(captured["n"].(float64)); got != 1 {
+		t.Fatalf("default openai-compatible n = %d, want 1; body=%#v", got, captured)
+	}
+}
+
 func TestOpenAICompatibleProviderSendsBase64ResponseFormatWhenExplicitlyConfigured(t *testing.T) {
 	sourcePNG := testPNG(t)
 	var captured map[string]any
@@ -170,6 +199,146 @@ func TestOpenAICompatibleProviderSendsBase64ResponseFormatWhenExplicitlyConfigur
 	}
 	if params["request_mode"] != OpenAICompatibleRequestModeImagesSyncB64 || params["response_format"] != openAICompatibleResponseFormatB64 {
 		t.Fatalf("expected b64 request shape in parameters: %#v", params)
+	}
+}
+
+func TestOpenAICompatibleProviderParsesImagesStreamingSSE(t *testing.T) {
+	sourcePNG := testPNG(t)
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/generations" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		partial := base64.StdEncoding.EncodeToString(sourcePNG)
+		final := partial
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"image_generation.partial_image\",\"partial_image_index\":0,\"b64_json\":%q}\n\n", partial)
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"image_generation.completed\",\"b64_json\":%q,\"revised_prompt\":\"stream revised\"}\n\n", final)
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "image-model",
+	})
+	task := testTask("1:1")
+	task.StructuredInputJSON = []byte(`{"generation_config":{"stream":true,"partial_images":1}}`)
+	result, err := provider.Generate(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if captured["stream"] != true || int(captured["partial_images"].(float64)) != 1 {
+		t.Fatalf("streaming fields missing from request body: %#v", captured)
+	}
+	if result.Metrics.ErrorStage != "" {
+		t.Fatalf("unexpected error_stage: %#v", result.Metrics)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(result.Files))
+	}
+	var params map[string]any
+	if err := json.Unmarshal(result.Files[0].ParametersRaw, &params); err != nil {
+		t.Fatalf("parameters are not JSON: %v", err)
+	}
+	if params["request_mode"] != OpenAICompatibleRequestModeImagesStream || int(params["partial_count"].(float64)) != 1 {
+		t.Fatalf("expected stream request shape with partial count: %#v", params)
+	}
+}
+
+func TestOpenAICompatibleProviderParsesResponsesStreamingSSE(t *testing.T) {
+	sourcePNG := testPNG(t)
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		b64 := base64.StdEncoding.EncodeToString(sourcePNG)
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.image_generation_call.partial_image\",\"partial_image_index\":0,\"partial_image_b64\":%q}\n\n", b64)
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"img_1\",\"type\":\"image_generation_call\",\"result\":{\"b64_json\":%q},\"revised_prompt\":\"responses revised\"}}\n\n", b64)
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+	})
+	task := testTask("1:1")
+	task.StructuredInputJSON = []byte(`{"generation_config":{"api_mode":"responses","stream":true,"partial_images":1}}`)
+	result, err := provider.Generate(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if captured["model"] != openAICompatibleDefaultResponsesModel || captured["stream"] != true {
+		t.Fatalf("unexpected responses request body: %#v", captured)
+	}
+	tools := captured["tools"].([]any)
+	tool := tools[0].(map[string]any)
+	if tool["type"] != "image_generation" || int(tool["partial_images"].(float64)) != 1 {
+		t.Fatalf("unexpected image_generation tool: %#v", tool)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(result.Files))
+	}
+	var params map[string]any
+	if err := json.Unmarshal(result.Files[0].ParametersRaw, &params); err != nil {
+		t.Fatalf("parameters are not JSON: %v", err)
+	}
+	if params["api_mode"] != openAICompatibleAPIModeResponses || params["request_mode"] != OpenAICompatibleRequestModeResponsesStream || int(params["partial_count"].(float64)) != 1 {
+		t.Fatalf("expected responses stream request shape: %#v", params)
+	}
+}
+
+func TestOpenAICompatibleProviderGenerationConfigOverridesProviderProfileShape(t *testing.T) {
+	sourcePNG := testPNG(t)
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/generations" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"b64_json": base64.StdEncoding.EncodeToString(sourcePNG)}},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewOpenAICompatibleProvider(OpenAICompatibleConfig{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "image-model",
+	})
+	task := testTask("1:1")
+	task.StructuredInputJSON = []byte(`{
+		"provider_profile":{"enabled":true,"provider":"openai-compatible","api_mode":"responses","stream":true,"partial_images":2,"preferred_response_format":"b64_json"},
+		"generation_config":{"api_mode":"images","stream":false,"preferred_response_format":"url","max_n":10}
+	}`)
+	task.RequestedCount = 10
+	result, err := provider.Generate(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if captured["stream"] != nil || captured["response_format"] != nil {
+		t.Fatalf("task generation_config should disable stream and b64: %#v", captured)
+	}
+	if int(captured["n"].(float64)) != 10 {
+		t.Fatalf("generation_config max_n should allow n=10, got body: %#v", captured)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(result.Files[0].ParametersRaw, &params); err != nil {
+		t.Fatalf("parameters are not JSON: %v", err)
+	}
+	if params["api_mode"] != openAICompatibleAPIModeImages || params["request_mode"] != OpenAICompatibleRequestModeImagesSyncURL {
+		t.Fatalf("generation_config did not override provider profile: %#v", params)
 	}
 }
 
@@ -281,6 +450,8 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	var capturedModeration string
 	var capturedOutputCompression string
 	var capturedResponseFormat string
+	var capturedStream string
+	var capturedPartialImages string
 	var imageCount int
 	var maskCount int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -294,9 +465,8 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 		capturedModeration = r.FormValue("moderation")
 		capturedOutputCompression = r.FormValue("output_compression")
 		capturedResponseFormat = r.FormValue("response_format")
-		if r.FormValue("stream") != "" {
-			t.Fatalf("stream should not be forwarded by server adapter")
-		}
+		capturedStream = r.FormValue("stream")
+		capturedPartialImages = r.FormValue("partial_images")
 		imageCount = len(r.MultipartForm.File["image[]"])
 		maskCount = len(r.MultipartForm.File["mask"])
 		w.Header().Set("Content-Type", "application/json")
@@ -344,6 +514,9 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	if capturedResponseFormat != "" {
 		t.Fatalf("response_format should be omitted by default for edits, got %q", capturedResponseFormat)
 	}
+	if capturedStream != "true" || capturedPartialImages != "2" {
+		t.Fatalf("streaming fields missing from multipart request: stream=%q partial=%q", capturedStream, capturedPartialImages)
+	}
 	if imageCount != 1 || maskCount != 1 {
 		t.Fatalf("unexpected multipart file counts: images=%d mask=%d", imageCount, maskCount)
 	}
@@ -354,7 +527,7 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	if err := json.Unmarshal(result.Files[0].ParametersRaw, &params); err != nil {
 		t.Fatalf("parameters are not JSON: %v", err)
 	}
-	if params["request_mode"] != OpenAICompatibleRequestModeImagesSyncURL || params["operation"] != "edit" || params["endpoint"] != openAICompatibleEndpointEdits {
+	if params["request_mode"] != OpenAICompatibleRequestModeImagesStream || params["operation"] != "edit" || params["endpoint"] != openAICompatibleEndpointEdits {
 		t.Fatalf("expected edit URL request shape, got %#v", params)
 	}
 }

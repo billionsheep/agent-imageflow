@@ -10,6 +10,7 @@ import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
+import { preloadLightbox, preloadMaskEditorModal, preloadSettingsModal } from '../lib/lazyModules'
 import { useHintTooltip } from '../hooks/useHintTooltip'
 import { useTooltip } from '../hooks/useTooltip'
 import { downloadImageEntriesAsZip, downloadImageIds, formatExportFileTime, getTaskOutputImageZipEntries } from '../lib/downloadImages'
@@ -18,6 +19,10 @@ import SizePickerModal from './SizePickerModal'
 import ViewportTooltip from './ViewportTooltip'
 import { CloseIcon } from './icons'
 
+function preloadInputImageOverlays() {
+  preloadLightbox()
+  preloadMaskEditorModal()
+}
 
 function getMentionTagTextLength(el: Element) {
   return el.textContent?.length ?? 0
@@ -1818,6 +1823,8 @@ export default function InputBar() {
               ? 'border-2 border-blue-500'
               : 'border border-gray-200 dark:border-white/[0.08]'
           }`}
+          onPointerEnter={preloadInputImageOverlays}
+          onPointerDown={preloadInputImageOverlays}
           onClick={() => {
             if (suppressImageClickRef.current) return
             if (isMaskTarget) {
@@ -2471,6 +2478,9 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
                   <button
+                    onPointerEnter={preloadSettingsModal}
+                    onFocus={preloadSettingsModal}
+                    onPointerDown={preloadSettingsModal}
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
                     className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
@@ -2578,6 +2588,9 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={(activeAgentIsRunning || !hasSubmitApiConfig) && submitHover} text={submitTooltipText} />
                   <button
+                    onPointerEnter={preloadSettingsModal}
+                    onFocus={preloadSettingsModal}
+                    onPointerDown={preloadSettingsModal}
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
                     disabled={activeAgentIsRunning ? false : hasSubmitApiConfig ? !canSubmit : false}
                     aria-label={submitButtonAriaLabel}

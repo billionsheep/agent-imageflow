@@ -1,9 +1,75 @@
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { memo, useCallback, useMemo, useRef, useState, useEffect, type MutableRefObject, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react'
+import type { TaskRecord } from '../types'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds, useStore, reuseConfig, editOutputs, removeTask, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import { preloadDetailModal } from '../lib/lazyModules'
 import TaskCard from './TaskCard'
 
 const TASK_GRID_INITIAL_LIMIT = 60
 const TASK_GRID_PAGE_SIZE = 60
+
+interface TaskGridItemProps {
+  task: TaskRecord
+  isSelected: boolean
+  isMac: boolean
+  suppressClickUntil: MutableRefObject<number>
+  setDetailTaskId: (taskId: string) => void
+  onDeleteTask: (task: TaskRecord) => void
+}
+
+const TaskGridItem = memo(function TaskGridItem({
+  task,
+  isSelected,
+  isMac,
+  suppressClickUntil,
+  setDetailTaskId,
+  onDeleteTask,
+}: TaskGridItemProps) {
+  const handleClick = useCallback((e: ReactMouseEvent | ReactTouchEvent) => {
+    if (Date.now() < suppressClickUntil.current) {
+      e.preventDefault()
+      return
+    }
+    suppressClickUntil.current = 0
+    const isCtrl = isMac ? 'metaKey' in e && e.metaKey : 'ctrlKey' in e && e.ctrlKey
+    if (isCtrl) {
+      useStore.getState().toggleTaskSelection(task.id)
+      return
+    }
+
+    setDetailTaskId(task.id)
+  }, [isMac, setDetailTaskId, suppressClickUntil, task.id])
+
+  const handleReuse = useCallback(() => {
+    reuseConfig(task)
+  }, [task])
+
+  const handleEditOutputs = useCallback(() => {
+    editOutputs(task)
+  }, [task])
+
+  const handleDelete = useCallback(() => {
+    onDeleteTask(task)
+  }, [onDeleteTask, task])
+
+  return (
+    <div
+      className="task-card-wrapper"
+      data-task-id={task.id}
+      onPointerEnter={preloadDetailModal}
+      onPointerDown={preloadDetailModal}
+      onFocusCapture={preloadDetailModal}
+    >
+      <TaskCard
+        task={task}
+        onClick={handleClick}
+        onReuse={handleReuse}
+        onEditOutputs={handleEditOutputs}
+        onDelete={handleDelete}
+        isSelected={isSelected}
+      />
+    </div>
+  )
+})
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
@@ -57,13 +123,13 @@ export default function TaskGrid() {
   )
   const hiddenTaskCount = Math.max(0, filteredTasks.length - visibleTasks.length)
 
-  const handleDelete = (task: typeof tasks[0]) => {
+  const handleDelete = useCallback((task: TaskRecord) => {
     setConfirmDialog({
       title: '删除任务',
       message: '确定要删除这个任务吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
       action: () => removeTask(task),
     })
-  }
+  }, [setConfirmDialog])
 
   const getPagePoint = (clientX: number, clientY: number) => ({
     pageX: clientX + window.scrollX,
@@ -301,29 +367,15 @@ export default function TaskGrid() {
     >
       <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
         {visibleTasks.map((task) => (
-          <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
-            <TaskCard
-              task={task}
-              onClick={(e) => {
-                if (Date.now() < suppressClickUntil.current) {
-                  e.preventDefault()
-                  return
-                }
-                suppressClickUntil.current = 0
-                const isCtrl = isMac ? e.metaKey : e.ctrlKey
-                if (isCtrl) {
-                  useStore.getState().toggleTaskSelection(task.id)
-                  return
-                }
-
-                setDetailTaskId(task.id)
-              }}
-              onReuse={() => reuseConfig(task)}
-              onEditOutputs={() => editOutputs(task)}
-              onDelete={() => handleDelete(task)}
-              isSelected={selectedTaskIds.includes(task.id)}
-            />
-          </div>
+          <TaskGridItem
+            key={task.id}
+            task={task}
+            isSelected={selectedTaskIds.includes(task.id)}
+            isMac={isMac}
+            suppressClickUntil={suppressClickUntil}
+            setDetailTaskId={setDetailTaskId}
+            onDeleteTask={handleDelete}
+          />
         ))}
       </div>
       {hiddenTaskCount > 0 && (

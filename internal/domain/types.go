@@ -64,6 +64,10 @@ type CreateTaskRequest struct {
 	PromptTemplate           string           `json:"prompt_template"`
 	TemplateVariables        map[string]any   `json:"template_variables"`
 	ReferenceImages          []ReferenceImage `json:"reference_images"`
+	CharacterIDs             []string         `json:"character_ids,omitempty"`
+	ReferenceAssetIDs        []string         `json:"reference_asset_ids,omitempty"`
+	PromptRecipeID           string           `json:"prompt_recipe_id,omitempty"`
+	UseProjectVisualContext  bool             `json:"use_project_visual_context,omitempty"`
 	MaskImage                *MaskImage       `json:"mask_image,omitempty"`
 	BestOfConfig             *BestOfConfig    `json:"best_of_config,omitempty"`
 	GenerationConfig         json.RawMessage  `json:"generation_config"`
@@ -158,6 +162,10 @@ type TaskAttempt struct {
 	Status              string     `json:"status"`
 	Provider            string     `json:"provider"`
 	ProviderRequestID   string     `json:"provider_request_id,omitempty"`
+	RequestMode         string     `json:"request_mode,omitempty"`
+	APIMode             string     `json:"api_mode,omitempty"`
+	Stream              bool       `json:"stream,omitempty"`
+	PartialImageCount   int        `json:"partial_image_count,omitempty"`
 	StartedAt           time.Time  `json:"started_at"`
 	FinishedAt          *time.Time `json:"finished_at,omitempty"`
 	LatencyMs           *int       `json:"latency_ms,omitempty"`
@@ -519,6 +527,74 @@ type BestOfConfig struct {
 	AutoRejectNonSelected bool   `json:"auto_reject_non_selected,omitempty"`
 }
 
+type CharacterProfile struct {
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Status            string    `json:"status"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	Role              string    `json:"role,omitempty"`
+	Appearance        string    `json:"appearance,omitempty"`
+	Personality       string    `json:"personality,omitempty"`
+	Forbidden         []string  `json:"forbidden,omitempty"`
+	PrimaryAssetID    string    `json:"primary_asset_id,omitempty"`
+	ReferenceAssetIDs []string  `json:"reference_asset_ids,omitempty"`
+}
+
+type ProjectReferenceBinding struct {
+	ID          string    `json:"id"`
+	AssetID     string    `json:"asset_id"`
+	Purpose     string    `json:"purpose"`
+	Label       string    `json:"label,omitempty"`
+	Weight      float64   `json:"weight,omitempty"`
+	Notes       string    `json:"notes,omitempty"`
+	CharacterID string    `json:"character_id,omitempty"`
+	Status      string    `json:"status"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type PromptBlock struct {
+	ID   string `json:"id,omitempty"`
+	Role string `json:"role,omitempty"`
+	Text string `json:"text"`
+}
+
+type PromptRecipe struct {
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	Status              string          `json:"status"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+	PromptBlocks        []PromptBlock   `json:"prompt_blocks,omitempty"`
+	NegativePrompt      string          `json:"negative_prompt,omitempty"`
+	DefaultAspectRatio  string          `json:"default_aspect_ratio,omitempty"`
+	DefaultOutputFormat string          `json:"default_output_format,omitempty"`
+	DefaultProvider     string          `json:"default_provider,omitempty"`
+	DefaultModel        string          `json:"default_model,omitempty"`
+	GenerationConfig    json.RawMessage `json:"generation_config,omitempty"`
+}
+
+type ProjectVisualContext struct {
+	Characters    []CharacterProfile        `json:"characters,omitempty"`
+	References    []ProjectReferenceBinding `json:"references,omitempty"`
+	PromptRecipes []PromptRecipe            `json:"prompt_recipes,omitempty"`
+	UpdatedAt     time.Time                 `json:"updated_at,omitempty"`
+}
+
+type ProjectVisualContextResponse struct {
+	WorkspaceID   string               `json:"workspace_id"`
+	ProjectID     string               `json:"project_id"`
+	VisualContext ProjectVisualContext `json:"visual_context"`
+}
+
+type VisualContextSnapshot struct {
+	Source            string                    `json:"source"`
+	CharacterIDs      []string                  `json:"character_ids,omitempty"`
+	ReferenceAssetIDs []string                  `json:"reference_asset_ids,omitempty"`
+	PromptRecipeID    string                    `json:"prompt_recipe_id,omitempty"`
+	Characters        []CharacterProfile        `json:"characters,omitempty"`
+	References        []ProjectReferenceBinding `json:"references,omitempty"`
+	PromptRecipe      *PromptRecipe             `json:"prompt_recipe,omitempty"`
+}
+
 type ProjectQualityProfileResponse struct {
 	WorkspaceID    string         `json:"workspace_id"`
 	ProjectID      string         `json:"project_id"`
@@ -532,6 +608,9 @@ type ProjectProviderProfile struct {
 	BaseURL                  string          `json:"base_url,omitempty"`
 	GenerationConfig         json.RawMessage `json:"generation_config,omitempty"`
 	UseProjectQualityProfile bool            `json:"use_project_quality_profile,omitempty"`
+	APIMode                  string          `json:"api_mode,omitempty"`
+	Stream                   *bool           `json:"stream,omitempty"`
+	PartialImages            *int            `json:"partial_images,omitempty"`
 	MaxN                     int             `json:"max_n,omitempty"`
 	SupportsURLResult        bool            `json:"supports_url_result,omitempty"`
 	PreferredResponseFormat  string          `json:"preferred_response_format,omitempty"`

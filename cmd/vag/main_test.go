@@ -91,3 +91,60 @@ func TestInferBenchmarkRequestShapeForOpenAICompatibleURLMode(t *testing.T) {
 		t.Fatalf("unexpected config fields: %#v", shape)
 	}
 }
+
+func TestInferBenchmarkRequestShapeDefaultsOpenAICompatibleMaxNToOne(t *testing.T) {
+	shape := inferBenchmarkRequestShape(provider.OpenAICompatibleProviderID, 3, config.Config{
+		ProviderTimeoutSeconds:       300,
+		OpenAICompatibleTotalTimeout: 300,
+	}, []domain.TaskResponse{{
+		Task: domain.Task{
+			AspectRatio:  "1:1",
+			OutputFormat: "png",
+		},
+	}})
+
+	if shape.N != 1 || len(shape.SplitCounts) != 3 || shape.SplitCounts[0] != 1 || shape.SplitCounts[1] != 1 || shape.SplitCounts[2] != 1 {
+		t.Fatalf("unexpected default split counts: %#v", shape)
+	}
+}
+
+func TestInferBenchmarkRequestShapeForResponsesStream(t *testing.T) {
+	structured, err := json.Marshal(map[string]any{
+		"provider_profile": map[string]any{
+			"enabled":  true,
+			"provider": provider.OpenAICompatibleProviderID,
+			"api_mode": "images",
+			"model":    "gpt-image-2",
+		},
+		"generation_config": map[string]any{
+			"api_mode":        "responses",
+			"model":           "gpt-5.5",
+			"stream":          true,
+			"partial_images":  2,
+			"timeout_seconds": 600,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal structured input: %v", err)
+	}
+	shape := inferBenchmarkRequestShape(provider.OpenAICompatibleProviderID, 1, config.Config{
+		ProviderTimeoutSeconds:       300,
+		OpenAICompatibleTotalTimeout: 300,
+	}, []domain.TaskResponse{{
+		Task: domain.Task{
+			AspectRatio:         "1:1",
+			OutputFormat:        "png",
+			StructuredInputJSON: structured,
+		},
+	}})
+
+	if shape.APIMode != "responses" || shape.Endpoint != "/responses" || shape.RequestMode != provider.OpenAICompatibleRequestModeResponsesStream {
+		t.Fatalf("unexpected responses request shape: %#v", shape)
+	}
+	if shape.Model != "gpt-5.5" {
+		t.Fatalf("unexpected model override: %#v", shape)
+	}
+	if !shape.Stream || shape.PartialImages != 2 || shape.TimeoutSeconds != 600 {
+		t.Fatalf("unexpected stream fields: %#v", shape)
+	}
+}

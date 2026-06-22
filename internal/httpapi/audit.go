@@ -186,6 +186,14 @@ func assignAuditStringIfEmpty(target *string, payload map[string]any, key string
 func inferAuditRoute(parts []string, method string) (string, string) {
 	isRead := method == http.MethodGet || method == http.MethodHead
 	switch {
+	case method == http.MethodPost && match(parts, "api", "admin", "login"):
+		return "/api/admin/login", "admin_login"
+	case isRead && match(parts, "api", "admin", "me"):
+		return "/api/admin/me", "admin_me"
+	case method == http.MethodPost && match(parts, "api", "admin", "logout"):
+		return "/api/admin/logout", "admin_logout"
+	case isRead && match(parts, "api", "admin", "assets", "recent"):
+		return "/api/admin/assets/recent", "list_recent_assets"
 	case isRead && match(parts, "api", "workspaces"):
 		return "/api/workspaces", "list_workspaces"
 	case method == http.MethodPost && match(parts, "api", "workspaces"):
@@ -226,6 +234,10 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/quality-profile", "get_quality_profile"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/quality-profile", "update_quality_profile"
+	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "visual-context"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/visual-context", "get_visual_context"
+	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "visual-context"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/visual-context", "update_visual_context"
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/provider-profile", "get_provider_profile"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):

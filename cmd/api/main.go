@@ -59,6 +59,10 @@ func main() {
 		Handler: httpapi.New(service, httpapi.Options{
 			BasicAuthUsername:            cfg.BasicAuthUsername,
 			BasicAuthPassword:            cfg.BasicAuthPassword,
+			AdminUsername:                cfg.AdminUsername,
+			AdminPassword:                cfg.AdminPassword,
+			AdminSessionSecret:           cfg.AdminSessionSecret,
+			AdminSessionTTL:              time.Duration(cfg.AdminSessionTTLSeconds) * time.Second,
 			AuditSink:                    localStorage,
 			RateLimiter:                  rateLimiter,
 			RateLimitWindow:              time.Duration(cfg.RateLimitWindowSeconds) * time.Second,

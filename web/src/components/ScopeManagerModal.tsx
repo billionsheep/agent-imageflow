@@ -129,6 +129,8 @@ const EMPTY_DASHBOARD_STATS: ScopeDashboardStats = {
 }
 
 const DASHBOARD_STATS_CACHE_MS = 60_000
+const DASHBOARD_STATS_START_DELAY_MS = 180
+const DASHBOARD_STATS_ASSET_LIMIT = 24
 const DASHBOARD_MAX_WORKSPACES = 12
 const DASHBOARD_MAX_PROJECTS_PER_WORKSPACE = 20
 const DASHBOARD_MAX_CAMPAIGNS_PER_PROJECT = 30
@@ -431,6 +433,8 @@ export default function ScopeManagerModal() {
   const setConfirmDialog = useStore((state) => state.setConfirmDialog)
   const modalRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef(0)
+  const dashboardRequestRef = useRef(0)
+  const dashboardTimerRef = useRef<number | null>(null)
   const dashboardCacheRef = useRef<{ key: string; stats: ScopeDashboardStats; error: string | null; createdAt: number } | null>(null)
 
   const [loading, setLoading] = useState(false)
@@ -472,7 +476,20 @@ export default function ScopeManagerModal() {
   const selectedProject = projects.find((project) => project.project_id === selectedProjectId) ?? null
   const selectedCampaign = campaigns.find((campaign) => campaign.campaign_id === selectedCampaignId) ?? null
 
-  const loadDashboardStats = useCallback(async (workspaceItems: AgentImageflowWorkspace[], requestId: number) => {
+  const clearDashboardTimer = useCallback(() => {
+    if (dashboardTimerRef.current != null) {
+      window.clearTimeout(dashboardTimerRef.current)
+      dashboardTimerRef.current = null
+    }
+  }, [])
+
+  const cancelDashboardStats = useCallback(() => {
+    dashboardRequestRef.current += 1
+    clearDashboardTimer()
+    setDashboardLoading(false)
+  }, [clearDashboardTimer])
+
+  const loadDashboardStats = useCallback(async (workspaceItems: AgentImageflowWorkspace[], dashboardRequestId: number) => {
     const cacheKey = [
       baseUrl,
       normalizedSettings.imageflowApiKey ? 'api-key:1' : 'api-key:0',
@@ -485,6 +502,7 @@ export default function ScopeManagerModal() {
     ].join('\n')
     const cached = dashboardCacheRef.current
     if (cached?.key === cacheKey && Date.now() - cached.createdAt < DASHBOARD_STATS_CACHE_MS) {
+      if (dashboardRequestRef.current !== dashboardRequestId) return
       setDashboardStats(cached.stats)
       setDashboardError(cached.error)
       setDashboardLoading(false)
@@ -511,7 +529,7 @@ export default function ScopeManagerModal() {
           nextStats.workspaces[workspace.workspace_id] = workspaceStats
           continue
         }
-        if (requestRef.current !== requestId) return
+        if (dashboardRequestRef.current !== dashboardRequestId) return
 
         workspaceStats.projectCount = projectResponse.projects.length
         if (projectResponse.projects.length > DASHBOARD_MAX_PROJECTS_PER_WORKSPACE) partialStatsFailed = true
@@ -528,7 +546,7 @@ export default function ScopeManagerModal() {
             nextStats.projects[project.project_id] = projectStats
             continue
           }
-          if (requestRef.current !== requestId) return
+          if (dashboardRequestRef.current !== dashboardRequestId) return
 
           projectStats.campaignCount = campaignResponse.campaigns.length
           workspaceStats.campaignCount += campaignResponse.campaigns.length
@@ -541,11 +559,11 @@ export default function ScopeManagerModal() {
               assets = await listAgentImageflowAssets(baseUrl, {
                 projectId: project.project_id,
                 campaignId: campaign.campaign_id,
-              }, auth)
+              }, auth, { limit: DASHBOARD_STATS_ASSET_LIMIT })
             } catch {
               partialStatsFailed = true
             }
-            if (requestRef.current !== requestId) return
+            if (dashboardRequestRef.current !== dashboardRequestId) return
 
             addAssetsToStats(campaignStats, assets)
             addAssetsToStats(projectStats, assets)
@@ -574,7 +592,7 @@ export default function ScopeManagerModal() {
             } catch {
               partialStatsFailed = true
             }
-            if (requestRef.current !== requestId) return
+            if (dashboardRequestRef.current !== dashboardRequestId) return
             nextStats.campaigns[getCampaignKey(project.project_id, campaign.campaign_id)] = campaignStats
           }
 
@@ -584,7 +602,7 @@ export default function ScopeManagerModal() {
         nextStats.workspaces[workspace.workspace_id] = workspaceStats
       }
 
-      if (requestRef.current !== requestId) return
+      if (dashboardRequestRef.current !== dashboardRequestId) return
       setDashboardStats(nextStats)
       const nextError = partialStatsFailed ? '部分 project/campaign 需要 API key，已跳过对应统计。' : null
       setDashboardError(nextError)
@@ -595,11 +613,11 @@ export default function ScopeManagerModal() {
         createdAt: Date.now(),
       }
     } catch (nextError) {
-      if (requestRef.current !== requestId) return
+      if (dashboardRequestRef.current !== dashboardRequestId) return
       setDashboardError(nextError instanceof Error ? nextError.message : String(nextError))
       setDashboardStats(EMPTY_DASHBOARD_STATS)
     } finally {
-      if (requestRef.current === requestId) {
+      if (dashboardRequestRef.current === dashboardRequestId) {
         setDashboardLoading(false)
       }
     }
@@ -614,11 +632,30 @@ export default function ScopeManagerModal() {
     normalizedSettings.imageflowWorkspaceId,
   ])
 
+  const scheduleDashboardStats = useCallback((workspaceItems: AgentImageflowWorkspace[]) => {
+    clearDashboardTimer()
+    const dashboardRequestId = dashboardRequestRef.current + 1
+    dashboardRequestRef.current = dashboardRequestId
+    setDashboardLoading(true)
+    setDashboardError(null)
+    dashboardTimerRef.current = window.setTimeout(() => {
+      dashboardTimerRef.current = null
+      void loadDashboardStats(workspaceItems, dashboardRequestId)
+    }, DASHBOARD_STATS_START_DELAY_MS)
+  }, [clearDashboardTimer, loadDashboardStats])
+
   useEffect(() => {
     if (open) return
     requestRef.current += 1
-    setDashboardLoading(false)
-  }, [open])
+    cancelDashboardStats()
+  }, [cancelDashboardStats, open])
+
+  useEffect(() => {
+    return () => {
+      clearDashboardTimer()
+      dashboardRequestRef.current += 1
+    }
+  }, [clearDashboardTimer])
 
   useEffect(() => {
     setWorkspaceNameDraft(selectedWorkspace?.name ?? '')
@@ -638,6 +675,7 @@ export default function ScopeManagerModal() {
     preferredCampaignId?: string,
   ) => {
     const requestId = ++requestRef.current
+    cancelDashboardStats()
     setLoading(true)
     setError(null)
 
@@ -651,7 +689,7 @@ export default function ScopeManagerModal() {
 
       const nextWorkspaces = sortScopesByArchived(workspaceResponse.workspaces)
       setWorkspaces(nextWorkspaces)
-      void loadDashboardStats(nextWorkspaces, requestId)
+      scheduleDashboardStats(nextWorkspaces)
 
       const nextWorkspaceId = pickPreferredId(nextWorkspaces, requestedWorkspaceId, (item) => item.workspace_id)
       setSelectedWorkspaceId(nextWorkspaceId)
@@ -695,6 +733,7 @@ export default function ScopeManagerModal() {
       setProjects([])
       setCampaigns([])
       setDashboardStats(EMPTY_DASHBOARD_STATS)
+      cancelDashboardStats()
       setSelectedWorkspaceId('')
       setSelectedProjectId('')
       setSelectedCampaignId('')
@@ -706,10 +745,11 @@ export default function ScopeManagerModal() {
   }, [
     auth,
     baseUrl,
-    loadDashboardStats,
+    cancelDashboardStats,
     normalizedSettings.imageflowCampaignId,
     normalizedSettings.imageflowProjectId,
     normalizedSettings.imageflowWorkspaceId,
+    scheduleDashboardStats,
   ])
 
   useEffect(() => {
@@ -745,12 +785,12 @@ export default function ScopeManagerModal() {
       showToast('归档中的 scope 不能设为当前托管 scope', 'error')
       return
     }
-    setSettings(normalizeSettings({
-      ...settings,
+    setSettings({
+      imageflowManagedMode: true,
       imageflowWorkspaceId: selectedWorkspace.workspace_id,
       imageflowProjectId: selectedProject.project_id,
       imageflowCampaignId: selectedCampaign.campaign_id,
-    }))
+    })
     showToast('已设为当前托管 scope', 'success')
   }
 

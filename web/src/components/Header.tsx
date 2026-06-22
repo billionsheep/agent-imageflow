@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { useVersionCheck } from '../hooks/useVersionCheck'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
+import { preloadAgentWorkspace, preloadScopeManagerModal, preloadSettingsModal } from '../lib/lazyModules'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
@@ -248,6 +249,9 @@ export default function Header() {
             <button
               type="button"
               onClick={() => setAppMode('agent')}
+              onPointerEnter={preloadAgentWorkspace}
+              onFocus={preloadAgentWorkspace}
+              onPointerDown={preloadAgentWorkspace}
               className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               Agent
@@ -294,6 +298,9 @@ export default function Header() {
             </div>
             <div
               className="relative"
+              onPointerEnter={preloadScopeManagerModal}
+              onFocusCapture={preloadScopeManagerModal}
+              onPointerDown={preloadScopeManagerModal}
               {...scopeTooltip.handlers}
             >
               <button
@@ -312,6 +319,9 @@ export default function Header() {
             </div>
             <div
               className="relative"
+              onPointerEnter={preloadSettingsModal}
+              onFocusCapture={preloadSettingsModal}
+              onPointerDown={preloadSettingsModal}
               {...settingsTooltip.handlers}
             >
               <button
@@ -339,6 +349,9 @@ export default function Header() {
             <button
               type="button"
               onClick={() => setAppMode('agent')}
+              onPointerEnter={preloadAgentWorkspace}
+              onFocus={preloadAgentWorkspace}
+              onPointerDown={preloadAgentWorkspace}
               className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               Agent

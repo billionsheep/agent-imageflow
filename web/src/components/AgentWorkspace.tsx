@@ -6,6 +6,7 @@ import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboar
 import { collectWebSearchCalls, getAgentRoundOutputItems, getWebSearchStatusForCalls, type AgentWebSearchStatus } from '../lib/agentWebSearch'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { downloadImageEntriesAsZip, downloadImageIds, getImageZipEntries } from '../lib/downloadImages'
+import { preloadDetailModal } from '../lib/lazyModules'
 import TaskCard from './TaskCard'
 import ViewportTooltip from './ViewportTooltip'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -1106,7 +1107,14 @@ export default function AgentWorkspace() {
                                 )
                               }
                               return (
-                                <div key={block.key} className="mt-4 max-w-sm" onClick={e => e.stopPropagation()}>
+                                <div
+                                  key={block.key}
+                                  className="mt-4 max-w-sm"
+                                  onClick={e => e.stopPropagation()}
+                                  onPointerEnter={preloadDetailModal}
+                                  onPointerDown={preloadDetailModal}
+                                  onFocusCapture={preloadDetailModal}
+                                >
                                   <TaskCard
                                     task={block.task}
                                     disableSwipe={true}

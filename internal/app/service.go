@@ -252,6 +252,19 @@ func (s *Service) ListAssets(ctx context.Context, query domain.AssetListQuery) (
 	return responses, nil
 }
 
+func (s *Service) ListRecentAssets(ctx context.Context, query domain.AssetListQuery) ([]domain.AssetResponse, error) {
+	query = normalizeAssetListQuery(query)
+	items, err := s.store.ListRecentAssets(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]domain.AssetResponse, 0, len(items))
+	for _, item := range items {
+		responses = append(responses, s.assetResponse(item))
+	}
+	return responses, nil
+}
+
 func (s *Service) GetAsset(ctx context.Context, assetID string) (domain.AssetResponse, error) {
 	item, err := s.store.GetAssetWithVersion(ctx, assetID)
 	if err != nil {
@@ -640,6 +653,22 @@ func normalizeProjectProviderProfile(profile domain.ProjectProviderProfile) doma
 	profile.Model = strings.TrimSpace(profile.Model)
 	profile.BaseURL = strings.TrimRight(strings.TrimSpace(profile.BaseURL), "/")
 	profile.GenerationConfig = jsonOrEmptyObject(profile.GenerationConfig)
+	switch strings.TrimSpace(profile.APIMode) {
+	case "responses":
+		profile.APIMode = "responses"
+	default:
+		profile.APIMode = "images"
+	}
+	if profile.PartialImages != nil {
+		value := *profile.PartialImages
+		if value < 0 {
+			value = 0
+		}
+		if value > 3 {
+			value = 3
+		}
+		profile.PartialImages = &value
+	}
 	if profile.MaxN <= 0 {
 		profile.MaxN = 4
 	}
@@ -730,14 +759,22 @@ func mergeAttemptMetrics(base domain.AttemptMetrics, next domain.AttemptMetrics)
 
 func effectiveTaskProviderMaxN(task domain.Task) int {
 	maxN := 4
-	var input struct {
-		ProviderProfile domain.ProjectProviderProfile `json:"provider_profile"`
+	if strings.TrimSpace(task.Provider) == provider.OpenAICompatibleProviderID {
+		maxN = 1
 	}
-	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil &&
-		input.ProviderProfile.Enabled &&
-		strings.TrimSpace(input.ProviderProfile.Provider) == task.Provider &&
-		input.ProviderProfile.MaxN > 0 {
-		maxN = input.ProviderProfile.MaxN
+	var input struct {
+		GenerationConfig json.RawMessage               `json:"generation_config"`
+		ProviderProfile  domain.ProjectProviderProfile `json:"provider_profile"`
+	}
+	if len(task.StructuredInputJSON) > 0 && json.Unmarshal(task.StructuredInputJSON, &input) == nil {
+		if input.ProviderProfile.Enabled &&
+			strings.TrimSpace(input.ProviderProfile.Provider) == task.Provider &&
+			input.ProviderProfile.MaxN > 0 {
+			maxN = input.ProviderProfile.MaxN
+		}
+		if value, ok := generationConfigInt(input.GenerationConfig, "max_n", 1, 10); ok {
+			maxN = value
+		}
 	}
 	if maxN < 1 {
 		return 1
@@ -748,6 +785,35 @@ func effectiveTaskProviderMaxN(task domain.Task) int {
 	return maxN
 }
 
+func generationConfigInt(raw json.RawMessage, key string, minValue, maxValue int) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var config map[string]any
+	if json.Unmarshal(raw, &config) != nil {
+		return 0, false
+	}
+	value, ok := config[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case float64:
+		intValue := int(typed)
+		if typed != float64(intValue) || intValue < minValue || intValue > maxValue {
+			return 0, false
+		}
+		return intValue, true
+	case int:
+		if typed < minValue || typed > maxValue {
+			return 0, false
+		}
+		return typed, true
+	default:
+		return 0, false
+	}
+}
+
 func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, req domain.CreateTaskRequest, projectProfile domain.QualityProfile, providerProfile domain.ProjectProviderProfile) (domain.CreateTaskRequest, []byte, string, error) {
 	providerProfile = normalizeProjectProviderProfile(providerProfile)
 	req.Title = strings.TrimSpace(req.Title)
@@ -756,6 +822,9 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	req.NegativePrompt = strings.TrimSpace(req.NegativePrompt)
 	req.StylePreset = strings.TrimSpace(req.StylePreset)
 	req.PromptTemplate = strings.TrimSpace(req.PromptTemplate)
+	req.CharacterIDs = normalizeStringList(req.CharacterIDs)
+	req.ReferenceAssetIDs = normalizeStringList(req.ReferenceAssetIDs)
+	req.PromptRecipeID = strings.TrimSpace(req.PromptRecipeID)
 	req.AspectRatio = strings.TrimSpace(req.AspectRatio)
 	req.OutputFormat = strings.TrimSpace(req.OutputFormat)
 	req.Provider = strings.TrimSpace(req.Provider)
@@ -764,6 +833,11 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	if req.Title == "" {
 		req.Title = "Untitled image task"
 	}
+	visualContext, err := s.expandProjectVisualContext(ctx, scope, req)
+	if err != nil {
+		return req, nil, "", err
+	}
+	req = visualContext.Request
 	if req.AspectRatio == "" {
 		req.AspectRatio = "1:1"
 	}
@@ -832,6 +906,11 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 		"prompt_template":             req.PromptTemplate,
 		"template_variables":          req.TemplateVariables,
 		"reference_images":            req.ReferenceImages,
+		"character_ids":               req.CharacterIDs,
+		"reference_asset_ids":         req.ReferenceAssetIDs,
+		"prompt_recipe_id":            req.PromptRecipeID,
+		"use_project_visual_context":  req.UseProjectVisualContext,
+		"visual_context_snapshot":     visualContext.Snapshot,
 		"mask_image":                  req.MaskImage,
 		"best_of_config":              req.BestOfConfig,
 		"resolved_input_files":        resolvedInputFiles,

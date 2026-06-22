@@ -13,6 +13,7 @@ type taskStructuredProviderInput struct {
 	ResolvedInputFiles *resolvedTaskInputFiles       `json:"resolved_input_files"`
 	GenerationConfig   json.RawMessage               `json:"generation_config"`
 	ProviderProfile    domain.ProjectProviderProfile `json:"provider_profile"`
+	VisualContext      *domain.VisualContextSnapshot `json:"visual_context_snapshot"`
 }
 
 type resolvedTaskInputFiles struct {
@@ -64,6 +65,9 @@ func taskProviderParameters(task domain.Task, base map[string]any) []byte {
 	if input.ProviderProfile.Enabled {
 		parameters["provider_profile"] = input.ProviderProfile
 	}
+	if input.VisualContext != nil {
+		parameters["visual_context_snapshot"] = input.VisualContext
+	}
 
 	raw, err := json.Marshal(parameters)
 	if err != nil {
@@ -90,6 +94,9 @@ func taskProviderMaxN(task domain.Task, providerID string, fallback int) int {
 		input.ProviderProfile.MaxN > 0 {
 		maxN = input.ProviderProfile.MaxN
 	}
+	if value, ok := configIntInRangeFromRaw(input.GenerationConfig, "max_n", 1, 10); ok {
+		maxN = value
+	}
 	if maxN < 1 {
 		return 1
 	}
@@ -97,4 +104,33 @@ func taskProviderMaxN(task domain.Task, providerID string, fallback int) int {
 		return 10
 	}
 	return maxN
+}
+
+func configIntInRangeFromRaw(raw json.RawMessage, key string, minValue, maxValue int) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var config map[string]any
+	if json.Unmarshal(raw, &config) != nil {
+		return 0, false
+	}
+	value, ok := config[key]
+	if !ok || value == nil {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case float64:
+		intValue := int(typed)
+		if typed != float64(intValue) || intValue < minValue || intValue > maxValue {
+			return 0, false
+		}
+		return intValue, true
+	case int:
+		if typed < minValue || typed > maxValue {
+			return 0, false
+		}
+		return typed, true
+	default:
+		return 0, false
+	}
 }

@@ -19,6 +19,12 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 			HasMask:       true,
 		},
 		"generation_config": map[string]any{"quality": "high"},
+		"visual_context_snapshot": domain.VisualContextSnapshot{
+			Source:            "project",
+			CharacterIDs:      []string{"dog_milo"},
+			ReferenceAssetIDs: []string{"asset_milo_primary"},
+			PromptRecipeID:    "pet_story",
+		},
 	})
 	if err != nil {
 		t.Fatalf("marshal structured input: %v", err)
@@ -42,5 +48,9 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 	generationConfig := parameters["generation_config"].(map[string]any)
 	if generationConfig["quality"] != "high" {
 		t.Fatalf("generation_config missing from parameters: %#v", parameters)
+	}
+	visualContext := parameters["visual_context_snapshot"].(map[string]any)
+	if visualContext["prompt_recipe_id"] != "pet_story" {
+		t.Fatalf("visual_context_snapshot missing from parameters: %#v", parameters)
 	}
 }

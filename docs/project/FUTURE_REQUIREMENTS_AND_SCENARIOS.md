@@ -186,6 +186,58 @@ Workspace -> Project -> Campaign -> Session/Run -> ImageTask -> Asset
 - Asset lineage：一张图从哪个 reference、哪个 prompt、哪个 seed / provider request 生成而来。
 - Edit lineage：一张图被哪次 edit/mask 任务修改成新版本或新资产。
 
+## Project Production Context
+
+本节记录 2026-06-20 的产品讨论结论：下一阶段不优先扩展 workspace 或完整账号系统，而是完善 `project` 这一层，让它承载一个账号、IP、产品线或客户项目的长期视觉生产记忆。
+
+推荐语义：
+
+```text
+workspace = 个人/团队/客户/业务大边界
+project   = 长期经营对象，例如萌宠账号、嵌入式架构图账号、品牌 IP、产品线
+campaign  = 一次具体生产批次，例如一期故事、一组四格漫画、一周封面图
+asset     = 生成或上传后可复用、可交付的图片资产
+```
+
+对“萌宠账号”场景，推荐结构是：
+
+```text
+workspace: ws_personal_media
+  project: prj_two_dogs_xhs
+    character cards:
+      - char_doudou
+      - char_mimi
+    project references:
+      - character reference assets
+      - style reference assets
+      - scene reference assets
+    campaigns:
+      - cmp_daily_four_panel_001
+      - cmp_origin_story_001
+```
+
+需求方向：
+
+- Project Dashboard：查看当前 project 下的 campaigns、assets、characters、references 和基础统计。
+- Character Card：项目级角色卡，保存角色外观、性格、禁止项、参考图和主视觉资产。
+- Project Reference Library：把现有 asset 标记为项目级参考图，并区分 `character`、`style`、`scene` 等用途。
+- Project-level Asset View：跨 campaign 查看当前 project 的资产，避免每次必须进入某个 campaign。
+- Task Input Integration：创建任务时允许传 `character_ids` 和 `reference_asset_ids`，服务端展开为 `reference_images` 并写入 metadata / parameters 快照。
+
+第一版建议边界：
+
+- 做 project 级视觉生产上下文，不做通用 DAM。
+- 做角色卡和参考图绑定，不做复杂 IP 管理系统。
+- 做 project 内复用，不做跨 workspace 素材市场。
+- 做服务端 provider key 固定配置，不把 provider key 放到 Web 前端。
+- 不做小红书运营、内容日历、自动发布或账号增长分析。
+
+候选下一轮 CSV 名称：
+
+```text
+issues/next-phase-p1-project-production-context.csv
+```
+
 ## Provider and Credential Model
 
 需要继续区分两类 key：

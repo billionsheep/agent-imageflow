@@ -83,3 +83,32 @@ func TestLoadWorkerConcurrency(t *testing.T) {
 		t.Fatalf("invalid WORKER_CONCURRENCY = %d, want fallback 6", got)
 	}
 }
+
+func TestLoadAdminCredentialsFallbackToBasicAuth(t *testing.T) {
+	t.Setenv("BASIC_AUTH_USERNAME", "basic-admin")
+	t.Setenv("BASIC_AUTH_PASSWORD", "basic-secret")
+	t.Setenv("ADMIN_USERNAME", "")
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("ADMIN_SESSION_SECRET", "")
+	t.Setenv("ADMIN_SESSION_TTL_SECONDS", "")
+
+	cfg := Load()
+	if cfg.AdminUsername != "basic-admin" || cfg.AdminPassword != "basic-secret" {
+		t.Fatalf("admin credentials should fall back to basic auth, got username=%q password=%q", cfg.AdminUsername, cfg.AdminPassword)
+	}
+	if cfg.AdminSessionTTLSeconds != 12*60*60 {
+		t.Fatalf("default admin session ttl = %d, want 43200", cfg.AdminSessionTTLSeconds)
+	}
+
+	t.Setenv("ADMIN_USERNAME", "console-admin")
+	t.Setenv("ADMIN_PASSWORD", "console-secret")
+	t.Setenv("ADMIN_SESSION_SECRET", "session-secret")
+	t.Setenv("ADMIN_SESSION_TTL_SECONDS", "60")
+	cfg = Load()
+	if cfg.AdminUsername != "console-admin" || cfg.AdminPassword != "console-secret" || cfg.AdminSessionSecret != "session-secret" {
+		t.Fatalf("explicit admin config was not applied: %#v", cfg)
+	}
+	if cfg.AdminSessionTTLSeconds != 60 {
+		t.Fatalf("admin session ttl = %d, want 60", cfg.AdminSessionTTLSeconds)
+	}
+}

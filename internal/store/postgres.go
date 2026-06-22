@@ -566,6 +566,22 @@ func (s *PostgresStore) GetProjectProviderProfile(ctx context.Context, workspace
 	return providerProfileFromProjectMetadata(metadataRaw)
 }
 
+func (s *PostgresStore) GetProjectVisualContext(ctx context.Context, workspaceID, projectID string) (domain.ProjectVisualContext, error) {
+	var metadataRaw []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT metadata_json
+		FROM project
+		WHERE workspace_id = $1 AND id = $2
+	`, workspaceID, projectID).Scan(&metadataRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ProjectVisualContext{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.ProjectVisualContext{}, err
+	}
+	return visualContextFromProjectMetadata(metadataRaw)
+}
+
 func (s *PostgresStore) UpdateProjectQualityProfile(ctx context.Context, workspaceID, projectID string, profile domain.QualityProfile) (domain.QualityProfile, error) {
 	profileRaw, err := json.Marshal(profile)
 	if err != nil {
@@ -632,6 +648,28 @@ func (s *PostgresStore) UpdateProjectProviderProfile(ctx context.Context, worksp
 		return domain.ProjectProviderProfile{}, err
 	}
 	return providerProfileFromProjectMetadata(metadataRaw)
+}
+
+func (s *PostgresStore) UpdateProjectVisualContext(ctx context.Context, workspaceID, projectID string, visualContext domain.ProjectVisualContext) (domain.ProjectVisualContext, error) {
+	contextRaw, err := json.Marshal(visualContext)
+	if err != nil {
+		return domain.ProjectVisualContext{}, err
+	}
+	var metadataRaw []byte
+	err = s.db.QueryRowContext(ctx, `
+		UPDATE project
+		SET metadata_json = jsonb_set(metadata_json, '{visual_context}', $3::jsonb, true),
+			updated_at = now()
+		WHERE workspace_id = $1 AND id = $2
+		RETURNING metadata_json
+	`, workspaceID, projectID, contextRaw).Scan(&metadataRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ProjectVisualContext{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.ProjectVisualContext{}, err
+	}
+	return visualContextFromProjectMetadata(metadataRaw)
 }
 
 func (s *PostgresStore) FindTaskByIdempotency(ctx context.Context, scope domain.Scope, key string) (domain.Task, string, bool, error) {
@@ -720,6 +758,16 @@ func (s *PostgresStore) ListAssetsByCampaign(ctx context.Context, query domain.A
 	return scanAssetRows(rows)
 }
 
+func (s *PostgresStore) ListRecentAssets(ctx context.Context, query domain.AssetListQuery) ([]domain.AssetWithVersion, error) {
+	sqlText, args := buildListRecentAssetsQuery(query)
+	rows, err := s.db.QueryContext(ctx, sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAssetRows(rows)
+}
+
 func buildListAssetsByCampaignQuery(query domain.AssetListQuery) (string, []any) {
 	limit := query.Limit
 	if limit <= 0 {
@@ -780,6 +828,70 @@ func buildListAssetsByCampaignQuery(query domain.AssetListQuery) (string, []any)
 	`, strings.Join(conditions, " AND "), limitPlaceholder, offsetPlaceholder), args
 }
 
+func buildListRecentAssetsQuery(query domain.AssetListQuery) (string, []any) {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = domain.DefaultAssetListLimit
+	}
+	if limit > domain.MaxAssetListLimit {
+		limit = domain.MaxAssetListLimit
+	}
+	offset := query.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	args := []any{}
+	conditions := []string{}
+	addStringCondition := func(sqlExpr string, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(sqlExpr, len(args)))
+	}
+	addStringCondition("a.status = $%d", query.Status)
+	addStringCondition("v.provider = $%d", query.Provider)
+	addStringCondition("v.model = $%d", query.Model)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'source' = $%d", query.Source)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'session_id' = $%d", query.SessionID)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'batch_id' = $%d", query.BatchID)
+	if keyword := strings.TrimSpace(query.Keyword); keyword != "" {
+		args = append(args, "%"+strings.ToLower(keyword)+"%")
+		placeholder := len(args)
+		conditions = append(conditions, fmt.Sprintf(`(
+			LOWER(a.id) LIKE $%[1]d OR
+			LOWER(a.task_id) LIKE $%[1]d OR
+			LOWER(a.name) LIKE $%[1]d OR
+			LOWER(v.prompt) LIKE $%[1]d OR
+			LOWER(t.title) LIKE $%[1]d
+		)`, placeholder))
+	}
+	if query.CreatedFrom != nil {
+		args = append(args, *query.CreatedFrom)
+		conditions = append(conditions, fmt.Sprintf("a.created_at >= $%d", len(args)))
+	}
+	if query.CreatedTo != nil {
+		args = append(args, *query.CreatedTo)
+		conditions = append(conditions, fmt.Sprintf("a.created_at <= $%d", len(args)))
+	}
+	args = append(args, limit)
+	limitPlaceholder := len(args)
+	args = append(args, offset)
+	offsetPlaceholder := len(args)
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+	return assetWithVersionSelect() + fmt.Sprintf(`
+		%s
+		ORDER BY a.created_at DESC, a.id DESC
+		LIMIT $%d OFFSET $%d
+	`, where, limitPlaceholder, offsetPlaceholder), args
+}
+
 func (s *PostgresStore) GetAssetWithVersion(ctx context.Context, assetID string) (domain.AssetWithVersion, error) {
 	row := s.db.QueryRowContext(ctx, assetWithVersionSelect()+` WHERE a.id = $1`, assetID)
 	item, err := scanAssetWithVersion(row)
@@ -822,7 +934,7 @@ func (s *PostgresStore) ListTaskAttempts(ctx context.Context, taskID string) ([]
 		SELECT id, task_id, attempt_no, status, provider, provider_request_id,
 			started_at, finished_at, latency_ms, queue_wait_ms, provider_first_byte_ms,
 			provider_total_ms, response_download_ms, store_ms, thumbnail_ms, retry_count,
-			error_stage, response_bytes, retry_after, error_code, error_message
+			error_stage, response_bytes, retry_after, error_code, error_message, raw_response_json
 		FROM task_attempt
 		WHERE task_id = $1
 		ORDER BY attempt_no ASC
@@ -850,6 +962,7 @@ func (s *PostgresStore) ListTaskAttempts(ctx context.Context, taskID string) ([]
 		var retryAfter sql.NullTime
 		var errorCode sql.NullString
 		var errorMessage sql.NullString
+		var rawResponse []byte
 		if err := rows.Scan(
 			&item.ID,
 			&item.TaskID,
@@ -872,6 +985,7 @@ func (s *PostgresStore) ListTaskAttempts(ctx context.Context, taskID string) ([]
 			&retryAfter,
 			&errorCode,
 			&errorMessage,
+			&rawResponse,
 		); err != nil {
 			return nil, err
 		}
@@ -927,9 +1041,33 @@ func (s *PostgresStore) ListTaskAttempts(ctx context.Context, taskID string) ([]
 		if errorMessage.Valid {
 			item.ErrorMessage = &errorMessage.String
 		}
+		applyAttemptResponseSummary(&item, rawResponse)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func applyAttemptResponseSummary(item *domain.TaskAttempt, raw []byte) {
+	if item == nil || len(raw) == 0 {
+		return
+	}
+	var summary struct {
+		APIMode           string `json:"api_mode"`
+		RequestMode       string `json:"request_mode"`
+		PartialImageCount int    `json:"partial_image_count"`
+	}
+	if json.Unmarshal(raw, &summary) != nil {
+		return
+	}
+	item.APIMode = strings.TrimSpace(summary.APIMode)
+	item.RequestMode = strings.TrimSpace(summary.RequestMode)
+	if summary.PartialImageCount > 0 {
+		item.Stream = true
+		item.PartialImageCount = summary.PartialImageCount
+	}
+	if strings.Contains(item.RequestMode, "stream") {
+		item.Stream = true
+	}
 }
 
 func (s *PostgresStore) GetBatchProgress(ctx context.Context, query domain.BatchProgressQuery) (domain.BatchProgressResponse, error) {
@@ -1731,6 +1869,7 @@ type projectMetadata struct {
 	QualityProfile  domain.QualityProfile         `json:"quality_profile"`
 	AccessConfig    domain.ProjectAccessConfig    `json:"access_config"`
 	ProviderProfile domain.ProjectProviderProfile `json:"provider_profile"`
+	VisualContext   domain.ProjectVisualContext   `json:"visual_context"`
 	ArchivedAt      *time.Time                    `json:"archived_at,omitempty"`
 }
 
@@ -1797,6 +1936,14 @@ func providerProfileFromProjectMetadata(raw []byte) (domain.ProjectProviderProfi
 		return domain.ProjectProviderProfile{}, err
 	}
 	return metadata.ProviderProfile, nil
+}
+
+func visualContextFromProjectMetadata(raw []byte) (domain.ProjectVisualContext, error) {
+	metadata, err := parseProjectMetadata(raw)
+	if err != nil {
+		return domain.ProjectVisualContext{}, err
+	}
+	return metadata.VisualContext, nil
 }
 
 func (m projectMetadata) Archived() bool {

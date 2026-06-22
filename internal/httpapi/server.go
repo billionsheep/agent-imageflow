@@ -19,6 +19,10 @@ import (
 type Options struct {
 	BasicAuthUsername            string
 	BasicAuthPassword            string
+	AdminUsername                string
+	AdminPassword                string
+	AdminSessionSecret           string
+	AdminSessionTTL              time.Duration
 	AuditSink                    HTTPAuditSink
 	RateLimiter                  RateLimiter
 	RateLimitWindow              time.Duration
@@ -41,6 +45,8 @@ type requestAuthScope struct {
 	AssetID        string
 	InputFileID    string
 	AllowBasicOnly bool
+	AllowAdmin     bool
+	RequireAdmin   bool
 }
 
 func New(service *app.Service, options Options) *Server {
@@ -48,7 +54,7 @@ func New(service *app.Service, options Options) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.setCORS(w)
+	s.setCORS(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -76,6 +82,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 0 || parts[0] != "api" {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+	if s.handleAdminSessionRoute(w, r, parts) {
 		return
 	}
 	authorized, authScope, auditActor, err := s.authorizeRequest(w, r, parts)
@@ -134,6 +143,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleGetProjectQualityProfile(w, r, parts[2], parts[4])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		s.handleUpdateProjectQualityProfile(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "visual-context"):
+		s.handleGetProjectVisualContext(w, r, parts[2], parts[4])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "visual-context"):
+		s.handleUpdateProjectVisualContext(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
 		s.handleGetProjectProviderProfile(w, r, parts[2], parts[4])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
@@ -148,6 +161,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleGetTask(w, r, parts[2])
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "assets"):
 		s.handleListAssets(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "admin", "assets", "recent"):
+		s.handleListRecentAssets(w, r)
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
 		s.handleGetBatchProgress(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "assets", "*"):
@@ -167,6 +182,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts []string) (bool, requestAuthScope, requestAuditActor, error) {
 	actor := defaultRequestAuditActor(r)
+	if routeAllowsAdminSession(parts, r.Method) {
+		if username, ok := s.adminSessionUsername(r); ok {
+			scope, ok, err := s.resolveRequestAuthScope(r, parts)
+			if err != nil {
+				return false, requestAuthScope{}, actor, err
+			}
+			if ok {
+				actor.AuthMode = "admin_session"
+				actor.Actor = username
+				return true, scope, actor, nil
+			}
+		}
+	}
 	if !s.authorizeBasicAuth(w, r) {
 		return false, requestAuthScope{}, actor, nil
 	}
@@ -175,6 +203,10 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 		return false, requestAuthScope{}, actor, err
 	}
 	if !ok || scope.ProjectID == "" {
+		if scope.RequireAdmin && actor.BasicAuthUser == "" {
+			writeUnauthorized(w, "admin_session_required", "admin session is required", false)
+			return false, scope, actor, nil
+		}
 		if actor.BasicAuthUser != "" {
 			actor.AuthMode = "basic_auth"
 			actor.Actor = actor.BasicAuthUser
@@ -187,6 +219,10 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 			actor.Actor = actor.BasicAuthUser
 		}
 		return true, scope, actor, nil
+	}
+	if scope.RequireAdmin && actor.BasicAuthUser == "" {
+		writeUnauthorized(w, "admin_session_required", "admin session is required", false)
+		return false, scope, actor, nil
 	}
 	apiKey := readProjectAPIKey(r)
 	var required bool
@@ -299,13 +335,15 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		match(parts, "api", "workspaces", "*", "projects"),
 		match(parts, "api", "workspaces", "*", "projects", "*"),
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns"):
-		return requestAuthScope{WorkspaceID: valueAt(parts, 2), ProjectID: valueAt(parts, 4), AllowBasicOnly: true}, true, nil
+		return requestAuthScope{WorkspaceID: valueAt(parts, 2), ProjectID: valueAt(parts, 4), AllowBasicOnly: true, AllowAdmin: true, RequireAdmin: s.adminConfigured()}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*"):
 		return requestAuthScope{
 			WorkspaceID:    valueAt(parts, 2),
 			ProjectID:      valueAt(parts, 4),
 			CampaignID:     valueAt(parts, 6),
 			AllowBasicOnly: true,
+			AllowAdmin:     true,
+			RequireAdmin:   s.adminConfigured(),
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "tasks"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4], CampaignID: parts[6]}, true, nil
@@ -332,10 +370,12 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
+	case match(parts, "api", "workspaces", "*", "projects", "*", "visual-context"):
+		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "provider-profile"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
-		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4], AllowBasicOnly: true}, true, nil
+		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4], AllowBasicOnly: true, AllowAdmin: true, RequireAdmin: s.adminConfigured()}, true, nil
 	case match(parts, "api", "tasks", "*"),
 		match(parts, "api", "tasks", "*", "attempts"):
 		scope, err := s.service.GetTaskScope(r.Context(), parts[2])
@@ -347,10 +387,13 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			ProjectID:   scope.ProjectID,
 			CampaignID:  scope.CampaignID,
 			TaskID:      parts[2],
+			AllowAdmin:  true,
 		}, true, nil
 	case match(parts, "api", "projects", "*", "campaigns", "*", "assets"),
 		match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
-		return requestAuthScope{ProjectID: parts[2], CampaignID: parts[4]}, true, nil
+		return requestAuthScope{ProjectID: parts[2], CampaignID: parts[4], AllowAdmin: true}, true, nil
+	case match(parts, "api", "admin", "assets", "recent"):
+		return requestAuthScope{AllowAdmin: true, RequireAdmin: true}, true, nil
 	case match(parts, "api", "assets", "*"),
 		match(parts, "api", "assets", "*", "approve"),
 		match(parts, "api", "assets", "*", "reject"),
@@ -365,6 +408,7 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			ProjectID:   scope.ProjectID,
 			CampaignID:  scope.CampaignID,
 			AssetID:     parts[2],
+			AllowAdmin:  true,
 		}, true, nil
 	default:
 		return requestAuthScope{}, false, nil
@@ -678,6 +722,33 @@ func (s *Server) handleUpdateProjectQualityProfile(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) handleGetProjectVisualContext(w http.ResponseWriter, r *http.Request, workspaceID, projectID string) {
+	response, err := s.service.GetProjectVisualContext(r.Context(), workspaceID, projectID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleUpdateProjectVisualContext(w http.ResponseWriter, r *http.Request, workspaceID, projectID string) {
+	defer r.Body.Close()
+	var payload struct {
+		VisualContext domain.ProjectVisualContext `json:"visual_context"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	response, err := s.service.UpdateProjectVisualContext(r.Context(), workspaceID, projectID, payload.VisualContext)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleGetProjectProviderProfile(w http.ResponseWriter, r *http.Request, workspaceID, projectID string) {
 	response, err := s.service.GetProjectProviderProfile(r.Context(), workspaceID, projectID)
 	if err != nil {
@@ -735,6 +806,20 @@ func (s *Server) handleListAssets(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	response, err := s.service.ListAssets(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleListRecentAssets(w http.ResponseWriter, r *http.Request) {
+	query, err := parseAssetListQuery(r, "", "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
+		return
+	}
+	response, err := s.service.ListRecentAssets(r.Context(), query)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -853,9 +938,16 @@ func parseAssetListQuery(r *http.Request, projectID, campaignID string) (domain.
 	return query, nil
 }
 
-func (s *Server) setCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	} else {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-API-Key")
 }
 

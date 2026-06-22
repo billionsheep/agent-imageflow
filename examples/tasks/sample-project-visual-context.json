@@ -1,0 +1,61 @@
+{
+  "characters": [
+    {
+      "id": "dog_mochi",
+      "name": "Mochi",
+      "status": "active",
+      "role": "mascot",
+      "appearance": "small fluffy cream-colored dog with round eyes and a red scarf",
+      "personality": "curious, brave, a little dramatic",
+      "forbidden": ["scary expression", "dirty fur", "human hands"]
+    },
+    {
+      "id": "dog_biscuit",
+      "name": "Biscuit",
+      "status": "active",
+      "role": "supporting mascot",
+      "appearance": "warm brown corgi-like dog with short legs and a tiny backpack",
+      "personality": "loyal, food-loving, gently funny",
+      "forbidden": ["aggressive pose", "realistic injury"]
+    },
+    {
+      "id": "cat_orange",
+      "name": "Orange Nap",
+      "status": "active",
+      "role": "cat friend",
+      "appearance": "round orange tabby cat with sleepy eyes and a small moon pendant",
+      "personality": "calm, clever, quietly mischievous",
+      "forbidden": ["sharp claws", "angry face"]
+    }
+  ],
+  "references": [],
+  "prompt_recipes": [
+    {
+      "id": "pet_story_cover",
+      "name": "Cute Pet Story Cover",
+      "status": "active",
+      "prompt_blocks": [
+        {
+          "role": "scene",
+          "text": "Story scene: {{prompt}}"
+        },
+        {
+          "role": "style",
+          "text": "cozy picture-book illustration, soft natural light, expressive cute pets, clean composition, room for title text"
+        },
+        {
+          "role": "channel",
+          "text": "mobile-first social cover, warm and memorable, no readable text inside image"
+        }
+      ],
+      "negative_prompt": "watermark, logo, unreadable text, scary mood, deformed animals, extra limbs",
+      "default_aspect_ratio": "3:4",
+      "default_output_format": "png",
+      "default_provider": "mock",
+      "default_model": "mock-image",
+      "generation_config": {
+        "quality": "high"
+      }
+    }
+  ]
+}

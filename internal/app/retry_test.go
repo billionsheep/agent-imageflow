@@ -140,6 +140,36 @@ func TestGenerateWithProviderLimitSplitsRequestedCountByProviderMaxN(t *testing.
 	}
 }
 
+func TestGenerateWithProviderLimitDefaultsOpenAICompatibleToSingleImageRequests(t *testing.T) {
+	adapter := &recordingProviderAdapter{delay: 10 * time.Millisecond}
+	service := &Service{
+		providerLimiters: map[string]chan struct{}{
+			provider.OpenAICompatibleProviderID: make(chan struct{}, 2),
+		},
+	}
+	task := domain.Task{
+		ID:             "task_openai_split_default",
+		Provider:       provider.OpenAICompatibleProviderID,
+		RequestedCount: 3,
+	}
+
+	result, err := service.generateWithProviderLimit(context.Background(), task, adapter)
+	if err != nil {
+		t.Fatalf("generateWithProviderLimit returned error: %v", err)
+	}
+	counts := append([]int(nil), adapter.counts...)
+	sort.Ints(counts)
+	if len(counts) != 3 || counts[0] != 1 || counts[1] != 1 || counts[2] != 1 {
+		t.Fatalf("provider requested counts = %#v, want [1 1 1]", counts)
+	}
+	if adapter.maxActive != 2 {
+		t.Fatalf("max concurrent split requests = %d, want 2", adapter.maxActive)
+	}
+	if len(result.Files) != 3 {
+		t.Fatalf("generated files = %d, want 3", len(result.Files))
+	}
+}
+
 func TestRetryAfterForRetryableHTTPError(t *testing.T) {
 	service := &Service{cfg: config.Config{
 		WorkerMaxRetries:        3,

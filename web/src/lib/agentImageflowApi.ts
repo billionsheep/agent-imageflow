@@ -10,6 +10,18 @@ export interface AgentImageflowAuth {
   basicPassword?: string
 }
 
+export interface AgentImageflowAdminLoginInput {
+  username: string
+  password: string
+}
+
+export interface AgentImageflowAdminSessionResponse {
+  authenticated: boolean
+  username?: string
+  expires_at?: string
+  configured: boolean
+}
+
 export interface AgentImageflowWorkspace {
   workspace_id: string
   name: string
@@ -90,6 +102,10 @@ export interface AgentImageflowTaskInput {
   prompt_template?: string
   template_variables?: Record<string, unknown>
   reference_images?: AgentImageflowReferenceImage[]
+  character_ids?: string[]
+  reference_asset_ids?: string[]
+  prompt_recipe_id?: string
+  use_project_visual_context?: boolean
   best_of_config?: AgentImageflowBestOfConfig
   mask_image?: AgentImageflowMaskImage
   generation_config?: Record<string, unknown>
@@ -179,6 +195,9 @@ export interface AgentImageflowProviderProfile {
   base_url?: string
   generation_config?: Record<string, unknown>
   use_project_quality_profile?: boolean
+  api_mode?: string
+  stream?: boolean
+  partial_images?: number
   max_n?: number
   supports_url_result?: boolean
   preferred_response_format?: string
@@ -309,6 +328,10 @@ export interface AgentImageflowTaskAttempt {
   status: string
   provider: string
   provider_request_id?: string
+  request_mode?: string
+  api_mode?: string
+  stream?: boolean
+  partial_image_count?: number
   started_at: string
   finished_at?: string
   latency_ms?: number
@@ -400,6 +423,22 @@ export interface AgentImageflowAssetResponse {
   created_at?: string
 }
 
+export class AgentImageflowApiError extends Error {
+  status: number
+  errorCode?: string
+
+  constructor(message: string, status: number, errorCode?: string) {
+    super(message)
+    this.name = 'AgentImageflowApiError'
+    this.status = status
+    this.errorCode = errorCode
+  }
+}
+
+export function isAgentImageflowUnauthorizedError(error: unknown): boolean {
+  return error instanceof AgentImageflowApiError && (error.status === 401 || error.status === 403)
+}
+
 export function normalizeAgentImageflowApiBaseUrl(baseUrl: string): string {
   return (baseUrl || 'http://localhost:8081').trim().replace(/\/+$/, '')
 }
@@ -429,6 +468,18 @@ export function buildAgentImageflowTaskAttemptsUrl(baseUrl: string, taskId: stri
 
 export function buildAgentImageflowWorkspacesUrl(baseUrl: string): string {
   return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/workspaces`
+}
+
+export function buildAgentImageflowAdminLoginUrl(baseUrl: string): string {
+  return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/login`
+}
+
+export function buildAgentImageflowAdminMeUrl(baseUrl: string): string {
+  return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/me`
+}
+
+export function buildAgentImageflowAdminLogoutUrl(baseUrl: string): string {
+  return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/logout`
 }
 
 export function buildAgentImageflowProjectsUrl(baseUrl: string, workspaceId: string): string {
@@ -478,6 +529,15 @@ export function buildAgentImageflowAssetsUrl(
     encodeURIComponent(scope.campaignId),
     'assets',
   ].join('/')
+  const params = buildAssetListSearchParams(query)
+  return params ? `${url}?${params}` : url
+}
+
+export function buildAgentImageflowRecentAssetsUrl(
+  baseUrl: string,
+  query?: AgentImageflowAssetListQuery,
+): string {
+  const url = `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/assets/recent`
   const params = buildAssetListSearchParams(query)
   return params ? `${url}?${params}` : url
 }
@@ -614,6 +674,27 @@ export async function createAgentImageflowTask(
     body: JSON.stringify(input),
   })
   return normalizeAgentImageflowTaskResponse(response)
+}
+
+export async function loginAgentImageflowAdmin(
+  baseUrl: string,
+  input: AgentImageflowAdminLoginInput,
+): Promise<AgentImageflowAdminSessionResponse> {
+  return requestJson<AgentImageflowAdminSessionResponse>(buildAgentImageflowAdminLoginUrl(baseUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function getAgentImageflowAdminMe(baseUrl: string): Promise<AgentImageflowAdminSessionResponse> {
+  return requestJson<AgentImageflowAdminSessionResponse>(buildAgentImageflowAdminMeUrl(baseUrl))
+}
+
+export async function logoutAgentImageflowAdmin(baseUrl: string): Promise<AgentImageflowAdminSessionResponse> {
+  return requestJson<AgentImageflowAdminSessionResponse>(buildAgentImageflowAdminLogoutUrl(baseUrl), {
+    method: 'POST',
+  })
 }
 
 export async function listAgentImageflowWorkspaces(baseUrl: string, auth?: AgentImageflowAuth): Promise<AgentImageflowWorkspaceListResponse> {
@@ -798,6 +879,17 @@ export async function listAgentImageflowAssets(
   return normalizeAgentImageflowAssetListResponse(response)
 }
 
+export async function listAgentImageflowRecentAssets(
+  baseUrl: string,
+  query?: AgentImageflowAssetListQuery,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowAssetResponse[]> {
+  const response = await requestJson<AgentImageflowAssetResponse[]>(buildAgentImageflowRecentAssetsUrl(baseUrl, query), {
+    headers: buildAgentImageflowHeaders(auth),
+  })
+  return normalizeAgentImageflowAssetListResponse(response)
+}
+
 export async function getAgentImageflowBatchProgress(
   baseUrl: string,
   scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
@@ -915,22 +1007,24 @@ function encodeBasicCredentials(username: string, password: string): string {
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init)
+  const response = await fetch(url, { credentials: 'include', ...init })
   const text = await response.text()
   const payload = text ? JSON.parse(text) : null
   if (!response.ok) {
     const message = typeof payload?.error_message === 'string' ? payload.error_message : `HTTP ${response.status}`
-    throw new Error(message)
+    const errorCode = typeof payload?.error_code === 'string' ? payload.error_code : undefined
+    throw new AgentImageflowApiError(message, response.status, errorCode)
   }
   return payload as T
 }
 
 async function requestEmpty(url: string, init?: RequestInit): Promise<void> {
-  const response = await fetch(url, init)
+  const response = await fetch(url, { credentials: 'include', ...init })
   const text = await response.text()
   const payload = text ? JSON.parse(text) : null
   if (!response.ok) {
     const message = typeof payload?.error_message === 'string' ? payload.error_message : `HTTP ${response.status}`
-    throw new Error(message)
+    const errorCode = typeof payload?.error_code === 'string' ? payload.error_code : undefined
+    throw new AgentImageflowApiError(message, response.status, errorCode)
   }
 }

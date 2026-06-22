@@ -294,6 +294,10 @@ export interface AgentImageflowManagedAttempt {
   attemptNo: number
   status: string
   provider: string
+  requestMode?: string
+  apiMode?: string
+  stream?: boolean
+  partialImageCount?: number
   latencyMs?: number
   queueWaitMs?: number
   providerFirstByteMs?: number

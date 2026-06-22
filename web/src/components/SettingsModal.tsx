@@ -98,6 +98,28 @@ function buildManagedScopeAuth(settings: Pick<AppSettings, 'imageflowApiKey' | '
   }
 }
 
+type ManagedScopeFields = Pick<AppSettings, 'imageflowWorkspaceId' | 'imageflowProjectId' | 'imageflowCampaignId'>
+
+function trimManagedScopeFields(settings: ManagedScopeFields): ManagedScopeFields {
+  return {
+    imageflowWorkspaceId: settings.imageflowWorkspaceId.trim(),
+    imageflowProjectId: settings.imageflowProjectId.trim(),
+    imageflowCampaignId: settings.imageflowCampaignId.trim(),
+  }
+}
+
+function hasCompleteManagedScope(settings: ManagedScopeFields): boolean {
+  const scope = trimManagedScopeFields(settings)
+  return Boolean(scope.imageflowWorkspaceId && scope.imageflowProjectId && scope.imageflowCampaignId)
+}
+
+function normalizeSettingsWithManagedScopeDraft(settings: AppSettings): AppSettings {
+  return {
+    ...normalizeSettings(settings),
+    ...trimManagedScopeFields(settings),
+  }
+}
+
 function slugifyManagedScopeId(name: string, prefix: string) {
   const slug = name
     .trim()
@@ -429,6 +451,7 @@ export default function SettingsModal() {
   const [projectCreateForm, setProjectCreateForm] = useState<ManagedScopeCreateForm>(createEmptyManagedScopeForm())
   const [campaignCreateForm, setCampaignCreateForm] = useState<ManagedScopeCreateForm>(createEmptyManagedScopeForm())
   const managedScopeLoadKeyRef = useRef<string>('')
+  const managedScopeRequestRef = useRef(0)
   const persistedManagedSettings = normalizeSettings(settings)
 
   const apiProxyConfig = readClientDevProxyConfig()
@@ -688,9 +711,36 @@ export default function SettingsModal() {
     setSettings(normalizedDraft)
   }
 
+  const setManagedScopeDraft = (nextDraft: AppSettings) => {
+    const normalizedDraft = normalizeSettingsWithManagedScopeDraft(nextDraft)
+    setDraft(normalizedDraft)
+    return normalizedDraft
+  }
+
+  const commitManagedScopeIfComplete = (nextDraft: AppSettings) => {
+    const normalizedDraft = normalizeSettingsWithManagedScopeDraft(nextDraft)
+    if (!hasCompleteManagedScope(normalizedDraft)) {
+      setDraft(normalizedDraft)
+      return false
+    }
+    commitSettings(normalizedDraft)
+    return true
+  }
+
+  const preservePersistedManagedScopeIfIncomplete = (nextDraft: AppSettings) => {
+    const normalizedDraft = normalizeSettingsWithManagedScopeDraft(nextDraft)
+    if (!normalizedDraft.imageflowManagedMode || hasCompleteManagedScope(normalizedDraft)) return normalizedDraft
+    return {
+      ...normalizedDraft,
+      ...trimManagedScopeFields(persistedManagedSettings),
+    }
+  }
+
   const loadManagedScopes = async (baseSettings: AppSettings = persistedManagedSettings) => {
     if (!baseSettings.imageflowManagedMode) return
 
+    const requestId = managedScopeRequestRef.current + 1
+    managedScopeRequestRef.current = requestId
     const baseUrl = normalizeAgentImageflowApiBaseUrl(baseSettings.imageflowApiBaseUrl)
     const auth = buildManagedScopeAuth(baseSettings)
 
@@ -699,10 +749,11 @@ export default function SettingsModal() {
 
     try {
       const workspaceResponse = await listAgentImageflowWorkspaces(baseUrl, auth)
+      if (managedScopeRequestRef.current !== requestId) return
       const workspaces = workspaceResponse.workspaces
       const activeWorkspaces = workspaces.filter((workspace) => !workspace.archived)
 
-      let nextDraft = normalizeSettings(baseSettings)
+      let nextDraft = normalizeSettingsWithManagedScopeDraft(baseSettings)
       if (!activeWorkspaces.some((workspace) => workspace.workspace_id === nextDraft.imageflowWorkspaceId)) {
         nextDraft = {
           ...nextDraft,
@@ -716,6 +767,7 @@ export default function SettingsModal() {
       const projectResponse = workspaceId
         ? await listAgentImageflowProjects(baseUrl, workspaceId, auth)
         : { workspace_id: workspaceId, projects: [] }
+      if (managedScopeRequestRef.current !== requestId) return
       const projects = projectResponse.projects
       const activeProjects = projects.filter((project) => !project.archived)
 
@@ -731,6 +783,7 @@ export default function SettingsModal() {
       const campaignResponse = workspaceId && projectId
         ? await listAgentImageflowCampaigns(baseUrl, { workspaceId, projectId }, auth)
         : { workspace_id: workspaceId, project_id: projectId, campaigns: [] }
+      if (managedScopeRequestRef.current !== requestId) return
       const campaigns = campaignResponse.campaigns
       const activeCampaigns = campaigns.filter((campaign) => !campaign.archived)
 
@@ -749,19 +802,24 @@ export default function SettingsModal() {
         nextDraft.imageflowProjectId !== baseSettings.imageflowProjectId ||
         nextDraft.imageflowCampaignId !== baseSettings.imageflowCampaignId
       ) {
-        commitSettings(nextDraft)
+        commitManagedScopeIfComplete(nextDraft)
+      } else {
+        setManagedScopeDraft(nextDraft)
       }
     } catch (error) {
+      if (managedScopeRequestRef.current !== requestId) return
       const message = error instanceof Error ? error.message : String(error)
       setManagedScopeError(message)
     } finally {
-      setManagedScopeLoading(false)
+      if (managedScopeRequestRef.current === requestId) {
+        setManagedScopeLoading(false)
+      }
     }
   }
 
   const refreshManagedScopes = async () => {
     managedScopeLoadKeyRef.current = ''
-    await loadManagedScopes(normalizeSettings(draft))
+    await loadManagedScopes(normalizeSettingsWithManagedScopeDraft(draft))
   }
 
   const createManagedWorkspace = async () => {
@@ -783,13 +841,12 @@ export default function SettingsModal() {
       showToast(`已创建 workspace「${name}」`, 'success')
       setShowWorkspaceCreateForm(false)
       setWorkspaceCreateForm(createEmptyManagedScopeForm())
-      const nextDraft = normalizeSettings({
+      const nextDraft = setManagedScopeDraft({
         ...draft,
         imageflowWorkspaceId: workspaceId,
         imageflowProjectId: '',
         imageflowCampaignId: '',
       })
-      commitSettings(nextDraft)
       managedScopeLoadKeyRef.current = ''
       await loadManagedScopes(nextDraft)
     } catch (error) {
@@ -823,13 +880,12 @@ export default function SettingsModal() {
       showToast(`已创建 project「${name}」`, 'success')
       setShowProjectCreateForm(false)
       setProjectCreateForm(createEmptyManagedScopeForm())
-      const nextDraft = normalizeSettings({
+      const nextDraft = setManagedScopeDraft({
         ...draft,
         imageflowWorkspaceId: workspaceId,
         imageflowProjectId: projectId,
         imageflowCampaignId: '',
       })
-      commitSettings(nextDraft)
       managedScopeLoadKeyRef.current = ''
       await loadManagedScopes(nextDraft)
     } catch (error) {
@@ -867,13 +923,13 @@ export default function SettingsModal() {
       showToast(`已创建 campaign「${name}」`, 'success')
       setShowCampaignCreateForm(false)
       setCampaignCreateForm(createEmptyManagedScopeForm())
-      const nextDraft = normalizeSettings({
+      const nextDraft = normalizeSettingsWithManagedScopeDraft({
         ...draft,
         imageflowWorkspaceId: workspaceId,
         imageflowProjectId: projectId,
         imageflowCampaignId: campaignId,
       })
-      commitSettings(nextDraft)
+      commitManagedScopeIfComplete(nextDraft)
       managedScopeLoadKeyRef.current = ''
       await loadManagedScopes(nextDraft)
     } catch (error) {
@@ -1006,7 +1062,7 @@ export default function SettingsModal() {
         : draft.profiles,
     }
     setAgentMaxToolRoundsInput(String(normalizedAgentMaxToolRounds))
-    commitSettings(nextDraft)
+    commitSettings(preservePersistedManagedScopeIfIncomplete(nextDraft))
     setShowSettings(false)
   }
 
@@ -1669,12 +1725,14 @@ export default function SettingsModal() {
                             onChange={(value) => {
                               const workspaceId = String(value || '').trim()
                               if (!workspaceId) return
-                              commitSettings({
+                              const nextDraft = setManagedScopeDraft({
                                 ...draft,
                                 imageflowWorkspaceId: workspaceId,
                                 imageflowProjectId: '',
                                 imageflowCampaignId: '',
                               })
+                              managedScopeLoadKeyRef.current = ''
+                              void loadManagedScopes(nextDraft)
                             }}
                             options={workspaceScopeOptions}
                             disabled={!draft.imageflowManagedMode}
@@ -1700,11 +1758,13 @@ export default function SettingsModal() {
                             onChange={(value) => {
                               const projectId = String(value || '').trim()
                               if (!projectId) return
-                              commitSettings({
+                              const nextDraft = setManagedScopeDraft({
                                 ...draft,
                                 imageflowProjectId: projectId,
                                 imageflowCampaignId: '',
                               })
+                              managedScopeLoadKeyRef.current = ''
+                              void loadManagedScopes(nextDraft)
                             }}
                             options={projectScopeOptions}
                             disabled={!draft.imageflowManagedMode || !draft.imageflowWorkspaceId.trim()}
@@ -1730,7 +1790,7 @@ export default function SettingsModal() {
                             onChange={(value) => {
                               const campaignId = String(value || '').trim()
                               if (!campaignId) return
-                              commitSettings({
+                              commitManagedScopeIfComplete({
                                 ...draft,
                                 imageflowCampaignId: campaignId,
                               })
@@ -1885,8 +1945,16 @@ export default function SettingsModal() {
                         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Workspace ID（手动兜底）</span>
                         <input
                           value={draft.imageflowWorkspaceId}
-                          onChange={(e) => setDraft({ ...draft, imageflowWorkspaceId: e.target.value })}
-                          onBlur={(e) => commitSettings({ ...draft, imageflowWorkspaceId: e.target.value })}
+                          onChange={(e) => setManagedScopeDraft({
+                            ...draft,
+                            imageflowWorkspaceId: e.target.value,
+                            imageflowProjectId: '',
+                            imageflowCampaignId: '',
+                          })}
+                          onBlur={(e) => commitManagedScopeIfComplete({
+                            ...draft,
+                            imageflowWorkspaceId: e.target.value,
+                          })}
                           type="text"
                           disabled={!draft.imageflowManagedMode}
                           className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
@@ -1896,8 +1964,15 @@ export default function SettingsModal() {
                         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Project ID（手动兜底）</span>
                         <input
                           value={draft.imageflowProjectId}
-                          onChange={(e) => setDraft({ ...draft, imageflowProjectId: e.target.value })}
-                          onBlur={(e) => commitSettings({ ...draft, imageflowProjectId: e.target.value })}
+                          onChange={(e) => setManagedScopeDraft({
+                            ...draft,
+                            imageflowProjectId: e.target.value,
+                            imageflowCampaignId: '',
+                          })}
+                          onBlur={(e) => commitManagedScopeIfComplete({
+                            ...draft,
+                            imageflowProjectId: e.target.value,
+                          })}
                           type="text"
                           disabled={!draft.imageflowManagedMode}
                           className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
@@ -1907,8 +1982,8 @@ export default function SettingsModal() {
                         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Campaign ID（手动兜底）</span>
                         <input
                           value={draft.imageflowCampaignId}
-                          onChange={(e) => setDraft({ ...draft, imageflowCampaignId: e.target.value })}
-                          onBlur={(e) => commitSettings({ ...draft, imageflowCampaignId: e.target.value })}
+                          onChange={(e) => setManagedScopeDraft({ ...draft, imageflowCampaignId: e.target.value })}
+                          onBlur={(e) => commitManagedScopeIfComplete({ ...draft, imageflowCampaignId: e.target.value })}
                           type="text"
                           disabled={!draft.imageflowManagedMode}
                           className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"

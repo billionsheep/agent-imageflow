@@ -4,6 +4,9 @@ import {
   buildAgentImageflowAssetsUrl,
   buildAgentImageflowAssetUrl,
   buildAgentImageflowBatchProgressUrl,
+  buildAgentImageflowAdminLoginUrl,
+  buildAgentImageflowAdminLogoutUrl,
+  buildAgentImageflowAdminMeUrl,
   buildAgentImageflowCampaignsUrl,
   buildAgentImageflowCampaignUrl,
   buildAgentImageflowInputFilesUrl,
@@ -11,6 +14,7 @@ import {
   buildAgentImageflowProjectsUrl,
   buildAgentImageflowProviderProfileUrl,
   buildAgentImageflowQualityProfileUrl,
+  buildAgentImageflowRecentAssetsUrl,
   buildAgentImageflowStorageGovernanceUrl,
   buildAgentImageflowStorageIntegrityUrl,
   buildAgentImageflowTaskAttemptsUrl,
@@ -43,6 +47,9 @@ describe('agentImageflowApi', () => {
     expect(buildAgentImageflowTaskStatusUrl('http://localhost:8081', 'task_1')).toBe('http://localhost:8081/api/tasks/task_1')
     expect(buildAgentImageflowTaskAttemptsUrl('http://localhost:8081', 'task_1')).toBe('http://localhost:8081/api/tasks/task_1/attempts')
     expect(buildAgentImageflowAssetUrl('http://localhost:8081', 'asset_1')).toBe('http://localhost:8081/api/assets/asset_1')
+    expect(buildAgentImageflowAdminLoginUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/login')
+    expect(buildAgentImageflowAdminMeUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/me')
+    expect(buildAgentImageflowAdminLogoutUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/logout')
     expect(buildAgentImageflowWorkspacesUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/workspaces')
     expect(buildAgentImageflowWorkspaceUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default')
     expect(buildAgentImageflowProjectsUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default/projects')
@@ -81,6 +88,12 @@ describe('agentImageflowApi', () => {
       batchId: 'batch_1',
       keyword: 'cover',
     })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets?limit=24&offset=48&status=selected&provider=mock&source=mcp&session_id=session_1&batch_id=batch_1&keyword=cover')
+    expect(buildAgentImageflowRecentAssetsUrl('http://localhost:8081/', {
+      limit: 24,
+      offset: 24,
+      source: 'mcp',
+      sessionId: 'session_1',
+    })).toBe('http://localhost:8081/api/admin/assets/recent?limit=24&offset=24&source=mcp&session_id=session_1')
     expect(buildAgentImageflowBatchProgressUrl('http://localhost:8081/', {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',

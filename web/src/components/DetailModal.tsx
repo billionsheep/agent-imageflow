@@ -1189,6 +1189,10 @@ export default function DetailModal() {
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
                             <span>{formatAttemptLatency(attempt.latencyMs)}</span>
+                            {attempt.apiMode && <span className="font-mono">{attempt.apiMode}</span>}
+                            {attempt.requestMode && <span className="font-mono">{attempt.requestMode}</span>}
+                            {attempt.stream && attempt.status !== 'completed' && <span>{attempt.partialImageCount ? '已收到 partial' : '流式请求中'}</span>}
+                            {Number.isFinite(attempt.partialImageCount) && attempt.partialImageCount != null && attempt.partialImageCount > 0 && <span>partial {attempt.partialImageCount}</span>}
                             {Number.isFinite(attempt.queueWaitMs) && <span>queue {formatAttemptLatency(attempt.queueWaitMs)}</span>}
                             {Number.isFinite(attempt.providerFirstByteMs) && <span>first {formatAttemptLatency(attempt.providerFirstByteMs)}</span>}
                             {Number.isFinite(attempt.providerTotalMs) && <span>provider {formatAttemptLatency(attempt.providerTotalMs)}</span>}

@@ -125,7 +125,7 @@ project:
 - name
 - description
 - style_preset
-- metadata_json (`quality_profile` 保存项目级质量复用配置，`provider_profile` 保存非敏感项目级 provider 默认值，`access_config` 保存项目级 API key 兼容视图与 `api_keys` 列表，`archived_at` 用于 project 归档状态)
+- metadata_json (`quality_profile` 保存项目级质量复用配置，`provider_profile` 保存非敏感项目级 provider 默认值，`visual_context` 保存第一版 Character/Mascot Profile、Project Reference Library binding 和 Prompt Recipe，`access_config` 保存项目级 API key 兼容视图与 `api_keys` 列表，`archived_at` 用于 project 归档状态)
 - created_at
 - updated_at
 
@@ -163,7 +163,7 @@ generation_task:
 
 `selection_mode` 当前保存在 `structured_input_json` 中，查询时由服务端反填；默认 `manual_optional`，传 `auto` 或 `best_of` 时 Worker 生成后会自动 selected 一张候选。
 
-`structured_input_json` 当前会保存有效质量配置快照和高级输入 descriptor，包括 `prompt_template`、`template_variables`、`reference_images`、`mask_image`、`generation_config`、`best_of_config`、`use_project_quality_profile`、`selection_mode`、`metadata_json.quality_profile_snapshot`，以及仅供 Worker/provider 使用的 `resolved_input_files`。当输入来自远程 URL 时，快照会同时保留原始 `url` 与服务端生成的 `input_file_id`；当输入来自资产复用时，快照会保留原始 `asset_id`。quality snapshot 中也会保留项目级 `best_of_config`，保证 REST/MCP/Web 托管任务复用时不丢 scorer 配置；其中 `best_of_config.auto_reject_non_selected` 可显式开启自动 rejected 未入选候选。
+`structured_input_json` 当前会保存有效质量配置快照、高级输入 descriptor 和 project visual context 展开快照，包括 `prompt_template`、`template_variables`、`reference_images`、`character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`use_project_visual_context`、`visual_context_snapshot`、`mask_image`、`generation_config`、`best_of_config`、`use_project_quality_profile`、`selection_mode`、`metadata_json.quality_profile_snapshot`，以及仅供 Worker/provider 使用的 `resolved_input_files`。当输入来自远程 URL 时，快照会同时保留原始 `url` 与服务端生成的 `input_file_id`；当输入来自资产复用时，快照会保留原始 `asset_id`。quality snapshot 中也会保留项目级 `best_of_config`，保证 REST/MCP/Web 托管任务复用时不丢 scorer 配置；其中 `best_of_config.auto_reject_non_selected` 可显式开启自动 rejected 未入选候选。visual context snapshot 中保留展开时用到的角色卡、reference binding 和 prompt recipe，asset `parameters_json` 也会保留同名关键快照。
 
 asset:
 - id
@@ -268,6 +268,11 @@ delivery_event:
 - `POST /api/workspaces/{workspace_id}/projects/{project_id}/quality-profile`
   - Input: project-level quality profile
   - Output: saved quality profile
+- `GET /api/workspaces/{workspace_id}/projects/{project_id}/visual-context`
+  - Output: project-level Character/Mascot Profile、Project Reference Library binding 和 Prompt Recipe
+- `POST /api/workspaces/{workspace_id}/projects/{project_id}/visual-context`
+  - Input: `visual_context` wrapper，保存到 `project.metadata_json.visual_context`
+  - Output: saved visual context; asset references must belong to the same workspace/project
 - `GET /api/workspaces/{workspace_id}/projects/{project_id}/provider-profile`
   - Output: project-level non-sensitive provider defaults (`enabled`、`provider`、`model`、`base_url`、`generation_config`、`use_project_quality_profile`)
 - `POST /api/workspaces/{workspace_id}/projects/{project_id}/provider-profile`

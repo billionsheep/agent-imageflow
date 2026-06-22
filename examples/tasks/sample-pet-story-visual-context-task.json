@@ -1,0 +1,21 @@
+{
+  "idempotency_key": "sample-pet-story-visual-context-v1",
+  "title": "Pet Story Scene Cover",
+  "purpose": "cute pet story cover",
+  "prompt": "Mochi, Biscuit and Orange Nap discover a tiny glowing moon cake under the sofa on a rainy evening",
+  "character_ids": ["dog_mochi", "dog_biscuit", "cat_orange"],
+  "prompt_recipe_id": "pet_story_cover",
+  "use_project_visual_context": true,
+  "requested_count": 2,
+  "selection_mode": "auto",
+  "review_required": false,
+  "metadata_json": {
+    "source": "cli",
+    "source_agent": "codex",
+    "session_id": "sample_pet_story_visual_context",
+    "batch_id": "sample_pet_story_visual_context_batch",
+    "story_id": "pet_story_moon_cake",
+    "scene_id": "scene_001",
+    "target_path": "stories/pet_story_moon_cake/scene_001_cover.png"
+  }
+}

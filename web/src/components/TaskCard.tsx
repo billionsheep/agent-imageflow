@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type ReactNode } from 'react'
+import { memo, useEffect, useState, useRef, type ReactNode } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, retryTask } from '../store'
 import { formatImageRatio } from '../lib/size'
@@ -57,7 +57,7 @@ function TaskActionButton({
   )
 }
 
-export default function TaskCard({
+function TaskCard({
   task,
   onReuse,
   onEditOutputs,
@@ -76,7 +76,7 @@ export default function TaskCard({
   const [swipeDirection, setSwipeDirection] = useState<-1 | 0 | 1>(0)
   const [streamPreviewLoaded, setStreamPreviewLoaded] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
-  const settings = useStore((s) => s.settings)
+  const alwaysShowRetryButton = useStore((s) => s.settings.alwaysShowRetryButton)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const streamPreviewSrc = useStore((s) => s.streamPreviews[task.id] || '')
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -665,7 +665,7 @@ export default function TaskCard({
               onTouchEnd={(e) => e.stopPropagation()}
               onTouchCancel={(e) => e.stopPropagation()}
             >
-              {task.managedBy !== 'agent-imageflow' && ((task.status === 'error' && !isFalReconnecting) || settings.alwaysShowRetryButton) && (
+              {task.managedBy !== 'agent-imageflow' && ((task.status === 'error' && !isFalReconnecting) || alwaysShowRetryButton) && (
                 <TaskActionButton
                   tooltip="重试任务"
                   onClick={() => retryTask(task)}
@@ -765,3 +765,5 @@ export default function TaskCard({
     </div>
   )
 }
+
+export default memo(TaskCard)

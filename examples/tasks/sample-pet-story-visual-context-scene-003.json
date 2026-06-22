@@ -1,0 +1,21 @@
+{
+  "idempotency_key": "sample-pet-story-visual-context-scene-003-v1",
+  "title": "Pet Story Scene 003",
+  "purpose": "cute pet story ending scene",
+  "prompt": "Mochi, Biscuit and Orange Nap share the tiny moon cake on the windowsill while rain turns into silver stars outside",
+  "character_ids": ["dog_mochi", "dog_biscuit", "cat_orange"],
+  "prompt_recipe_id": "pet_story_cover",
+  "use_project_visual_context": true,
+  "requested_count": 2,
+  "selection_mode": "auto",
+  "review_required": false,
+  "metadata_json": {
+    "source": "cli",
+    "source_agent": "codex",
+    "session_id": "sample_pet_story_visual_context",
+    "batch_id": "sample_pet_story_visual_context_batch",
+    "story_id": "pet_story_moon_cake",
+    "scene_id": "scene_003",
+    "target_path": "stories/pet_story_moon_cake/scene_003_windowsill.png"
+  }
+}

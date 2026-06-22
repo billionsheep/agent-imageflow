@@ -258,6 +258,10 @@ func (s *Server) tools() []toolDefinition {
 						"weight":        map[string]any{"type": "number"},
 					}, nil),
 				},
+				"character_ids":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Project visual context character profile ids to expand into this task."},
+				"reference_asset_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Existing project asset ids to use as visual context references."},
+				"prompt_recipe_id":           stringProp("Project visual context prompt recipe id to expand."),
+				"use_project_visual_context": map[string]any{"type": "boolean", "description": "Expand project visual context before enqueueing."},
 				"best_of_config": map[string]any{
 					"type":        "object",
 					"description": "Optional best-of scoring configuration. strategy may be local_metadata_v1 or http_judge_v1; auto_reject_non_selected rejects losing candidates after auto selection.",
@@ -501,6 +505,10 @@ type createImageTaskArgs struct {
 	PromptTemplate           string                  `json:"prompt_template"`
 	TemplateVariables        map[string]any          `json:"template_variables"`
 	ReferenceImages          []domain.ReferenceImage `json:"reference_images"`
+	CharacterIDs             []string                `json:"character_ids"`
+	ReferenceAssetIDs        []string                `json:"reference_asset_ids"`
+	PromptRecipeID           string                  `json:"prompt_recipe_id"`
+	UseProjectVisualContext  bool                    `json:"use_project_visual_context"`
 	BestOfConfig             *domain.BestOfConfig    `json:"best_of_config"`
 	MaskImage                *domain.MaskImage       `json:"mask_image"`
 	GenerationConfig         json.RawMessage         `json:"generation_config"`
@@ -525,6 +533,10 @@ func (a createImageTaskArgs) request() domain.CreateTaskRequest {
 		PromptTemplate:           a.PromptTemplate,
 		TemplateVariables:        a.TemplateVariables,
 		ReferenceImages:          a.ReferenceImages,
+		CharacterIDs:             a.CharacterIDs,
+		ReferenceAssetIDs:        a.ReferenceAssetIDs,
+		PromptRecipeID:           a.PromptRecipeID,
+		UseProjectVisualContext:  a.UseProjectVisualContext,
 		BestOfConfig:             a.BestOfConfig,
 		MaskImage:                a.MaskImage,
 		GenerationConfig:         a.GenerationConfig,
