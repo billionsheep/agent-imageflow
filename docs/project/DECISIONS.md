@@ -1,5 +1,23 @@
 # Decisions
 
+## 2026-06-22: 生产发布采用 GHCR 私有镜像 + 服务器拉取运行
+
+- Decision: Agent ImageFlow 的正式自托管发布流采用 GitHub Actions 构建并推送 GHCR 私有镜像，服务器只通过 `docker compose -f docker-compose.prod.yml --env-file .env.prod pull/up` 拉取和运行镜像，不在服务器构建 Go 或 Web。后端镜像名为 `ghcr.io/billionsheep/agent-imageflow-api`，Web 镜像名为 `ghcr.io/billionsheep/agent-imageflow-web`；版本使用 `main`、`vX.Y.Z` 和 `sha-<short_sha>`。
+- Reason: 当前产品已经进入可自托管试用阶段，本地源码 build 适合开发但不适合长期服务器部署。镜像发布流能让上线、回滚、审计和服务器环境保持稳定，同时避免把本地 dirty worktree、构建工具链或 provider key 带到服务器。
+- Impact: 新增 `docker-compose.prod.yml`、`Dockerfile.web`、`docker/nginx-web.conf`、`.github/workflows/docker-publish.yml`、`.env.example.prod`、`scripts/check_deployment_release.py` 和 `docs/project/SERVER_DEPLOYMENT_GUIDE.md`。`docker-compose.yml` 保持开发模式；`.env.prod` 只放服务器且继续被忽略；Postgres/Redis/storage root 不直接公网暴露；HTTPS/证书/反向代理由部署环境负责。后续任何包含数据库 schema 变化的版本，必须另开 migration/backup 计划。
+
+## 2026-06-22: 真实 provider 验证默认采用低频 canary
+
+- Decision: 后续真实 provider 验证默认采用低频 canary：独立 scope、少量图片、明确入口、明确停止条件；不把真实 provider benchmark 当作日常验证手段。MCP/REST/Web/CLI 入口是否真实走 provider，可通过 1 图 canary、batch progress、task attempts、metadata、thumbnail/original URL 和 Recent Assets 可见性来验收。
+- Reason: 项目已经具备 mock benchmark、provider stage metrics 和 batch progress，真实 provider 的主要风险从“平台是否能并发”转为“费用、外部限流和单次调用可靠性”。用户当前目标是打通萌宠账号资产生产工作流，而不是压测 provider；低频 canary 能证明真实链路不断，又避免费用失控。
+- Impact: 本轮已用 MCP `create_image_task` 执行 1 图真实 canary，生成 `task_b5256922a91e424850d3 -> asset_7c706c1a1cea00490a40`，provider 为 `openai-compatible / gpt-image-2`。后续如需真实 benchmark，必须另行确认费用预算、并发、样本量、provider cap 和中止条件；不得读取、打印或迁移 provider key/API key/secret/cookie/session。
+
+## 2026-06-22: P2 Web Operator Review Console 采用 server-first 审图语义
+
+- Decision: 下一阶段 P2 主线命名为 Web Operator Review Console，默认服务人工审图与交付确认；Recent Assets 和 Production View 默认展示图片、prompt/画面描述、story/scene、状态和核心动作，asset/task/scope/provider/hash/session/batch 等工程字段放入折叠 Technical details。真实 provider key/base URL 继续属于服务端平台配置；Admin 登录者使用平台能力；Project API key 继续服务 MCP/CLI/REST 外部调用；旧版浏览器直连 provider profile 保留为 advanced/legacy 兼容路径。
+- Reason: P1 已证明 Project Visual Context、batch/story/scene 聚合、scene action/regenerate 和 JSON manifest 闭环可用，但 Web 默认信息层仍像调试面板，用户在萌宠账号图片资产生产中只需要快速看图、理解剧情、选择/拒绝和导出。若不先收束凭据语义和 UI 信息层，后续功能越多越难用，也容易误导为“每个登录用户自带 provider key”的账号体系。
+- Impact: 已新增并关闭 `issues/next-phase-p2-web-operator-review-console.csv`，实现记录写入 `docs/project/stories/slice-051-web-operator-review-console.md`；本轮只做 Web 操作体验和最小安全回归，不引入多用户账号、注册、多租户、RBAC、发布系统、DAM、服务端 ZIP、WebDAV/SMB server 或真实视觉质检 AI；不读取、打印、迁移或处理任何真实 key/secret/cookie/session。
+
 ## 2026-06-20: Project Visual Context 第一版复用 project.metadata_json
 
 - Decision: P1 Project Production Context 第一版不新增数据库表或迁移，统一使用 `project.metadata_json.visual_context` 保存 Character/Mascot Profile、Project Reference Library binding 和 Prompt Recipe；`CreateTask` 新增 `character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`use_project_visual_context`，在入队前展开为 `structured_input_json.visual_context_snapshot`，并进入 asset `parameters_json`。
@@ -228,3 +246,39 @@
 - Decision: 保留 `WORKER_CONCURRENCY=6` 作为平台吞吐默认，但将真实 provider 默认入口 cap 调整为 `OPENAI_COMPATIBLE_MAX_CONCURRENCY=3`、`FAL_MAX_CONCURRENCY=3`，并将 `PROVIDER_TIMEOUT_SECONDS` 默认提升到 `300`；openai-compatible 额外拆分 connect/header/total timeout profile，task attempt 写入 queue/provider/download/store/thumbnail 阶段指标，benchmark run 自动带 `session_id/batch_id` 以便 batch progress 查询。
 - Reason: mock benchmark 已证明平台本地 worker/storage 不是主要瓶颈；真实 provider cap=6 小样本出现 2/6 timeout，说明把 worker 并发直接等同于 provider 并发风险较高。cap=3 + 300s total timeout 更适合作为自托管默认安全档，后续真实 provider 应按 cap `2 -> 3 -> 4` 小样本确认。
 - Impact: provider 生产吞吐会更保守，但 timeout/429 风险降低；需要更高吞吐时应使用 `vag benchmark image-generation --allow-paid-provider` 在用户确认费用后验证。仍不做 streaming、partial images、adaptive backpressure 或复杂 provider probe。
+
+## 2026-06-22: Project Context Web 面板先按最小可打通场景实现
+
+- Decision: P1-PCTX-008 和 P1-PCTX-009 已按 `docs/project/stories/slice-037-pctx-web-panel-and-pet-story-scenarios.md` 的边界落地：Web 第一版只做当前 project 的 Visual Context 维护入口、asset card Mark as reference、Web managed task context selector；clean 萌宠故事 mock 回归已验证角色、参考图、recipe、scene metadata、batch progress 和 Web 可见性。暂不提前实现独立 Batch / Story / Scene View、Export Pack、NAS/WebDAV/SMB、Usage Tracking、通用 DAM 或运营后台。
+- Reason: 服务端和 MCP/REST/CLI 已经能处理 Project Visual Context，当前最大断点是用户在 Web 上无法维护和使用这些长期上下文。如果先做批量故事视图或导出系统，会把产品重心从“project 级视觉生产上下文”拉到更复杂的生产/交付平台，增加返工风险。
+- Impact: Web Project Context modal 使用 Admin session / Basic fallback 读取和保存完整 `project.metadata_json.visual_context`，不新增数据库表或迁移；Web 只把 context ids 传给服务端，不在前端拼最终 prompt；asset card Reference 只写 reference binding，不复制文件或改变 asset 状态。P1-PCTX-009 只运行了 mock provider，evidence 已写回 CSV、TASKS、PROJECT_PLAN、PROJECT_STATUS_MAP、CHECKPOINTS 和 RUNBOOK。
+
+## 2026-06-22: Batch Story Export Foundation 作为下一阶段主线
+
+- Decision: 下一阶段正式入口为 `issues/next-phase-p1-batch-story-export-foundation.csv`。第一轮只做 batch/story/scene 聚合查看、MCP asset filter parity、scene 级 retry/regenerate、selected-only review、JSON manifest / 可选 ZIP 和 NAS/Docker 文件访问说明；不做小红书发布、内容日历、账号运营后台、通用 DAM、内置 WebDAV/SMB server、Usage Tracking 或 AI 视觉质检。
+- Reason: Project Visual Context 已证明角色、参考图和 recipe 可以贯穿 task/asset metadata；下一个真实断点是用户批量生成一组故事图后，无法在 Web 中按 scene 看进度、选图、重试和交付。直接做完整导出系统或运营后台会扩大范围，而 summary API + grouped view + manifest 可以先打通生产闭环。
+- Impact: 第一版继续使用 `metadata_json.session_id/batch_id/story_id/scene_id/target_path` 作为 grouping contract，优先不新增数据库表；NAS/WebDAV/SMB 由部署环境提供文件访问，Agent ImageFlow 继续负责 DB metadata、状态、delivery URL、manifest 和审计。
+
+## 2026-06-22: Batch summary route contract
+
+- Decision: P1-BSE-002 选择 `GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-summary` 作为第一版批量故事聚合路由，而不是 `story-summary`。`story_id` 作为可选 query filter，默认仍以 `session_id/batch_id` 表达一次生产批次。
+- Reason: 现有平台已有 `batch-progress` 和 `vag batch progress`，使用 `batch-summary` 可以复用用户心智，并保持 story 是 batch 内的业务维度。
+- Impact: 后续 P1-BSE-003 API、P1-BSE-005 Web production view 和 P1-BSE-009 manifest 都应复用 `slice-041` 的 metadata-only grouping、setup exclusion、scene ordering 和 regenerate metadata contract。
+
+## 2026-06-22: Scene regenerate 第一版采用新建 task 的 metadata lineage
+
+- Decision: P1-BSE-007 确认 scene regenerate 第一版采用 `create-new-task-as-regeneration`：不 retry 原 task，不 mutate 原 task，不覆盖旧 assets，不自动改变 selected/rejected。新 task 复用同一 `project_id/campaign_id/session_id/batch_id/story_id/scene_id`，通过 `structured_input_json.metadata_json` 和 asset `parameters_json` 记录 `regenerated_from_task_id`、`regenerate_no`、reason、overrides 和 visual context snapshot 摘要。
+- Reason: 用户在萌宠故事批量生产中需要针对单个失败或效果差的 scene 重新生成，同时保留旧候选、旧错误、已选图和审看痕迹。把 regenerate 设计成原 task retry 或覆盖旧资产会破坏 batch summary、manifest 和 selected-only 交付语义，也会让 agent 难以追溯哪次任务产生了哪张图。
+- Impact: P1-BSE-008 已按该决策实现第一版 Web/REST scene-level action，内部复用 create task / worker / asset registry 现有链路，且不需要 schema migration。`batch-summary`、`batch-progress`、asset list 和未来 manifest 必须继续通过 metadata lineage 识别 regenerated scene attempts；selected-only manifest 只有在用户显式 select 新 asset 后才切换。CLI/MCP regenerate command 和复杂 Web override UI 仍后置。
+
+## 2026-06-22: P1 第一轮不实现服务端 ZIP export
+
+- Decision: P1-BSE-010 确认第一轮不实现服务端 ZIP 打包。交付路径优先采用 JSON manifest + NAS/filesystem 访问；ZIP 仅在后续明确确认“小批量 selected assets 一键包”时另开实现切片。
+- Reason: 当前真实工作流需要的是图片资产生产、审看、追踪和交付清单，而不是复杂导出系统。JSON manifest 已能让 agent 和人拿到 delivery URL、metadata URL、target_path、scene/story/task 和 visual context；NAS/WebDAV/SMB/Finder 更适合承担大文件浏览、复制和备份。服务端 ZIP 会引入数量/大小保护、临时文件、路径安全、并发打包、下载中断和低资源 NAS 压力。
+- Impact: P1-BSE-011 应文档化 Docker storage root、只读共享和 manifest/file-system 分工；不要在应用内实现 WebDAV/SMB server 或 ZIP。未来 ZIP 必须限制小批量 selected assets，并加入数量、大小、路径和 secret 保护。
+
+## 2026-06-22: NAS / Docker 文件访问不成为资产事实源
+
+- Decision: P1-BSE-011 确认 NAS、WebDAV、SMB 和 Finder 只作为部署层文件访问能力，主要承担浏览、复制、交付拷贝和备份；Agent ImageFlow 的 DB / metadata / manifest 继续作为 task、asset、selected/rejected/published、visual context、scene/story/batch 追踪和审计的事实源。
+- Reason: 自托管和 NAS 场景下，直接访问图片目录很高效，但如果把文件夹移动、重命名或删除当成资产状态变化，会破坏 delivery URL、manifest、storage-integrity、selected/published 保护和跨入口一致性。
+- Impact: RUNBOOK 明确建议 NAS / WebDAV / SMB / Finder 常规访问只读；不要手动移动、重命名或删除平台管理的 selected / approved / published 资产；备份/恢复必须同时处理 Postgres dump 和 storage root 一致快照。应用内不实现 WebDAV/SMB server，也不把目录树扩成通用 DAM。

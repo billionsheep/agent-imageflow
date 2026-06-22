@@ -158,7 +158,56 @@ printf '%s\n' \
 5. 启用实例级 `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD`。
 6. 给需要隔离的 project 启用 project API key。
 7. 持久化 `postgres-data` 与 `asset-storage` 卷，避免重启后丢库或丢图。
-8. 如果需要 Web UI，自行构建 `web/dist` 并用静态文件服务或反向代理托管。
+8. 如果需要 Web UI，推荐使用生产 Web 镜像；也可以自行构建 `web/dist` 并用静态文件服务或反向代理托管。
+
+### Production image deployment
+
+正式部署推荐使用 GHCR 私有镜像，服务器只拉取镜像运行，不在服务器上构建 Go 或 Web。
+
+默认镜像：
+
+```text
+ghcr.io/billionsheep/agent-imageflow-api:${IMAGE_TAG}
+ghcr.io/billionsheep/agent-imageflow-web:${IMAGE_TAG}
+```
+
+第一次上线：
+
+```bash
+docker login ghcr.io
+cp .env.example.prod .env.prod
+# 编辑 .env.prod，设置 PUBLIC_BASE_URL、DATABASE_URL、Admin、Basic、provider 和 storage 变量
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+curl https://imageflow.example.com/healthz
+```
+
+版本更新：
+
+```bash
+# 修改 .env.prod 中的 IMAGE_TAG，例如 v0.1.1 或 sha-xxxxxxx
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+回滚：
+
+```bash
+# 把 IMAGE_TAG 改回上一版
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+部署前后建议备份：
+
+- PostgreSQL dump。
+- `asset-storage` / NAS storage root 快照。
+- `.env.prod` 单独安全备份。
+
+`docker-compose.prod.yml` 默认只把 API 和 Web 绑定到 `127.0.0.1`，交给宿主机反向代理转发；Postgres、Redis 和 storage root 不应直接暴露到公网。
+
+反向代理需要把 `/api/*` 和 `/healthz` 转到 API，把其他路径转到 Web 镜像；Web Settings 里的 Agent ImageFlow API URL 建议填写同一个公开域名，例如 `https://imageflow.example.com`，避免远程浏览器误连自己的 `localhost:8081`。
 
 启用 Basic Auth 示例：
 
@@ -175,20 +224,23 @@ docker compose up -d --force-recreate api worker
 下面示例假设：
 
 - API 在宿主机 `127.0.0.1:8081`
-- 已执行 `npm --prefix web run build`
-- 构建产物位于 `/srv/agent-imageflow/web/dist`
+- Web 镜像在宿主机 `127.0.0.1:8080`
 
 ```caddyfile
 imageflow.example.com {
   encode zstd gzip
 
+  handle /healthz {
+    reverse_proxy 127.0.0.1:8081
+  }
+
   handle /api/* {
     reverse_proxy 127.0.0.1:8081
   }
 
-  root * /srv/agent-imageflow/web/dist
-  try_files {path} /index.html
-  file_server
+  handle {
+    reverse_proxy 127.0.0.1:8080
+  }
 }
 ```
 
@@ -207,4 +259,5 @@ imageflow.example.com {
 - [技术规格](docs/project/TECH_SPEC.md)
 - [输入输出规格](docs/project/INPUT_OUTPUT_SPEC.md)
 - [运行手册](docs/project/RUNBOOK.md)
+- [服务器部署指导](docs/project/SERVER_DEPLOYMENT_GUIDE.md)
 - [检查点](docs/project/CHECKPOINTS.md)

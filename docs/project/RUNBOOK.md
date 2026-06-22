@@ -42,6 +42,7 @@ docker compose exec api /app/vag storage cleanup-execute --workspace ws_default 
 curl -H 'X-API-Key: <project_key>' http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-governance
 curl -H 'X-API-Key: <project_key>' http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-integrity
 curl -H 'X-API-Key: <project_key>' 'http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/assets?limit=24&source=mcp&session_id=<session_id>'
+curl -H 'X-API-Key: <project_key>' 'http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-summary?session_id=<session_id>&batch_id=<batch_id>&limit=100'
 
 # Project Visual Context smoke（mock provider，无外部费用）
 STAMP=$(date +%s)
@@ -482,6 +483,94 @@ imageflow.example.com {
 
 如果当前实例只给 MCP、CLI、自动化脚本或内网后台使用，可以不公开 Web UI，只反代 `/api/*`。
 
+## Production Image Deployment
+
+正式部署推荐使用 GitHub Actions 发布到 GHCR 的私有镜像，服务器只拉取镜像运行，不在服务器构建 Go 或 Web。
+
+如果要把任务交给新线程或服务器运维执行，优先使用独立交接文档：`docs/project/SERVER_DEPLOYMENT_GUIDE.md`。
+
+默认镜像：
+
+```text
+ghcr.io/billionsheep/agent-imageflow-api:${IMAGE_TAG}
+ghcr.io/billionsheep/agent-imageflow-web:${IMAGE_TAG}
+```
+
+生产 compose：
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+```
+
+第一次上线步骤：
+
+1. 在服务器执行 `docker login ghcr.io`，使用只具备 `read:packages` 权限的 GitHub token 或 deploy token。
+2. 从 `.env.example.prod` 复制出 `.env.prod`，只在服务器编辑真实值。
+3. 设置 `IMAGE_TAG`，可用 `main`、`vX.Y.Z` 或 `sha-xxxxxxx`。
+4. 设置 `PUBLIC_BASE_URL=https://your-domain.example`。
+5. 设置 `DATABASE_URL` 与 `POSTGRES_PASSWORD`；如果密码包含 URL 特殊字符，`DATABASE_URL` 中需要 URL encode。
+6. 设置 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`ADMIN_SESSION_SECRET`。
+7. 按需设置 `BASIC_AUTH_USERNAME`、`BASIC_AUTH_PASSWORD` 和 project API key。
+8. 按需设置 `OPENAI_COMPATIBLE_*` 或 `FAL_*`；未设置 key 时不会默认调用真实 provider。
+9. 如使用 NAS，把 `AGENT_IMAGEFLOW_STORAGE_ROOT` 设置为宿主机/NAS 路径；留空则使用 Docker named volume。
+10. 执行 pull/up，并通过反向代理开放 HTTPS。
+
+反向代理路由必须保持这个边界：
+
+- `/api/*` 转发到 API，例如宿主机 `127.0.0.1:8081`。
+- `/healthz` 转发到 API，便于上线 smoke 和外部健康检查。
+- 其他路径转发到 Web 镜像，例如宿主机 `127.0.0.1:8080`。
+
+Web Settings 里的 Agent ImageFlow API URL 建议填写同一个公开 HTTPS 域名，例如 `https://your-domain.example`，不要在远程浏览器里保留 `http://localhost:8081`；否则浏览器会访问操作者本机的 localhost，而不是服务器。
+
+版本更新步骤：
+
+```bash
+# 1. 修改 .env.prod 中的 IMAGE_TAG，例如 v0.1.1 或 sha-xxxxxxx
+# 2. 拉取并重建容器
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+# 3. 验证
+curl -fsS https://your-domain.example/healthz
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+```
+
+回滚步骤：
+
+```bash
+# 把 IMAGE_TAG 改回上一版
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+生产 smoke 建议：
+
+```bash
+curl -fsS https://your-domain.example/healthz
+curl -fsSI https://your-domain.example/
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api /app/vag audit list --limit 5
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"deploy-smoke"}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | docker compose -f docker-compose.prod.yml --env-file .env.prod run -T --rm api /app/mcp
+```
+
+备份建议：
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T postgres \
+  pg_dump -U agent -d agent_imageflow > agent_imageflow_$(date +%Y%m%d_%H%M%S).sql
+```
+
+- 同时对 `asset-storage` 或 `AGENT_IMAGEFLOW_STORAGE_ROOT` 做一致快照。
+- `.env.prod` 单独安全备份，不提交 Git。
+- 恢复时要让 Postgres dump 和 storage root 尽量来自同一时间点。
+
+当前不引入数据库 migration 框架；后续如果某个版本包含 schema 变化，必须先另开 migration/backup 计划。
+
 ## Project API key / Basic Auth / Admin Console
 
 服务端当前支持两层最小鉴权：
@@ -669,6 +758,173 @@ docker compose exec -T api /app/mcp < examples/tasks/sample-pet-story-visual-con
 - 如果 project 已启用 project API key，REST/CLI 调用方需要自行提供现有 `X-API-Key` / Bearer；不要把 key 写进示例文件或日志。
 - MCP stdio 逐行读取 JSON-RPC，因此 `sample-pet-story-visual-context-mcp-call.json` 保持为单行 JSON。
 - 若正在使用旧的已运行 Docker image，新增 examples 需要 rebuild 后才会出现在 `/app/examples/tasks/`；未 rebuild 时可以用 host-side REST 示例或临时 `docker compose cp` 到容器内验证。
+
+### Web Project Context panel
+
+P1-PCTX-008 已完成最小 Web Project Context 入口，第一版仍只服务当前 project 的长期视觉上下文，不扩展成通用 DAM 或运营后台。
+
+Web 行为：
+
+- 顶栏 `Project Context` 按钮会懒加载 modal，并读取当前 `workspace_id / project_id` 的 `visual_context`。
+- Web 使用 Admin session / Basic fallback 读取和保存 visual context；不要求人工在 Web 中填写 project API key，也不在前端接触 provider key。
+- modal 展示 characters、references、prompt recipes 三类数据，并区分 loading、empty、unauthorized/login required、error 状态。
+- character / reference binding / prompt recipe 支持最小新增、编辑、归档/恢复；保存方式是写回完整 `visual_context` 文档，保存后重新拉取服务端状态。
+- 服务端资产卡的 `Reference` 动作只打开 Project Context modal 并带入 `asset_id`，用于写 reference binding；不会复制文件、改 asset status 或改原始 asset。
+- Web 托管模式输入框可选择 recipe、characters 和 references；创建任务时只发送 `character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`use_project_visual_context`，最终 prompt 展开仍由服务端完成。
+
+如果打开 modal 后看到 `unauthorized / login required`，先用同一 host 完成 Admin 登录，再刷新或重新打开 Project Context。不要把 Admin cookie、Basic 密码、project API key 或 provider key 写入日志、截图、文档 evidence。
+
+### P1-PCTX-009 regression evidence
+
+P1-PCTX-008/009 的场景矩阵和最小功能设计见：
+
+```text
+docs/project/stories/slice-037-pctx-web-panel-and-pet-story-scenarios.md
+```
+
+P1-PCTX-008 的实现 evidence 见：
+
+```text
+docs/project/stories/slice-038-pctx-web-project-context-panel.md
+```
+
+P1-PCTX-009 clean 萌宠故事 mock 回归已完成。验收用独立 project/campaign、同 project style reference、三角色、`pet_story_cover` recipe 和 scene-only batch，验证 project context 到 task / asset metadata、batch progress、asset list 和 Admin Recent Assets 不断链。
+
+验收 ID：
+
+```text
+workspace: ws_default
+project: prj_pet_story_pctx009_1782094416
+campaign: cmp_pet_story_pctx009_1782094416
+style_reference_task: task_4dfbbd870dbb99f2e9fc
+style_reference_asset: asset_b8d5272e4afa0e249e5f
+scene_session: pet_story_pctx009_scene_session_1782094416
+scene_batch: pet_story_pctx009_scene_batch_1782094416
+scene_story: pet_story_pctx009_scene_story_1782094416
+scene_tasks: task_6e6cf178fcf656386d62, task_2fca7b06875125b64d01, task_108de9bcdaafc384302f
+scene_assets: asset_0aaa4b95e0914ba51c6d, asset_1735fa3123d84caea912, asset_743f12cb989a42fe002a, asset_4b174cc3330569378cc0, asset_b4232047c2b6df882314, asset_c486950784aef846a424
+```
+
+结果：
+
+- Visual Context readback 返回 3 个角色、1 个同 project style reference 和 `pet_story_cover` recipe。
+- Final scene-only batch progress 返回 `task_count=3`、`succeeded_count=3`、`failed_count=0`、`asset_count=6`、`attempt_count=3`。
+- REST/CLI asset list 通过 `source=codex`、`session_id=pet_story_pctx009_scene_session_1782094416`、`batch_id=pet_story_pctx009_scene_batch_1782094416` 查回 6 张 assets，覆盖 `scene_001`、`scene_002`、`scene_003`。
+- Admin Recent Assets 使用同一组 filters 查回 6 张 assets，scope 为 `ws_default/prj_pet_story_pctx009_1782094416/cmp_pet_story_pctx009_1782094416`。
+- 每个 scene task 的 `structured_input_json` 保留 `character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`visual_context_snapshot` 和 story/scene/batch metadata。
+- 每个 scene asset 的 `parameters_json.visual_context_snapshot` / `metadata_json.visual_context_snapshot` 保留 character ids、reference asset ids、recipe id，并保留 `story_id`、`scene_id`、`batch_id`。
+
+复跑注意：
+
+- style reference 准备任务可以复用同 project asset，但不要把 reference setup task 混进最终 scene batch；最终验收建议单独使用 scene-only `session_id/batch_id`，避免 `task_count` 和 `asset_count` 被 setup task 污染。
+- 若需要验证 Web UI，优先用 Admin Recent Assets 数据源或 production preview；不要读取或打印 Admin cookie/session token。
+
+验收边界：
+
+- 不运行真实 provider；mock provider 足够验证任务、资产、缩略图、metadata 和 Web 查看闭环。
+- 不读取、打印或处理任何 API key / provider key / secret；如果 project key 已启用，只验证未授权状态或由调用方在不输出的环境变量里提供。
+- 不做小红书发布、内容日历、账号运营后台、通用 DAM、模板市场、多人协作、RBAC、Batch / Story / Scene 新 UI、Export Pack 或 NAS/WebDAV/SMB。
+- P1-PCTX-009 已验证 project context 到 task/asset metadata/Web 可见性不断链；后续如果继续 Batch / Story / Scene UI 或导出能力，需要重新确认范围并拆独立 CSV。
+
+### Batch Story Export Foundation planning
+
+下一阶段入口：
+
+```text
+issues/next-phase-p1-batch-story-export-foundation.csv
+```
+
+场景和边界：
+
+```text
+docs/project/stories/slice-040-batch-story-export-scenarios.md
+```
+
+第一轮只做：
+
+- batch/story/scene grouped view。
+- `batch-summary` 第一版契约见 `docs/project/stories/slice-041-batch-story-summary-contract.md`，实现记录见 `docs/project/stories/slice-042-batch-story-summary-api.md`。
+- MCP `list_image_assets` 与 REST/CLI/Admin Recent Assets 的 session/batch filter parity。
+- scene 级 retry/regenerate：设计见 `docs/project/stories/slice-046-scene-regenerate-design.md`，实现记录见 `docs/project/stories/slice-047-scene-regenerate-implementation.md`。第一版采用 `create-new-task-as-regeneration`，保留原 scene metadata，不覆盖旧 task/assets，不自动改变 selected/rejected。
+- selected-only review。
+- JSON manifest export：REST `GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest`、CLI `vag batch manifest`、Web Production View manifest buttons 已完成。
+- 可选 ZIP export 已在 `docs/project/stories/slice-049-export-pack-zip-boundary.md` 明确后置；第一轮默认通过 manifest + NAS/filesystem 访问交付文件。
+- NAS/Docker 文件系统访问说明已完成，见 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`。
+
+Scene regenerate 使用/维护注意：
+
+- 优先输入 `source_task_id`；也可用 `session_id/batch_id/story_id/scene_id` + `task_selector=latest` 解析 source task。
+- REST action: `POST /api/projects/{project_id}/campaigns/{campaign_id}/scene-regenerations`。
+- Web Production View 第一版使用 scene `latest_task_id` / `source_task_id` 和可选 reason 创建 regeneration task。
+- 新 task 必须保持同一 project/campaign/session/batch/story/scene，并在 `structured_input_json.metadata_json` 记录 `regenerated_from_task_id`、`regenerate_no`、`regenerate_reason`、`regeneration_overrides` 和 request source。
+- 可覆盖字段只限 prompt、negative prompt、prompt recipe、character/reference ids、reference descriptors、requested_count、selection_mode、aspect/output/provider/model 和非敏感 generation config；不得接受 provider key、API key、cookie、session token 或任意本地路径。
+- `batch-summary`、`batch-progress`、asset list 和未来 manifest 应通过 metadata lineage 读到 regeneration；selected-only manifest 不因 regenerate 自动替换旧 selected asset。
+- CLI/MCP regenerate command 和 Web prompt/recipe override UI 仍后置；当前外部 agent 可先调用 REST action。
+
+Batch manifest 使用注意：
+
+- 至少传 `session_id` 或 `batch_id`。
+- `selected_only=true` 只导出 selected assets；`selected_only=false` 默认导出 generated + selected；`include_rejected=true` 才导出 rejected assets。
+- Manifest 只包含公开 delivery URL、metadata URL、target_path、scene/story/task id 和 visual context 摘要；不得加入 `local_path`、provider key、project API key、cookie 或 session token。
+- ZIP、多文件下载和服务端打包能力已在 P1-BSE-010 决定后置；未另行确认前不实现。
+
+### NAS / Docker / WebDAV / SMB access guide
+
+第一版自托管交付推荐采用：
+
+```text
+Agent ImageFlow DB / metadata / manifest
+        +
+Docker storage root on NAS-backed volume
+        +
+NAS / Finder / WebDAV / SMB read-only file access
+```
+
+职责边界：
+
+- 文件系统负责：浏览原图、缩略图和 metadata 文件；复制交付文件；做 NAS 快照、离线备份和人工归档；通过部署环境把 Docker storage root 映射到 NAS 路径。
+- DB / metadata 负责：workspace/project/campaign/task/asset 归属，task 状态，asset `generated/selected/rejected/published` 状态，visual context snapshot，scene/story/batch 追踪，manifest，audit log，storage governance 和 integrity 视图。
+- Manifest 负责连接两边：它输出 asset id、task id、session/batch/story/scene、delivery URL、thumbnail URL、metadata URL、target_path 和 visual context 摘要；它不输出宿主机本地绝对路径。
+
+部署建议：
+
+- Docker Compose 的 storage root 应挂载到持久目录；在 NAS 上运行时，优先使用 NAS 本地路径或 bind mount 作为该目录。
+- NAS / WebDAV / SMB / Finder 面向人和外部 agent 的常规访问建议只读。需要复制交付件时，从共享目录复制出去，不在共享目录内移动、重命名或删除平台管理文件。
+- 不要把 storage root 直接暴露到公网；公网访问走 Web/API 的 HTTPS 反向代理和现有鉴权。
+- 容器运行用户、NAS 共享用户和备份任务需要有清晰权限：服务端进程可写，普通浏览/交付账号只读。
+
+不要手动改动平台管理文件：
+
+- 不要手动移动、重命名或删除已 selected / approved / published 的资产文件。
+- 不要通过文件夹重命名来表达 project、campaign、scene 或 asset 状态；这些状态只由 DB / metadata 表达。
+- 如果绕过平台删除文件，DB 仍会保留 asset/task/status 记录，delivery URL 可能失效，storage-integrity 才能发现不一致。
+- 清理磁盘优先使用 storage governance / cleanup dry-run 和 execute 流程；它会保护 selected / published / approved 资产。
+
+备份与恢复：
+
+- 备份必须同时包含 Postgres dump 和 storage root 一致快照；只备份数据库会丢图片文件，只备份文件会丢 task/asset/status/visual context/manifest 追踪。
+- 恢复时先恢复数据库和 storage root，再用 storage-integrity 或 repair verify 类命令做只读校验。
+- 如果 NAS 提供快照，建议在数据库 dump 前后记录时间点，并让 storage root 快照与 dump 时间尽量一致。
+
+Manifest 与文件系统路径：
+
+- `target_path` 是交付逻辑路径，用于下游组织文件名或目录，不等于宿主机绝对路径。
+- `delivery_url` / `thumbnail_url` / `metadata_url` 是平台交付入口，适合 agent、Web 和外部系统读取。
+- 文件系统实际路径由 Docker volume / NAS mount 决定，不写入 manifest；不同机器恢复后路径可以不同，只要 storage root 内容和 DB metadata 一致即可。
+
+避免变成复杂 DAM：
+
+- Reference Library 只保留 `character/style/scene/prop` 等项目视觉生产用途标记，不扩展成通用标签体系、文件夹 taxonomy 或企业资产库。
+- WebDAV / SMB server 不在 Agent ImageFlow 应用内实现，由 NAS 或操作系统提供。
+- 不做内容日历、发布状态运营、账号后台、多租户文件权限或多人协作工作流。
+- 后续若需要 ZIP，只能另开小批量 selected assets 切片，并复用 manifest，不重新发明导出筛选。
+
+边界：
+
+- 不运行真实 provider，除非用户单独确认费用。
+- 不读取、打印或处理任何 API key / provider key / secret / cookie / session token。
+- 不做小红书发布、内容日历、账号运营后台、通用 DAM、WebDAV/SMB server、多人协作、Usage Tracking 或 AI 视觉质检。
+- NAS/WebDAV/SMB 第一轮由部署环境承担文件浏览、拷贝和备份；Agent ImageFlow 负责 DB metadata、状态、delivery URL、manifest 和审计。
 
 ## Managed input files / real edit
 
@@ -1054,10 +1310,12 @@ Selection mode: auto
 - 输入框提交 prompt 会创建服务端 `ImageTask`，不走浏览器直连 provider。
 - 如果输入框带参考图或 mask，Web 会把本地图片 ID、来源、MIME、角色和 mask target 作为 descriptor 提交到服务端；原图/mask 二进制仍留在浏览器 IndexedDB。
 - 如果“使用项目质量配置”开启，创建任务时会传 `use_project_quality_profile=true`，服务端会应用项目级 prompt template / style preset / reference 参数 / generation config。
+- 托管模式输入框会显示 Project Context selector，可选择当前 project 的 prompt recipe、characters 和 references；提交任务时会传 `character_ids`、`reference_asset_ids`、`prompt_recipe_id`、`use_project_visual_context`，前端不展开最终 prompt。
 - 托管模式默认传 `selection_mode=auto`；多候选任务完成后，服务端会按任务输入或项目级 quality profile 中的 `best_of_config` 自动 selected 一张候选。
 - 如果服务端启用了 Basic Auth 或项目级 API key，Web 会自动附带 `Authorization: Basic ...` 和 `X-API-Key`。
 - Web 服务端资产库默认展示 Recent Assets；用户使用 Admin 登录后，不需要手填 project API key 也可以看到 MCP / CLI / REST / Web 生成的最近资产。
 - 资产卡会显示 workspace / project / campaign，并可点击 `Scope` 切换当前 scope；`Scope` 视图仍可查看当前 campaign 的资产。
+- 资产卡的 `Reference` 动作会打开 Project Context modal，用当前 asset 建立 character/style/scene/prop reference binding；该动作不改变 asset 文件或 selected/rejected 状态。
 - 未登录或 401 会显示 unauthorized/login 状态，不再和真实空列表、筛选无结果混成 `0 shown`。
 - Web 会轮询 `GET /api/tasks/{task_id}` 并展示服务端候选资产。
 - 任务详情页可以对当前候选资产执行 Select / Reject。
