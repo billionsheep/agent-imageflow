@@ -17,6 +17,13 @@ import {
   type AgentImageflowAuth,
   type AgentImageflowAdminSessionResponse,
 } from '../lib/agentImageflowApi'
+import {
+  getAssetReviewTitle,
+  getAssetReviewSummary,
+  getAssetTechnicalFields,
+  getLocalhostMismatchWarning,
+  getProductionFiltersFromAsset,
+} from '../lib/operatorReview'
 import { CopyIcon, LinkIcon, RefreshIcon } from './icons'
 
 const ASSET_PAGE_SIZE = 24
@@ -48,11 +55,6 @@ function buildAuth(apiKey: string, basicUsername: string, basicPassword: string)
     basicUsername,
     basicPassword,
   }
-}
-
-function getMetadataValue(asset: AgentImageflowAssetResponse, key: string): string {
-  const value = asset.metadata_json?.[key]
-  return typeof value === 'string' ? value : ''
 }
 
 function formatAssetDate(value?: string): string {
@@ -116,27 +118,13 @@ function mergeAssets(current: AgentImageflowAssetResponse[], next: AgentImageflo
   return merged
 }
 
-function formatJSONSummary(value?: Record<string, unknown>): string {
-  if (!value || Object.keys(value).length === 0) return ''
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return ''
-  }
-}
-
-function safeLocalPathLabel(value?: string): string {
-  if (!value) return ''
-  const pieces = value.split(/[\\/]+/).filter(Boolean)
-  const filename = pieces[pieces.length - 1]
-  return filename ? `stored file: ${filename}` : 'stored file available'
-}
-
 interface ServerAssetCardProps {
   asset: AgentImageflowAssetResponse
   busy: boolean
   onSelectAsset: (asset: AgentImageflowAssetResponse) => void
   onRejectAsset: (asset: AgentImageflowAssetResponse) => void
+  onMarkAsReference: (asset: AgentImageflowAssetResponse) => void
+  onOpenProductionView: (asset: AgentImageflowAssetResponse) => void
   onCopyText: (text: string, label: string) => void
   onSwitchToAssetScope: (asset: AgentImageflowAssetResponse) => void
 }
@@ -146,32 +134,27 @@ const ServerAssetCard = memo(function ServerAssetCard({
   busy,
   onSelectAsset,
   onRejectAsset,
+  onMarkAsReference,
+  onOpenProductionView,
   onCopyText,
   onSwitchToAssetScope,
 }: ServerAssetCardProps) {
-  const source = getMetadataValue(asset, 'source')
-  const sessionId = getMetadataValue(asset, 'session_id')
-  const batchId = getMetadataValue(asset, 'batch_id')
-  const storyId = getMetadataValue(asset, 'story_id')
-  const sceneId = getMetadataValue(asset, 'scene_id')
-  const targetPath = getMetadataValue(asset, 'target_path')
-  const metadataSummary = useMemo(() => formatJSONSummary(asset.metadata_json), [asset.metadata_json])
-  const parametersSummary = useMemo(() => formatJSONSummary(asset.parameters_json), [asset.parameters_json])
-  const safeLocalPath = useMemo(() => safeLocalPathLabel(asset.delivery.local_path), [asset.delivery.local_path])
+  const reviewSummary = useMemo(() => getAssetReviewSummary(asset), [asset])
+  const reviewTitle = useMemo(() => getAssetReviewTitle(asset), [asset])
+  const technicalFields = useMemo(() => getAssetTechnicalFields(asset), [asset])
+  const productionFilters = useMemo(() => getProductionFiltersFromAsset(asset), [asset])
+  const visibleReviewFields = reviewSummary.filter((field) => field.key !== 'prompt')
 
   return (
     <article className="overflow-hidden rounded-lg border border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40">
       <div className="aspect-[4/3] bg-gray-100 dark:bg-white/[0.04]">
-        <img src={asset.delivery.thumbnail_url} alt={asset.prompt || asset.asset_id} className="h-full w-full object-cover" loading="lazy" />
+        <img src={asset.delivery.thumbnail_url} alt={reviewTitle || asset.asset_id} className="h-full w-full object-cover" loading="lazy" />
       </div>
       <div className="space-y-3 p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="line-clamp-2 text-sm font-medium text-gray-800 dark:text-gray-100" title={asset.prompt || asset.asset_id}>
-              {asset.prompt || asset.asset_id}
-            </div>
-            <div className="mt-1 truncate text-[11px] text-gray-500 dark:text-gray-400" title={asset.asset_id}>
-              {asset.asset_id}
+            <div className="line-clamp-2 text-sm font-medium text-gray-800 dark:text-gray-100" title={reviewTitle || asset.asset_id}>
+              {reviewTitle || asset.asset_id}
             </div>
           </div>
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClassName(asset.status)}`}>
@@ -179,36 +162,77 @@ const ServerAssetCard = memo(function ServerAssetCard({
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <AssetField label="workspace" value={asset.workspace_id} />
-          <AssetField label="project" value={asset.project_id} />
-          <AssetField label="campaign" value={asset.campaign_id} />
-          <AssetField label="provider" value={asset.provider} />
-          <AssetField label="model" value={asset.model} />
-          <AssetField label="task" value={asset.task_id} />
-          <AssetField label="hash" value={asset.hash} />
-          <AssetField label="source" value={source} />
-          <AssetField label="session" value={sessionId} />
-          <AssetField label="batch" value={batchId} />
-          <AssetField label="story" value={storyId} />
-          <AssetField label="scene" value={sceneId} />
-          <AssetField label="created" value={formatAssetDate(asset.created_at)} />
-          <AssetField label="target" value={targetPath} />
-        </div>
+        {visibleReviewFields.length > 0 && (
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
+            {visibleReviewFields.map((field) => (
+              <AssetField
+                key={field.key}
+                label={field.label}
+                value={field.key === 'created' ? formatAssetDate(field.value) : field.value}
+              />
+            ))}
+          </div>
+        )}
 
-        {(metadataSummary || parametersSummary || safeLocalPath) && (
+        {technicalFields.length > 0 && (
           <details className="rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
-            <summary className="cursor-pointer text-[11px] font-medium text-gray-500 dark:text-gray-300">Details</summary>
-            <div className="mt-2 space-y-2">
-              {safeLocalPath && (
-                <div className="break-all text-[11px] text-gray-500 dark:text-gray-400">{safeLocalPath}</div>
-              )}
-              {metadataSummary && (
-                <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-2 text-[11px] text-gray-600 dark:bg-gray-950/50 dark:text-gray-300">{metadataSummary}</pre>
-              )}
-              {parametersSummary && (
-                <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-2 text-[11px] text-gray-600 dark:bg-gray-950/50 dark:text-gray-300">{parametersSummary}</pre>
-              )}
+            <summary className="cursor-pointer text-[11px] font-medium text-gray-500 dark:text-gray-300">Technical details</summary>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {technicalFields.map((field) => (
+                field.key === 'metadata' || field.key === 'parameters' ? (
+                  <div key={field.key} className="col-span-2 min-w-0">
+                    <div className="text-[10px] uppercase text-gray-400 dark:text-gray-500">{field.label}</div>
+                    <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-2 text-[11px] text-gray-600 dark:bg-gray-950/50 dark:text-gray-300">{field.value}</pre>
+                  </div>
+                ) : (
+                  <AssetField key={field.key} label={field.label} value={field.value} />
+                )
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-2 dark:border-white/[0.08]">
+              <a
+                href={asset.delivery.metadata_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+              >
+                <LinkIcon className="h-3.5 w-3.5" />
+                Metadata
+              </a>
+              <button
+                type="button"
+                onClick={() => void onCopyText(asset.asset_id, ' asset_id')}
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+                title="复制 asset_id"
+              >
+                <CopyIcon className="h-3.5 w-3.5" />
+                ID
+              </button>
+              <button
+                type="button"
+                onClick={() => void onCopyText(asset.delivery.download_url, ' delivery URL')}
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+                title="复制 delivery URL"
+              >
+                <CopyIcon className="h-3.5 w-3.5" />
+                URL
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToAssetScope(asset)}
+                className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+                title="切换到该资产所在 scope"
+              >
+                Scope
+              </button>
+              <button
+                type="button"
+                onClick={() => onMarkAsReference(asset)}
+                className="inline-flex h-8 items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200"
+                title="标记为当前 project 的参考图"
+              >
+                Reference
+              </button>
             </div>
           </details>
         )}
@@ -239,41 +263,16 @@ const ServerAssetCard = memo(function ServerAssetCard({
             <LinkIcon className="h-3.5 w-3.5" />
             Original
           </a>
-          <a
-            href={asset.delivery.metadata_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
-          >
-            <LinkIcon className="h-3.5 w-3.5" />
-            Metadata
-          </a>
-          <button
-            type="button"
-            onClick={() => void onCopyText(asset.asset_id, ' asset_id')}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
-            title="复制 asset_id"
-          >
-            <CopyIcon className="h-3.5 w-3.5" />
-            ID
-          </button>
-          <button
-            type="button"
-            onClick={() => void onCopyText(asset.delivery.download_url, ' delivery URL')}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
-            title="复制 delivery URL"
-          >
-            <CopyIcon className="h-3.5 w-3.5" />
-            URL
-          </button>
-          <button
-            type="button"
-            onClick={() => onSwitchToAssetScope(asset)}
-            className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
-            title="切换到该资产所在 scope"
-          >
-            Scope
-          </button>
+          {productionFilters && (
+            <button
+              type="button"
+              onClick={() => onOpenProductionView(asset)}
+              className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+              title="用该资产的 session / batch 打开 Production View"
+            >
+              Batch
+            </button>
+          )}
         </div>
       </div>
     </article>
@@ -289,6 +288,8 @@ export default function ServerAssetLibrary() {
   const imageflowProjectId = useStore((state) => state.settings.imageflowProjectId)
   const imageflowCampaignId = useStore((state) => state.settings.imageflowCampaignId)
   const setSettings = useStore((state) => state.setSettings)
+  const setShowProjectContext = useStore((state) => state.setShowProjectContext)
+  const setShowProductionView = useStore((state) => state.setShowProductionView)
   const showToast = useStore((state) => state.showToast)
   const baseUrl = useMemo(
     () => normalizeAgentImageflowApiBaseUrl(imageflowApiBaseUrl),
@@ -302,6 +303,11 @@ export default function ServerAssetLibrary() {
     basicUsername: imageflowBasicUsername,
     basicPassword: imageflowBasicPassword,
   }), [imageflowBasicPassword, imageflowBasicUsername])
+  const hostMismatchWarning = useMemo(() => (
+    typeof window === 'undefined'
+      ? null
+      : getLocalhostMismatchWarning(window.location.origin, baseUrl)
+  ), [baseUrl])
   const scope = useMemo(() => ({
     workspaceId: imageflowWorkspaceId.trim(),
     projectId: imageflowProjectId.trim(),
@@ -518,6 +524,42 @@ export default function ServerAssetLibrary() {
     showToast('已切换到该资产所在 scope', 'success')
   }, [setSettings, showToast])
 
+  const markAsReference = useCallback((asset: AgentImageflowAssetResponse) => {
+    const assetProjectId = asset.project_id?.trim()
+    if (assetProjectId && assetProjectId !== scope.projectId) {
+      setSettings({
+        imageflowManagedMode: true,
+        imageflowWorkspaceId: asset.workspace_id?.trim() || scope.workspaceId,
+        imageflowProjectId: assetProjectId,
+        imageflowCampaignId: asset.campaign_id?.trim() || scope.campaignId,
+      })
+    }
+    setShowProjectContext(true, asset.asset_id)
+  }, [scope.campaignId, scope.projectId, scope.workspaceId, setSettings, setShowProjectContext])
+
+  const openProductionViewFromAsset = useCallback((asset: AgentImageflowAssetResponse) => {
+    const filters = getProductionFiltersFromAsset(asset)
+    if (!filters) {
+      showToast('该资产缺少 session_id 或 batch_id，无法打开 Production View', 'error')
+      return
+    }
+    const workspaceId = asset.workspace_id?.trim()
+    const projectId = asset.project_id?.trim()
+    const campaignId = asset.campaign_id?.trim()
+    if (!projectId || !campaignId) {
+      showToast('该资产缺少 project / campaign，无法打开 Production View', 'error')
+      return
+    }
+    setSettings({
+      imageflowManagedMode: true,
+      ...(workspaceId ? { imageflowWorkspaceId: workspaceId } : {}),
+      imageflowProjectId: projectId,
+      imageflowCampaignId: campaignId,
+    })
+    setMode((current) => current === 'scope' ? current : 'scope')
+    setShowProductionView(true, filters)
+  }, [setSettings, setShowProductionView, showToast])
+
   const setTextFilter = (key: Exclude<keyof AssetFilters, 'status'>, value: string) => {
     setDraftFilters((current) => ({ ...current, [key]: value }))
   }
@@ -657,6 +699,11 @@ export default function ServerAssetLibrary() {
 
       {unauthorized ? (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-500/20 dark:bg-amber-500/10">
+          {hostMismatchWarning && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-white/70 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-gray-950/30 dark:text-amber-100">
+              {hostMismatchWarning}
+            </div>
+          )}
           {!adminConfigured ? (
             <div className="text-xs text-amber-800 dark:text-amber-100">
               控制台 Admin 登录未配置。请在服务端设置 ADMIN_USERNAME / ADMIN_PASSWORD，或复用 BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD。
@@ -714,6 +761,8 @@ export default function ServerAssetLibrary() {
                 busy={actionAssetId === asset.asset_id}
                 onSelectAsset={selectAsset}
                 onRejectAsset={rejectAsset}
+                onMarkAsReference={markAsReference}
+                onOpenProductionView={openProductionViewFromAsset}
                 onCopyText={copyText}
                 onSwitchToAssetScope={switchToAssetScope}
               />

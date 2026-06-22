@@ -183,6 +183,12 @@ func (s *Server) executeTool(ctx context.Context, call toolCallParams) (any, err
 		return s.service.ListAssets(ctx, domain.AssetListQuery{
 			ProjectID:  projectID,
 			CampaignID: campaignID,
+			Limit:      args.Limit,
+			Status:     args.Status,
+			Source:     args.Source,
+			SessionID:  args.SessionID,
+			BatchID:    args.BatchID,
+			Keyword:    args.Keyword,
 		})
 	case "select_image_asset":
 		var args assetIDArgs
@@ -311,6 +317,12 @@ func (s *Server) tools() []toolDefinition {
 			InputSchema: objectSchema(map[string]any{
 				"project_id":  stringProp("Project id. Defaults to DEFAULT_PROJECT_ID."),
 				"campaign_id": stringProp("Campaign id. Defaults to DEFAULT_CAMPAIGN_ID."),
+				"source":      stringProp("Optional metadata source filter, such as mcp, cli, rest, or web."),
+				"session_id":  stringProp("Optional metadata session id filter."),
+				"batch_id":    stringProp("Optional metadata batch id filter."),
+				"status":      stringProp("Optional asset status filter. Compatibility values generated/selected map to draft/approved in the service."),
+				"keyword":     stringProp("Optional prompt/model/task/asset keyword filter."),
+				"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": domain.MaxAssetListLimit, "description": "Optional maximum number of assets to return."},
 			}, nil),
 		},
 		{
@@ -370,6 +382,10 @@ func mapStatuses(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
+			if key == "local_path" {
+				delete(typed, key)
+				continue
+			}
 			if key == "status" {
 				if status, ok := child.(string); ok {
 					typed[key] = semanticStatus(status)
@@ -558,6 +574,12 @@ type taskIDArgs struct {
 type listAssetsArgs struct {
 	ProjectID  string `json:"project_id"`
 	CampaignID string `json:"campaign_id"`
+	Source     string `json:"source"`
+	SessionID  string `json:"session_id"`
+	BatchID    string `json:"batch_id"`
+	Status     string `json:"status"`
+	Keyword    string `json:"keyword"`
+	Limit      int    `json:"limit"`
 }
 
 type assetIDArgs struct {

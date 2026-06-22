@@ -544,6 +544,10 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     imageflowCampaignId: typeof record.imageflowCampaignId === 'string' && record.imageflowCampaignId.trim() ? record.imageflowCampaignId.trim() : 'cmp_7day_cover',
     imageflowProvider: typeof record.imageflowProvider === 'string' && record.imageflowProvider.trim() ? record.imageflowProvider.trim() : 'mock',
     imageflowUseProjectQualityProfile: typeof record.imageflowUseProjectQualityProfile === 'boolean' ? record.imageflowUseProjectQualityProfile : true,
+    imageflowUseProjectVisualContext: typeof record.imageflowUseProjectVisualContext === 'boolean' ? record.imageflowUseProjectVisualContext : false,
+    imageflowCharacterIds: normalizeStringArray(record.imageflowCharacterIds, []),
+    imageflowReferenceAssetIds: normalizeStringArray(record.imageflowReferenceAssetIds, []),
+    imageflowPromptRecipeId: typeof record.imageflowPromptRecipeId === 'string' ? record.imageflowPromptRecipeId.trim() : '',
     profiles,
     activeProfileId,
   }
@@ -846,4 +850,8 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   imageflowCampaignId: 'cmp_7day_cover',
   imageflowProvider: 'mock',
   imageflowUseProjectQualityProfile: true,
+  imageflowUseProjectVisualContext: false,
+  imageflowCharacterIds: [],
+  imageflowReferenceAssetIds: [],
+  imageflowPromptRecipeId: '',
 })

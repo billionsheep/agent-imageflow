@@ -60,7 +60,7 @@ func main() {
 
 func batchCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: vag batch progress")
+		return fmt.Errorf("usage: vag batch progress|manifest")
 	}
 	switch args[0] {
 	case "progress":
@@ -84,9 +84,84 @@ func batchCmd(args []string) error {
 		values.Set("limit", strconv.Itoa(*limit))
 		path := fmt.Sprintf("/api/projects/%s/campaigns/%s/batch-progress?%s", *projectID, *campaignID, values.Encode())
 		return request("GET", *apiURL, path, nil)
+	case "manifest":
+		fs := flag.NewFlagSet("vag batch manifest", flag.ExitOnError)
+		apiURL := fs.String("api-url", defaultAPIURL(), "API base URL")
+		projectID := fs.String("project", env("DEFAULT_PROJECT_ID", "prj_xhs_anime"), "project id")
+		campaignID := fs.String("campaign", env("DEFAULT_CAMPAIGN_ID", "cmp_7day_cover"), "campaign id")
+		sessionID := fs.String("session-id", "", "metadata session_id")
+		batchID := fs.String("batch-id", "", "metadata batch_id")
+		storyID := fs.String("story-id", "", "metadata story_id")
+		source := fs.String("source", "", "metadata source")
+		status := fs.String("status", "", "task status filter")
+		includeSetup := fs.Bool("include-setup", false, "include setup/reference tasks")
+		limit := fs.Int("limit", 100, "maximum tasks to summarize")
+		selectedOnly := fs.Bool("selected-only", true, "include only selected assets")
+		includeRejected := fs.Bool("include-rejected", false, "include rejected assets when selected-only=false")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		path := buildBatchManifestPath(*projectID, *campaignID, batchManifestOptions{
+			SessionID:       *sessionID,
+			BatchID:         *batchID,
+			StoryID:         *storyID,
+			Source:          *source,
+			Status:          *status,
+			IncludeSetup:    *includeSetup,
+			Limit:           *limit,
+			SelectedOnly:    *selectedOnly,
+			IncludeRejected: *includeRejected,
+		})
+		return request("GET", *apiURL, path, nil)
 	default:
 		return fmt.Errorf("unknown batch command %q", args[0])
 	}
+}
+
+type batchManifestOptions struct {
+	SessionID       string
+	BatchID         string
+	StoryID         string
+	Source          string
+	Status          string
+	IncludeSetup    bool
+	Limit           int
+	SelectedOnly    bool
+	IncludeRejected bool
+}
+
+func buildBatchManifestPath(projectID, campaignID string, options batchManifestOptions) string {
+	values := url.Values{}
+	if trimmed := strings.TrimSpace(options.SessionID); trimmed != "" {
+		values.Set("session_id", trimmed)
+	}
+	if trimmed := strings.TrimSpace(options.BatchID); trimmed != "" {
+		values.Set("batch_id", trimmed)
+	}
+	if trimmed := strings.TrimSpace(options.StoryID); trimmed != "" {
+		values.Set("story_id", trimmed)
+	}
+	if trimmed := strings.TrimSpace(options.Source); trimmed != "" {
+		values.Set("source", trimmed)
+	}
+	if trimmed := strings.TrimSpace(options.Status); trimmed != "" {
+		values.Set("status", trimmed)
+	}
+	if options.IncludeSetup {
+		values.Set("include_setup", "true")
+	}
+	if options.Limit > 0 {
+		values.Set("limit", strconv.Itoa(options.Limit))
+	}
+	values.Set("selected_only", strconv.FormatBool(options.SelectedOnly))
+	if options.IncludeRejected {
+		values.Set("include_rejected", "true")
+	}
+	path := fmt.Sprintf("/api/projects/%s/campaigns/%s/batch-manifest", projectID, campaignID)
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	return path
 }
 
 func taskCmd(args []string) error {
@@ -1758,6 +1833,7 @@ func usage() {
   vag audit list [--limit 50] [--project prj_xxx]
   vag benchmark image-generation --provider mock --tasks 32 --requested-count 1 --concurrency-label worker-4
   vag batch progress --session-id <session_id> --batch-id <batch_id>
+  vag batch manifest --session-id <session_id> --batch-id <batch_id> [--selected-only=false --include-rejected]
   vag storage cleanup-preview [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx]
   vag storage cleanup-execute --execute --dry-run-token <token> [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx]
   vag project access get

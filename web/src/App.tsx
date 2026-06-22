@@ -22,6 +22,8 @@ import {
   loadDetailModal,
   loadLightbox,
   loadMaskEditorModal,
+  loadProjectContextModal,
+  loadProductionViewModal,
   loadScopeManagerModal,
   loadSettingsModal,
 } from './lib/lazyModules'
@@ -31,6 +33,8 @@ const DetailModal = lazy(loadDetailModal)
 const Lightbox = lazy(loadLightbox)
 const SettingsModal = lazy(loadSettingsModal)
 const ScopeManagerModal = lazy(loadScopeManagerModal)
+const ProjectContextModal = lazy(loadProjectContextModal)
+const ProductionViewModal = lazy(loadProductionViewModal)
 const MaskEditorModal = lazy(loadMaskEditorModal)
 
 let customProviderConfigUrlImportStarted = false
@@ -96,6 +100,8 @@ export default function App() {
   const lightboxImageId = useStore((s) => s.lightboxImageId)
   const showSettings = useStore((s) => s.showSettings)
   const showScopeManager = useStore((s) => s.showScopeManager)
+  const showProjectContext = useStore((s) => s.showProjectContext)
+  const showProductionView = useStore((s) => s.showProductionView)
   const maskEditorImageId = useStore((s) => s.maskEditorImageId)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
@@ -210,6 +216,16 @@ export default function App() {
       {showScopeManager && (
         <Suspense fallback={<LazyModalFallback />}>
           <ScopeManagerModal />
+        </Suspense>
+      )}
+      {showProjectContext && (
+        <Suspense fallback={<LazyModalFallback />}>
+          <ProjectContextModal />
+        </Suspense>
+      )}
+      {showProductionView && (
+        <Suspense fallback={<LazyModalFallback />}>
+          <ProductionViewModal />
         </Suspense>
       )}
       <ConfirmDialog />

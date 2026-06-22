@@ -136,3 +136,118 @@ func TestBuildListRecentAssetsQueryDoesNotRequireScopeAndKeepsFilters(t *testing
 		t.Fatalf("expected offset=48, got %v", got)
 	}
 }
+
+func TestBuildBatchStorySummaryTasksQueryAddsContractFilters(t *testing.T) {
+	built := buildBatchStorySummaryTasksQuery(domain.BatchStorySummaryQuery{
+		ProjectID:  "prj_demo",
+		CampaignID: "cmp_demo",
+		SessionID:  "session_1",
+		BatchID:    "batch_1",
+		StoryID:    "story_1",
+		Source:     "codex",
+		Status:     domain.TaskCompleted,
+		Limit:      999,
+	})
+
+	for _, fragment := range []string{
+		"gt.project_id = $1",
+		"gt.campaign_id = $2",
+		"gt.structured_input_json->'metadata_json'->>'session_id' = $3",
+		"gt.structured_input_json->'metadata_json'->>'batch_id' = $4",
+		"gt.structured_input_json->'metadata_json'->>'story_id' = $5",
+		"gt.structured_input_json->'metadata_json'->>'source' = $6",
+		"gt.status = $7",
+		"NOT",
+		"task_role",
+		"exclude_from_story_summary",
+		"WITH limited_tasks AS",
+		"LIMIT $8",
+		"LEFT JOIN asset a ON a.task_id = gt.id",
+		"LEFT JOIN asset_version v ON v.id = a.current_version_id",
+	} {
+		if !strings.Contains(built.SQL, fragment) {
+			t.Fatalf("expected batch story summary query to contain %q:\n%s", fragment, built.SQL)
+		}
+	}
+	if got := built.Args[len(built.Args)-1]; got != 999 {
+		t.Fatalf("expected raw limit arg to be preserved for store normalization, got %v", got)
+	}
+}
+
+func TestBuildBatchStorySummaryTasksQueryCanIncludeSetupRoles(t *testing.T) {
+	built := buildBatchStorySummaryTasksQuery(domain.BatchStorySummaryQuery{
+		ProjectID:    "prj_demo",
+		CampaignID:   "cmp_demo",
+		SessionID:    "session_1",
+		IncludeSetup: true,
+		Limit:        10,
+	})
+	if strings.Contains(built.SQL, "NOT") && strings.Contains(built.SQL, "task_role") {
+		t.Fatalf("include_setup=true should not add setup exclusion to task query:\n%s", built.SQL)
+	}
+
+	excluded := buildBatchStorySummaryExcludedCountQuery(domain.BatchStorySummaryQuery{
+		ProjectID:  "prj_demo",
+		CampaignID: "cmp_demo",
+		SessionID:  "session_1",
+	})
+	if !strings.Contains(excluded.SQL, "task_role") || !strings.Contains(excluded.SQL, "scene_id") {
+		t.Fatalf("excluded count query should count setup-like tasks:\n%s", excluded.SQL)
+	}
+}
+
+func TestBuildResolveLatestSceneTaskQueryAddsSceneIdentityFilters(t *testing.T) {
+	built := buildResolveLatestSceneTaskQuery(domain.SceneIdentity{
+		SessionID: "session_1",
+		BatchID:   "batch_1",
+		StoryID:   "story_1",
+		SceneID:   "scene_002",
+		Source:    "codex",
+	}, "prj_demo", "cmp_demo")
+
+	for _, fragment := range []string{
+		"project_id = $1",
+		"campaign_id = $2",
+		"structured_input_json->'metadata_json'->>'session_id' = $3",
+		"structured_input_json->'metadata_json'->>'batch_id' = $4",
+		"structured_input_json->'metadata_json'->>'story_id' = $5",
+		"structured_input_json->'metadata_json'->>'scene_id' = $6",
+		"structured_input_json->'metadata_json'->>'source' = $7",
+		"ORDER BY created_at DESC, id DESC",
+		"LIMIT 1",
+	} {
+		if !strings.Contains(built.SQL, fragment) {
+			t.Fatalf("expected latest scene task query to contain %q:\n%s", fragment, built.SQL)
+		}
+	}
+	if len(built.Args) != 7 || built.Args[6] != "codex" {
+		t.Fatalf("unexpected latest query args: %#v", built.Args)
+	}
+}
+
+func TestBuildCountSceneRegenerationsQueryCountsMetadataLineage(t *testing.T) {
+	built := buildCountSceneRegenerationsQuery(domain.SceneIdentity{
+		SessionID: "session_1",
+		BatchID:   "batch_1",
+		StoryID:   "story_1",
+		SceneID:   "scene_002",
+	}, "prj_demo", "cmp_demo")
+
+	for _, fragment := range []string{
+		"project_id = $1",
+		"campaign_id = $2",
+		"structured_input_json->'metadata_json'->>'session_id' = $3",
+		"structured_input_json->'metadata_json'->>'batch_id' = $4",
+		"structured_input_json->'metadata_json'->>'story_id' = $5",
+		"structured_input_json->'metadata_json'->>'scene_id' = $6",
+		"COALESCE(structured_input_json->'metadata_json'->>'regenerated_from_task_id', '') <> ''",
+		"COUNT(*)",
+	} {
+		if !strings.Contains(built.SQL, fragment) {
+			t.Fatalf("expected regeneration count query to contain %q:\n%s", fragment, built.SQL)
+		}
+	}
+	if len(built.Args) != 6 {
+		t.Fatalf("unexpected count query args: %#v", built.Args)
+	}
+}

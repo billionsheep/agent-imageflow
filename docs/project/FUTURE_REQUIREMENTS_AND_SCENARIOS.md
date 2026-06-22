@@ -232,10 +232,23 @@ workspace: ws_personal_media
 - 做服务端 provider key 固定配置，不把 provider key 放到 Web 前端。
 - 不做小红书运营、内容日历、自动发布或账号增长分析。
 
-候选下一轮 CSV 名称：
+2026-06-22 场景补全：
+
+- P1-PCTX-008 的 Web 第一版入口只服务当前 project 的 visual context 维护：查看 empty / unauthorized / error 状态，维护 characters、reference bindings 和 prompt recipes，从 asset card 标记 reference，并在 Web managed task 创建时选择 recipe / characters / references。
+- P1-PCTX-009 的回归只验证萌宠账号图片资产生产链路：clean project/campaign/session/batch、两只狗和一只橘猫角色卡、style reference、`pet_story_cover` recipe、2-3 个 scene task、batch progress、asset metadata 和 Web 可见性。
+- 这两个任务的详细场景和最小功能设计以 `docs/project/stories/slice-037-pctx-web-panel-and-pet-story-scenarios.md` 为准；它们不包含小红书发布、内容日历、通用 DAM、Batch / Story / Scene 新 UI、Export Pack、NAS/WebDAV/SMB 或 Usage Tracking。
+
+2026-06-22 Batch Story Export Foundation 收口：
+
+- P1-PCTX-001 到 P1-PCTX-009 完成后，`issues/next-phase-p1-batch-story-export-foundation.csv` 已完成 P1-BSE-001 到 P1-BSE-011。
+- 场景设计见 `docs/project/stories/slice-040-batch-story-export-scenarios.md`，收口记录见 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`。
+- 第一轮已解决外部 agent 批量生成故事图后的生产查看和交付：batch/story/scene grouped view、scene 级 retry/regenerate、selected-only review、JSON manifest、ZIP 后置边界，以及 NAS/Docker 文件系统访问说明。
+- NAS/WebDAV/SMB 判断：第一轮由文件系统和部署环境承担浏览、拷贝、备份；Agent ImageFlow 的 DB / metadata / manifest 继续承担 asset id、状态、prompt、visual context snapshot、scene/batch/story 追踪和审计。暂不在应用内实现 WebDAV/SMB server。
+
+后续若继续推进，需要重新定义 P2 CSV，例如：
 
 ```text
-issues/next-phase-p1-project-production-context.csv
+issues/next-phase-p2-production-operations.csv
 ```
 
 ## Provider and Credential Model

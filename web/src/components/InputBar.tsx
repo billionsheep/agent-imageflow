@@ -7,10 +7,17 @@ import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSetting
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { getProjectContextPanelSummary } from '../lib/projectContextPanel'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
-import { preloadLightbox, preloadMaskEditorModal, preloadSettingsModal } from '../lib/lazyModules'
+import { preloadLightbox, preloadMaskEditorModal, preloadProjectContextModal, preloadSettingsModal } from '../lib/lazyModules'
+import {
+  getAgentImageflowProjectVisualContext,
+  isAgentImageflowUnauthorizedError,
+  normalizeAgentImageflowApiBaseUrl,
+  type AgentImageflowProjectVisualContext,
+} from '../lib/agentImageflowApi'
 import { useHintTooltip } from '../hooks/useHintTooltip'
 import { useTooltip } from '../hooks/useTooltip'
 import { downloadImageEntriesAsZip, downloadImageIds, formatExportFileTime, getTaskOutputImageZipEntries } from '../lib/downloadImages'
@@ -448,6 +455,7 @@ export default function InputBar() {
   const setSettings = useStore((s) => s.setSettings)
   const reusedTaskApiProfileId = useStore((s) => s.reusedTaskApiProfileId)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const setShowProjectContext = useStore((s) => s.setShowProjectContext)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const showToast = useStore((s) => s.showToast)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
@@ -754,14 +762,19 @@ export default function InputBar() {
       ? settings
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, currentActiveProfile.id, settings])
-  const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
+  const managedScopeReady = Boolean(settings.imageflowWorkspaceId.trim() && settings.imageflowProjectId.trim() && settings.imageflowCampaignId.trim())
+  const hasSubmitApiConfig = settings.imageflowManagedMode ? managedScopeReady : Boolean(activeProfile.apiKey)
   const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning)
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
     : hasSubmitApiConfig
     ? maskDraft ? '遮罩编辑' : '生成图像'
-    : '请先配置 API'
-  const submitTooltipText = activeAgentIsRunning ? '停止生成' : '尚未完成 API 配置，请在右上角设置中进行'
+    : settings.imageflowManagedMode ? '请先选择托管 scope' : '请先配置 API'
+  const submitTooltipText = activeAgentIsRunning
+    ? '停止生成'
+    : settings.imageflowManagedMode
+    ? '请先在设置或 Scope 管理中选择完整 scope'
+    : '尚未完成 API 配置，请在右上角设置中进行'
   const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...'
   const submitCurrentMode = useCallback(() => {
     if (appMode === 'agent') {
@@ -833,6 +846,108 @@ export default function InputBar() {
   const referenceImages = maskTargetImage
     ? inputImages.filter((img) => img.id !== maskTargetImage.id)
     : inputImages
+  const [projectVisualContext, setProjectVisualContext] = useState<AgentImageflowProjectVisualContext | null>(null)
+  const [projectContextLoading, setProjectContextLoading] = useState(false)
+  const [projectContextError, setProjectContextError] = useState<string | null>(null)
+  const [projectContextExpanded, setProjectContextExpanded] = useState(false)
+  const projectContextWorkspaceId = settings.imageflowWorkspaceId.trim()
+  const projectContextProjectId = settings.imageflowProjectId.trim()
+  const projectContextScopeReady = Boolean(projectContextWorkspaceId && projectContextProjectId)
+  const activeProjectCharacters = useMemo(() => (
+    (projectVisualContext?.characters ?? []).filter((character) => character.status !== 'archived')
+  ), [projectVisualContext?.characters])
+  const activeProjectReferences = useMemo(() => (
+    (projectVisualContext?.references ?? []).filter((reference) => reference.status !== 'archived')
+  ), [projectVisualContext?.references])
+  const activeProjectRecipes = useMemo(() => (
+    (projectVisualContext?.prompt_recipes ?? []).filter((recipe) => recipe.status !== 'archived')
+  ), [projectVisualContext?.prompt_recipes])
+  const selectedProjectCharacterIds = settings.imageflowCharacterIds
+  const selectedProjectReferenceAssetIds = settings.imageflowReferenceAssetIds
+  const selectedProjectRecipeId = settings.imageflowPromptRecipeId
+
+  useEffect(() => {
+    if (!settings.imageflowManagedMode || !projectContextScopeReady) {
+      setProjectVisualContext(null)
+      setProjectContextError(null)
+      setProjectContextLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setProjectContextLoading(true)
+    setProjectContextError(null)
+    void getAgentImageflowProjectVisualContext(
+      normalizeAgentImageflowApiBaseUrl(settings.imageflowApiBaseUrl),
+      {
+        workspaceId: projectContextWorkspaceId,
+        projectId: projectContextProjectId,
+      },
+      {
+        basicUsername: settings.imageflowBasicUsername,
+        basicPassword: settings.imageflowBasicPassword,
+      },
+    )
+      .then((response) => {
+        if (cancelled) return
+        setProjectVisualContext(response.visual_context)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setProjectContextError(isAgentImageflowUnauthorizedError(error) ? 'Project Context unauthorized' : error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        if (!cancelled) setProjectContextLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    projectContextProjectId,
+    projectContextScopeReady,
+    projectContextWorkspaceId,
+    settings.imageflowApiBaseUrl,
+    settings.imageflowBasicPassword,
+    settings.imageflowBasicUsername,
+    settings.imageflowManagedMode,
+  ])
+
+  const toggleProjectCharacter = useCallback((characterId: string) => {
+    const selected = selectedProjectCharacterIds.includes(characterId)
+      ? selectedProjectCharacterIds.filter((id) => id !== characterId)
+      : [...selectedProjectCharacterIds, characterId]
+    setSettings({
+      imageflowCharacterIds: selected,
+      imageflowUseProjectVisualContext: settings.imageflowUseProjectVisualContext || selected.length > 0,
+    })
+  }, [selectedProjectCharacterIds, setSettings, settings.imageflowUseProjectVisualContext])
+
+  const toggleProjectReference = useCallback((assetId: string) => {
+    const selected = selectedProjectReferenceAssetIds.includes(assetId)
+      ? selectedProjectReferenceAssetIds.filter((id) => id !== assetId)
+      : [...selectedProjectReferenceAssetIds, assetId]
+    setSettings({
+      imageflowReferenceAssetIds: selected,
+      imageflowUseProjectVisualContext: settings.imageflowUseProjectVisualContext || selected.length > 0,
+    })
+  }, [selectedProjectReferenceAssetIds, setSettings, settings.imageflowUseProjectVisualContext])
+
+  const setPromptRecipe = useCallback((recipeId: string) => {
+    setSettings({
+      imageflowPromptRecipeId: recipeId,
+      imageflowUseProjectVisualContext: settings.imageflowUseProjectVisualContext || Boolean(recipeId),
+    })
+  }, [setSettings, settings.imageflowUseProjectVisualContext])
+
+  const clearProjectContextSelection = useCallback(() => {
+    setSettings({
+      imageflowUseProjectVisualContext: false,
+      imageflowCharacterIds: [],
+      imageflowReferenceAssetIds: [],
+      imageflowPromptRecipeId: '',
+    })
+  }, [setSettings])
   const cursorPosition = cursorPos
   const visiblePrompt = stripImageMentionMarkers(prompt)
   const agentOutputImageOptions = useMemo<AtImageOption[]>(() => {
@@ -1928,6 +2043,146 @@ export default function InputBar() {
     )
   }
 
+  const renderProjectContextControls = () => {
+    if (!settings.imageflowManagedMode) return null
+
+    const selectedCount = selectedProjectCharacterIds.length + selectedProjectReferenceAssetIds.length + (selectedProjectRecipeId ? 1 : 0)
+    const projectContextSummary = projectContextError
+      ? projectContextError
+      : getProjectContextPanelSummary({
+        useProjectVisualContext: settings.imageflowUseProjectVisualContext,
+        selectedRecipeId: selectedProjectRecipeId,
+        selectedCharacterIds: selectedProjectCharacterIds,
+        selectedReferenceAssetIds: selectedProjectReferenceAssetIds,
+        recipes: activeProjectRecipes,
+        characters: activeProjectCharacters,
+        references: activeProjectReferences,
+      })
+    return (
+      <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50/70 p-2.5 dark:border-blue-500/20 dark:bg-blue-500/10">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <label className="inline-flex max-w-full min-w-0 items-center gap-2 text-xs font-medium text-blue-800 dark:text-blue-100">
+              <input
+                type="checkbox"
+                checked={settings.imageflowUseProjectVisualContext}
+                onChange={(event) => setSettings({ imageflowUseProjectVisualContext: event.target.checked })}
+                className="h-4 w-4 rounded border-blue-200 text-blue-500 focus:ring-blue-300"
+              />
+              <span className="truncate">Project Context</span>
+            </label>
+            <div className={`mt-0.5 truncate text-[11px] ${projectContextError ? 'text-amber-700 dark:text-amber-100' : 'text-blue-600/80 dark:text-blue-100/70'}`} title={projectContextSummary}>
+              {projectContextLoading ? 'loading project context' : projectContextSummary}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-blue-200 bg-white/70 px-2 py-0.5 text-[11px] text-blue-700 dark:border-blue-500/20 dark:bg-white/[0.06] dark:text-blue-100">
+              {projectContextLoading ? 'loading' : `${selectedCount} selected`}
+            </span>
+            <button
+              type="button"
+              onClick={() => setProjectContextExpanded((expanded) => !expanded)}
+              className="h-7 rounded-lg border border-blue-200 bg-white/80 px-2.5 text-[11px] font-medium text-blue-700 transition hover:border-blue-300 hover:bg-white dark:border-blue-500/20 dark:bg-white/[0.06] dark:text-blue-100"
+              aria-expanded={projectContextExpanded}
+            >
+              {projectContextExpanded ? 'Collapse' : 'Expand'}
+            </button>
+            <button
+              type="button"
+              onPointerEnter={preloadProjectContextModal}
+              onFocus={preloadProjectContextModal}
+              onPointerDown={preloadProjectContextModal}
+              onClick={() => setShowProjectContext(true)}
+              className="h-7 rounded-lg border border-blue-200 bg-white/80 px-2.5 text-[11px] font-medium text-blue-700 transition hover:border-blue-300 hover:bg-white dark:border-blue-500/20 dark:bg-white/[0.06] dark:text-blue-100"
+            >
+              Manage
+            </button>
+            {selectedCount > 0 && (
+              <button
+                type="button"
+                onClick={clearProjectContextSelection}
+                className="h-7 rounded-lg border border-blue-200 bg-white/80 px-2.5 text-[11px] font-medium text-blue-700 transition hover:border-blue-300 hover:bg-white dark:border-blue-500/20 dark:bg-white/[0.06] dark:text-blue-100"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        {projectContextExpanded && (!projectContextScopeReady ? (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+            scope incomplete
+          </div>
+        ) : projectContextError ? (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+            {projectContextError}
+          </div>
+        ) : (
+          <div className="mt-2 grid gap-2 lg:grid-cols-3">
+            <label className="min-w-0 text-[11px] font-medium uppercase text-blue-700 dark:text-blue-100">
+              <span className="mb-1 block">recipe</span>
+              <select
+                value={selectedProjectRecipeId}
+                onChange={(event) => setPromptRecipe(event.target.value)}
+                className="h-8 w-full min-w-0 rounded-lg border border-blue-200 bg-white/80 px-2 text-xs text-gray-700 outline-none focus:border-blue-300 dark:border-blue-500/20 dark:bg-gray-950/40 dark:text-gray-100"
+              >
+                <option value="">none</option>
+                {activeProjectRecipes.map((recipe) => (
+                  <option key={recipe.id} value={recipe.id}>{recipe.name || recipe.id}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="min-w-0">
+              <div className="mb-1 text-[11px] font-medium uppercase text-blue-700 dark:text-blue-100">characters</div>
+              <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1 custom-scrollbar">
+                {activeProjectCharacters.length === 0 ? (
+                  <span className="text-[11px] text-blue-600/70 dark:text-blue-100/70">none</span>
+                ) : activeProjectCharacters.map((character) => {
+                  const selected = selectedProjectCharacterIds.includes(character.id)
+                  return (
+                    <button
+                      key={character.id}
+                      type="button"
+                      onClick={() => toggleProjectCharacter(character.id)}
+                      className={`max-w-full truncate rounded-lg border px-2 py-1 text-[11px] transition ${selected ? 'border-blue-300 bg-white text-blue-700 dark:border-blue-400/40 dark:bg-white/[0.08] dark:text-blue-100' : 'border-blue-200/70 bg-white/50 text-blue-700/80 hover:bg-white dark:border-blue-500/20 dark:bg-white/[0.04] dark:text-blue-100/80'}`}
+                      title={character.id}
+                    >
+                      {character.name || character.id}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              <div className="mb-1 text-[11px] font-medium uppercase text-blue-700 dark:text-blue-100">references</div>
+              <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1 custom-scrollbar">
+                {activeProjectReferences.length === 0 ? (
+                  <span className="text-[11px] text-blue-600/70 dark:text-blue-100/70">none</span>
+                ) : activeProjectReferences.map((reference) => {
+                  const selected = selectedProjectReferenceAssetIds.includes(reference.asset_id)
+                  const label = reference.label || reference.asset_id
+                  return (
+                    <button
+                      key={`${reference.id}:${reference.asset_id}`}
+                      type="button"
+                      onClick={() => toggleProjectReference(reference.asset_id)}
+                      className={`max-w-full truncate rounded-lg border px-2 py-1 text-[11px] transition ${selected ? 'border-blue-300 bg-white text-blue-700 dark:border-blue-400/40 dark:bg-white/[0.08] dark:text-blue-100' : 'border-blue-200/70 bg-white/50 text-blue-700/80 hover:bg-white dark:border-blue-500/20 dark:bg-white/[0.04] dark:text-blue-100/80'}`}
+                      title={reference.asset_id}
+                    >
+                      {reference.purpose}: {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   const renderParams = (cols: string) => (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
       <label
@@ -2346,6 +2601,8 @@ export default function InputBar() {
               renderImageThumbs()
             )
           )}
+
+          {renderProjectContextControls()}
 
           {/* 输入框 */}
           <div className="relative grid">

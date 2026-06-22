@@ -41,6 +41,23 @@ describe('validateApiProfile', () => {
   })
 })
 
+describe('normalizeSettings project visual context', () => {
+  it('normalizes managed task visual context selectors', () => {
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      imageflowUseProjectVisualContext: true,
+      imageflowCharacterIds: [' dog_mochi ', '', 'cat_orange'],
+      imageflowReferenceAssetIds: [' asset_1 ', 'asset_2'],
+      imageflowPromptRecipeId: ' pet_story_cover ',
+    })
+
+    expect(settings.imageflowUseProjectVisualContext).toBe(true)
+    expect(settings.imageflowCharacterIds).toEqual(['dog_mochi', 'cat_orange'])
+    expect(settings.imageflowReferenceAssetIds).toEqual(['asset_1', 'asset_2'])
+    expect(settings.imageflowPromptRecipeId).toBe('pet_story_cover')
+  })
+})
+
 describe('mergeImportedSettings', () => {
   it('replaces the default OpenAI profile with legacy imported settings when current settings are untouched', () => {
     const merged = mergeImportedSettings(DEFAULT_SETTINGS, {

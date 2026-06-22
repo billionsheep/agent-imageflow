@@ -254,8 +254,16 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/projects/{project_id}/campaigns/{campaign_id}/assets", "list_assets"
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
 		return "/api/projects/{project_id}/campaigns/{campaign_id}/batch-progress", "get_batch_progress"
+	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-summary"):
+		return "/api/projects/{project_id}/campaigns/{campaign_id}/batch-summary", "get_batch_summary"
+	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-manifest"):
+		return "/api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest", "get_batch_manifest"
+	case method == http.MethodPost && match(parts, "api", "projects", "*", "campaigns", "*", "scene-regenerations"):
+		return "/api/projects/{project_id}/campaigns/{campaign_id}/scene-regenerations", "regenerate_scene"
 	case isRead && match(parts, "api", "assets", "*"):
 		return "/api/assets/{asset_id}", "get_asset"
+	case isRead && match(parts, "api", "assets", "*", "metadata"):
+		return "/api/assets/{asset_id}/metadata", "get_asset_metadata"
 	case method == http.MethodPost && match(parts, "api", "assets", "*", "approve"):
 		return "/api/assets/{asset_id}/approve", "approve_asset"
 	case method == http.MethodPost && match(parts, "api", "assets", "*", "reject"):

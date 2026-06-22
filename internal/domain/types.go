@@ -284,6 +284,260 @@ type BatchProgressResponse struct {
 	Tasks       []BatchProgressTask `json:"tasks"`
 }
 
+type BatchStorySummaryQuery struct {
+	ProjectID    string
+	CampaignID   string
+	SessionID    string
+	BatchID      string
+	StoryID      string
+	Source       string
+	Status       string
+	IncludeSetup bool
+	Limit        int
+}
+
+type BatchStorySummaryCounts struct {
+	StoryCount                int `json:"story_count"`
+	SceneCount                int `json:"scene_count"`
+	SceneWithSelectedCount    int `json:"scene_with_selected_count"`
+	SceneMissingSelectedCount int `json:"scene_missing_selected_count"`
+	TaskCount                 int `json:"task_count"`
+	QueuedCount               int `json:"queued_count"`
+	RunningCount              int `json:"running_count"`
+	SucceededCount            int `json:"succeeded_count"`
+	PartialCount              int `json:"partial_count"`
+	FailedCount               int `json:"failed_count"`
+	RetryingCount             int `json:"retrying_count"`
+	AssetCount                int `json:"asset_count"`
+	GeneratedAssetCount       int `json:"generated_asset_count"`
+	SelectedAssetCount        int `json:"selected_asset_count"`
+	RejectedAssetCount        int `json:"rejected_asset_count"`
+	AttemptCount              int `json:"attempt_count"`
+	ExcludedSetupTaskCount    int `json:"excluded_setup_task_count"`
+}
+
+type BatchStorySummaryStory struct {
+	StoryID            string   `json:"story_id"`
+	SceneCount         int      `json:"scene_count"`
+	SelectedSceneCount int      `json:"selected_scene_count"`
+	Scenes             []string `json:"scenes"`
+}
+
+type BatchStorySceneCounts struct {
+	TaskCount           int `json:"task_count"`
+	SucceededCount      int `json:"succeeded_count"`
+	FailedCount         int `json:"failed_count"`
+	AssetCount          int `json:"asset_count"`
+	GeneratedAssetCount int `json:"generated_asset_count"`
+	SelectedAssetCount  int `json:"selected_asset_count"`
+	RejectedAssetCount  int `json:"rejected_asset_count"`
+	AttemptCount        int `json:"attempt_count"`
+}
+
+type BatchStoryVisualContext struct {
+	CharacterIDs      []string `json:"character_ids,omitempty"`
+	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
+	PromptRecipeID    string   `json:"prompt_recipe_id,omitempty"`
+}
+
+type BatchStorySummaryTask struct {
+	TaskID                string    `json:"task_id"`
+	Status                string    `json:"status"`
+	AssetCount            int       `json:"asset_count"`
+	AttemptCount          int       `json:"attempt_count"`
+	Retrying              bool      `json:"retrying"`
+	ErrorStage            string    `json:"error_stage,omitempty"`
+	ErrorCode             *string   `json:"error_code,omitempty"`
+	ErrorMessage          *string   `json:"error_message,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	RegeneratedFromTaskID string    `json:"regenerated_from_task_id,omitempty"`
+	RegenerateNo          int       `json:"regenerate_no,omitempty"`
+}
+
+type BatchStorySummaryAsset struct {
+	AssetID      string    `json:"asset_id"`
+	TaskID       string    `json:"task_id"`
+	Status       string    `json:"status"`
+	Provider     string    `json:"provider,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	Prompt       string    `json:"prompt,omitempty"`
+	DownloadURL  string    `json:"download_url"`
+	ThumbnailURL string    `json:"thumbnail_url"`
+	MetadataURL  string    `json:"metadata_url"`
+	TargetPath   string    `json:"target_path,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type BatchStorySummaryScene struct {
+	StoryID                string                   `json:"story_id"`
+	SceneID                string                   `json:"scene_id"`
+	SceneOrder             int                      `json:"scene_order,omitempty"`
+	TargetPath             string                   `json:"target_path,omitempty"`
+	Status                 string                   `json:"status"`
+	LatestTaskID           string                   `json:"latest_task_id,omitempty"`
+	PrimarySelectedAssetID string                   `json:"primary_selected_asset_id,omitempty"`
+	RegeneratedFromTaskID  string                   `json:"regenerated_from_task_id,omitempty"`
+	RegenerationCount      int                      `json:"regeneration_count"`
+	Counts                 BatchStorySceneCounts    `json:"counts"`
+	VisualContext          BatchStoryVisualContext  `json:"visual_context,omitempty"`
+	Tasks                  []BatchStorySummaryTask  `json:"tasks"`
+	Assets                 []BatchStorySummaryAsset `json:"assets"`
+}
+
+type BatchStorySummaryResponse struct {
+	GeneratedAt time.Time                `json:"generated_at"`
+	ProjectID   string                   `json:"project_id"`
+	CampaignID  string                   `json:"campaign_id"`
+	SessionID   string                   `json:"session_id,omitempty"`
+	BatchID     string                   `json:"batch_id,omitempty"`
+	Source      string                   `json:"source,omitempty"`
+	StoryID     string                   `json:"story_id,omitempty"`
+	Counts      BatchStorySummaryCounts  `json:"counts"`
+	Stories     []BatchStorySummaryStory `json:"stories"`
+	Scenes      []BatchStorySummaryScene `json:"scenes"`
+}
+
+type BatchManifestQuery struct {
+	BatchStorySummaryQuery
+	SelectedOnly    bool
+	IncludeRejected bool
+}
+
+type BatchManifestCounts = BatchStorySummaryCounts
+
+type BatchManifestTask struct {
+	TaskID                string    `json:"task_id"`
+	StoryID               string    `json:"story_id,omitempty"`
+	SceneID               string    `json:"scene_id,omitempty"`
+	Status                string    `json:"status"`
+	AssetCount            int       `json:"asset_count"`
+	AttemptCount          int       `json:"attempt_count"`
+	Retrying              bool      `json:"retrying"`
+	ErrorStage            string    `json:"error_stage,omitempty"`
+	ErrorCode             *string   `json:"error_code,omitempty"`
+	ErrorMessage          *string   `json:"error_message,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	RegeneratedFromTaskID string    `json:"regenerated_from_task_id,omitempty"`
+	RegenerateNo          int       `json:"regenerate_no,omitempty"`
+}
+
+type BatchManifestAsset struct {
+	AssetID       string                  `json:"asset_id"`
+	TaskID        string                  `json:"task_id"`
+	StoryID       string                  `json:"story_id,omitempty"`
+	SceneID       string                  `json:"scene_id,omitempty"`
+	Status        string                  `json:"status"`
+	Provider      string                  `json:"provider,omitempty"`
+	Model         string                  `json:"model,omitempty"`
+	Prompt        string                  `json:"prompt,omitempty"`
+	DownloadURL   string                  `json:"download_url"`
+	ThumbnailURL  string                  `json:"thumbnail_url,omitempty"`
+	MetadataURL   string                  `json:"metadata_url,omitempty"`
+	TargetPath    string                  `json:"target_path,omitempty"`
+	CreatedAt     time.Time               `json:"created_at"`
+	VisualContext BatchStoryVisualContext `json:"visual_context,omitempty"`
+}
+
+type BatchManifestScene struct {
+	StoryID                string                  `json:"story_id"`
+	SceneID                string                  `json:"scene_id"`
+	Status                 string                  `json:"status"`
+	TargetPath             string                  `json:"target_path,omitempty"`
+	LatestTaskID           string                  `json:"latest_task_id,omitempty"`
+	PrimarySelectedAssetID string                  `json:"primary_selected_asset_id,omitempty"`
+	RegenerationCount      int                     `json:"regeneration_count"`
+	AssetIDs               []string                `json:"asset_ids"`
+	SelectedAssetIDs       []string                `json:"selected_asset_ids"`
+	TaskIDs                []string                `json:"task_ids"`
+	VisualContext          BatchStoryVisualContext `json:"visual_context,omitempty"`
+}
+
+type BatchManifestResponse struct {
+	GeneratedAt     time.Time                `json:"generated_at"`
+	ProjectID       string                   `json:"project_id"`
+	CampaignID      string                   `json:"campaign_id"`
+	SessionID       string                   `json:"session_id,omitempty"`
+	BatchID         string                   `json:"batch_id,omitempty"`
+	Source          string                   `json:"source,omitempty"`
+	StoryID         string                   `json:"story_id,omitempty"`
+	SelectedOnly    bool                     `json:"selected_only"`
+	IncludeRejected bool                     `json:"include_rejected"`
+	Counts          BatchManifestCounts      `json:"counts"`
+	Tasks           []BatchManifestTask      `json:"tasks"`
+	Assets          []BatchManifestAsset     `json:"assets"`
+	Scenes          []BatchManifestScene     `json:"scenes"`
+	Stories         []BatchStorySummaryStory `json:"stories"`
+}
+
+type SceneIdentity struct {
+	SessionID    string `json:"session_id"`
+	BatchID      string `json:"batch_id"`
+	StoryID      string `json:"story_id"`
+	SceneID      string `json:"scene_id"`
+	Source       string `json:"source,omitempty"`
+	TaskSelector string `json:"task_selector,omitempty"`
+}
+
+type SceneRegenerateOverrides struct {
+	Prompt            *string          `json:"prompt,omitempty"`
+	NegativePrompt    *string          `json:"negative_prompt,omitempty"`
+	PromptRecipeID    *string          `json:"prompt_recipe_id,omitempty"`
+	CharacterIDs      []string         `json:"character_ids,omitempty"`
+	ReferenceAssetIDs []string         `json:"reference_asset_ids,omitempty"`
+	ReferenceImages   []ReferenceImage `json:"reference_images,omitempty"`
+	QualityProfileID  *string          `json:"quality_profile_id,omitempty"`
+	GenerationConfig  json.RawMessage  `json:"generation_config,omitempty"`
+	RequestedCount    *int             `json:"requested_count,omitempty"`
+	SelectionMode     *string          `json:"selection_mode,omitempty"`
+	AspectRatio       *string          `json:"aspect_ratio,omitempty"`
+	OutputFormat      *string          `json:"output_format,omitempty"`
+	Provider          *string          `json:"provider,omitempty"`
+	Model             *string          `json:"model,omitempty"`
+}
+
+type SceneRegenerateRequest struct {
+	ProjectID          string                   `json:"project_id,omitempty"`
+	CampaignID         string                   `json:"campaign_id,omitempty"`
+	SourceTaskID       string                   `json:"source_task_id,omitempty"`
+	SceneIdentity      *SceneIdentity           `json:"scene_identity,omitempty"`
+	RegenerateReason   string                   `json:"regenerate_reason,omitempty"`
+	CreatedBy          string                   `json:"created_by,omitempty"`
+	RequestSource      string                   `json:"regenerate_request_source,omitempty"`
+	Overrides          SceneRegenerateOverrides `json:"overrides,omitempty"`
+	RegenerationNumber int                      `json:"-"`
+}
+
+type SceneRegenerateWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type SceneRegenerateVisualContextSnapshot struct {
+	CharacterIDs      []string `json:"character_ids,omitempty"`
+	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
+	PromptRecipeID    string   `json:"prompt_recipe_id,omitempty"`
+	CharacterCount    int      `json:"character_count"`
+	ReferenceCount    int      `json:"reference_count"`
+	HasPromptRecipe   bool     `json:"has_prompt_recipe"`
+}
+
+type SceneRegenerateResponse struct {
+	TaskID                      string                               `json:"task_id"`
+	Status                      string                               `json:"status"`
+	RegeneratedFromTaskID       string                               `json:"regenerated_from_task_id"`
+	RegenerateNo                int                                  `json:"regenerate_no"`
+	ProjectID                   string                               `json:"project_id"`
+	CampaignID                  string                               `json:"campaign_id"`
+	SessionID                   string                               `json:"session_id"`
+	BatchID                     string                               `json:"batch_id"`
+	StoryID                     string                               `json:"story_id"`
+	SceneID                     string                               `json:"scene_id"`
+	CopiedVisualContextSnapshot SceneRegenerateVisualContextSnapshot `json:"copied_visual_context_snapshot"`
+	Warnings                    []SceneRegenerateWarning             `json:"warnings,omitempty"`
+}
+
 const (
 	DefaultAssetListLimit     = 50
 	MaxAssetListLimit         = 100
@@ -308,6 +562,30 @@ type DeliveryInfo struct {
 	DownloadURL  string `json:"download_url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 	MetadataURL  string `json:"metadata_url"`
+}
+
+type PublicDeliveryInfo struct {
+	DownloadURL  string `json:"download_url"`
+	ThumbnailURL string `json:"thumbnail_url"`
+	MetadataURL  string `json:"metadata_url"`
+}
+
+type AssetMetadataResponse struct {
+	AssetID        string             `json:"asset_id"`
+	WorkspaceID    string             `json:"workspace_id"`
+	ProjectID      string             `json:"project_id"`
+	CampaignID     string             `json:"campaign_id"`
+	TaskID         string             `json:"task_id"`
+	CurrentVersion int                `json:"current_version"`
+	Status         string             `json:"status"`
+	Hash           string             `json:"hash"`
+	Provider       string             `json:"provider"`
+	Model          string             `json:"model"`
+	Prompt         string             `json:"prompt"`
+	ParametersJSON json.RawMessage    `json:"parameters_json"`
+	MetadataJSON   json.RawMessage    `json:"metadata_json"`
+	Delivery       PublicDeliveryInfo `json:"delivery"`
+	CreatedAt      time.Time          `json:"created_at"`
 }
 
 type StorageUsageCategoryStat struct {

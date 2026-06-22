@@ -165,8 +165,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleListRecentAssets(w, r)
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
 		s.handleGetBatchProgress(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-summary"):
+		s.handleGetBatchStorySummary(w, r, parts[2], parts[4])
+	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-manifest"):
+		s.handleGetBatchManifest(w, r, parts[2], parts[4])
+	case r.Method == http.MethodPost && match(parts, "api", "projects", "*", "campaigns", "*", "scene-regenerations"):
+		s.handleRegenerateSceneTask(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "assets", "*"):
 		s.handleGetAsset(w, r, parts[2])
+	case isRead && match(parts, "api", "assets", "*", "metadata"):
+		s.handleGetAssetMetadata(w, r, parts[2])
 	case r.Method == http.MethodPost && match(parts, "api", "assets", "*", "approve"):
 		s.handleReviewAsset(w, r, parts[2], "approve")
 	case r.Method == http.MethodPost && match(parts, "api", "assets", "*", "reject"):
@@ -390,11 +398,15 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			AllowAdmin:  true,
 		}, true, nil
 	case match(parts, "api", "projects", "*", "campaigns", "*", "assets"),
-		match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
+		match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"),
+		match(parts, "api", "projects", "*", "campaigns", "*", "batch-summary"),
+		match(parts, "api", "projects", "*", "campaigns", "*", "batch-manifest"),
+		match(parts, "api", "projects", "*", "campaigns", "*", "scene-regenerations"):
 		return requestAuthScope{ProjectID: parts[2], CampaignID: parts[4], AllowAdmin: true}, true, nil
 	case match(parts, "api", "admin", "assets", "recent"):
 		return requestAuthScope{AllowAdmin: true, RequireAdmin: true}, true, nil
 	case match(parts, "api", "assets", "*"),
+		match(parts, "api", "assets", "*", "metadata"),
 		match(parts, "api", "assets", "*", "approve"),
 		match(parts, "api", "assets", "*", "reject"),
 		match(parts, "api", "assets", "*", "original"),
@@ -841,8 +853,64 @@ func (s *Server) handleGetBatchProgress(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) handleGetBatchStorySummary(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {
+	query, err := parseBatchStorySummaryQuery(r, projectID, campaignID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
+		return
+	}
+	response, err := s.service.GetBatchStorySummary(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleGetBatchManifest(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {
+	query, err := parseBatchManifestQuery(r, projectID, campaignID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
+		return
+	}
+	response, err := s.service.GetBatchManifest(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleRegenerateSceneTask(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {
+	defer r.Body.Close()
+	var req domain.SceneRegenerateRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	response, err := s.service.RegenerateSceneTask(r.Context(), domain.Scope{
+		ProjectID:  projectID,
+		CampaignID: campaignID,
+	}, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "scene_regeneration_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
 func (s *Server) handleGetAsset(w http.ResponseWriter, r *http.Request, assetID string) {
 	response, err := s.service.GetAsset(r.Context(), assetID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleGetAssetMetadata(w http.ResponseWriter, r *http.Request, assetID string) {
+	response, err := s.service.GetAssetMetadata(r.Context(), assetID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -891,6 +959,75 @@ func parseBatchProgressQuery(r *http.Request, projectID, campaignID string) (dom
 		SessionID:  strings.TrimSpace(values.Get("session_id")),
 		BatchID:    strings.TrimSpace(values.Get("batch_id")),
 		Limit:      limit,
+	}, nil
+}
+
+func parseBatchStorySummaryQuery(r *http.Request, projectID, campaignID string) (domain.BatchStorySummaryQuery, error) {
+	values := r.URL.Query()
+	limit := domain.DefaultBatchProgressLimit
+	if rawLimit := strings.TrimSpace(values.Get("limit")); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return domain.BatchStorySummaryQuery{}, err
+		}
+		limit = parsed
+	}
+	if limit <= 0 {
+		limit = domain.DefaultBatchProgressLimit
+	}
+	if limit > domain.MaxBatchProgressLimit {
+		limit = domain.MaxBatchProgressLimit
+	}
+	includeSetup := false
+	if rawIncludeSetup := strings.TrimSpace(values.Get("include_setup")); rawIncludeSetup != "" {
+		parsed, err := strconv.ParseBool(rawIncludeSetup)
+		if err != nil {
+			return domain.BatchStorySummaryQuery{}, err
+		}
+		includeSetup = parsed
+	}
+	return domain.BatchStorySummaryQuery{
+		ProjectID:    projectID,
+		CampaignID:   campaignID,
+		SessionID:    strings.TrimSpace(values.Get("session_id")),
+		BatchID:      strings.TrimSpace(values.Get("batch_id")),
+		StoryID:      strings.TrimSpace(values.Get("story_id")),
+		Source:       strings.TrimSpace(values.Get("source")),
+		Status:       strings.TrimSpace(values.Get("status")),
+		IncludeSetup: includeSetup,
+		Limit:        limit,
+	}, nil
+}
+
+func parseBatchManifestQuery(r *http.Request, projectID, campaignID string) (domain.BatchManifestQuery, error) {
+	summaryQuery, err := parseBatchStorySummaryQuery(r, projectID, campaignID)
+	if err != nil {
+		return domain.BatchManifestQuery{}, err
+	}
+	if summaryQuery.SessionID == "" && summaryQuery.BatchID == "" {
+		return domain.BatchManifestQuery{}, errors.New("session_id or batch_id is required")
+	}
+	values := r.URL.Query()
+	selectedOnly := true
+	if rawSelectedOnly := strings.TrimSpace(values.Get("selected_only")); rawSelectedOnly != "" {
+		parsed, err := strconv.ParseBool(rawSelectedOnly)
+		if err != nil {
+			return domain.BatchManifestQuery{}, err
+		}
+		selectedOnly = parsed
+	}
+	includeRejected := false
+	if rawIncludeRejected := strings.TrimSpace(values.Get("include_rejected")); rawIncludeRejected != "" {
+		parsed, err := strconv.ParseBool(rawIncludeRejected)
+		if err != nil {
+			return domain.BatchManifestQuery{}, err
+		}
+		includeRejected = parsed
+	}
+	return domain.BatchManifestQuery{
+		BatchStorySummaryQuery: summaryQuery,
+		SelectedOnly:           selectedOnly,
+		IncludeRejected:        includeRejected,
 	}, nil
 }
 

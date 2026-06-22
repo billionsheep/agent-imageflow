@@ -118,6 +118,10 @@ export interface AppSettings {
   imageflowCampaignId: string
   imageflowProvider: string
   imageflowUseProjectQualityProfile: boolean
+  imageflowUseProjectVisualContext: boolean
+  imageflowCharacterIds: string[]
+  imageflowReferenceAssetIds: string[]
+  imageflowPromptRecipeId: string
   profiles: ApiProfile[]
   activeProfileId: string
 }

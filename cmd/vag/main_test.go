@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -21,6 +22,44 @@ func TestBenchmarkRealProviderRequiresExplicitOptIn(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--allow-paid-provider") {
 		t.Fatalf("expected opt-in hint, got %v", err)
+	}
+}
+
+func TestBatchManifestPathBuildsExpectedQuery(t *testing.T) {
+	path := buildBatchManifestPath("prj_demo", "cmp_demo", batchManifestOptions{
+		SessionID:       "session_1",
+		BatchID:         "batch_1",
+		StoryID:         "story_1",
+		Source:          "codex",
+		Status:          "completed",
+		IncludeSetup:    true,
+		Limit:           250,
+		SelectedOnly:    false,
+		IncludeRejected: true,
+	})
+
+	parsed, err := url.Parse(path)
+	if err != nil {
+		t.Fatalf("parse path: %v", err)
+	}
+	if parsed.Path != "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest" {
+		t.Fatalf("unexpected path %q", parsed.Path)
+	}
+	query := parsed.Query()
+	for key, want := range map[string]string{
+		"session_id":       "session_1",
+		"batch_id":         "batch_1",
+		"story_id":         "story_1",
+		"source":           "codex",
+		"status":           "completed",
+		"include_setup":    "true",
+		"limit":            "250",
+		"selected_only":    "false",
+		"include_rejected": "true",
+	} {
+		if got := query.Get(key); got != want {
+			t.Fatalf("query %s = %q, want %q in %s", key, got, want, path)
+		}
 	}
 }
 

@@ -364,6 +364,14 @@ func TestInferAuditRoute(t *testing.T) {
 		t.Fatalf("unexpected action %q", action)
 	}
 
+	route, action = inferAuditRoute([]string{"api", "assets", "asset_1", "metadata"}, http.MethodGet)
+	if route != "/api/assets/{asset_id}/metadata" {
+		t.Fatalf("unexpected metadata route %q", route)
+	}
+	if action != "get_asset_metadata" {
+		t.Fatalf("unexpected metadata action %q", action)
+	}
+
 	route, action = inferAuditRoute([]string{"api", "tasks", "task_1", "attempts"}, http.MethodGet)
 	if route != "/api/tasks/{task_id}/attempts" {
 		t.Fatalf("unexpected attempts route %q", route)
@@ -380,12 +388,99 @@ func TestInferAuditRoute(t *testing.T) {
 		t.Fatalf("unexpected batch-progress action %q", action)
 	}
 
+	route, action = inferAuditRoute([]string{"api", "projects", "prj_demo", "campaigns", "cmp_demo", "batch-summary"}, http.MethodGet)
+	if route != "/api/projects/{project_id}/campaigns/{campaign_id}/batch-summary" {
+		t.Fatalf("unexpected batch-summary route %q", route)
+	}
+	if action != "get_batch_summary" {
+		t.Fatalf("unexpected batch-summary action %q", action)
+	}
+
+	route, action = inferAuditRoute([]string{"api", "projects", "prj_demo", "campaigns", "cmp_demo", "batch-manifest"}, http.MethodGet)
+	if route != "/api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest" {
+		t.Fatalf("unexpected batch-manifest route %q", route)
+	}
+	if action != "get_batch_manifest" {
+		t.Fatalf("unexpected batch-manifest action %q", action)
+	}
+
 	route, action = inferAuditRoute([]string{"api", "admin", "assets", "recent"}, http.MethodGet)
 	if route != "/api/admin/assets/recent" {
 		t.Fatalf("unexpected recent assets route %q", route)
 	}
 	if action != "list_recent_assets" {
 		t.Fatalf("unexpected recent assets action %q", action)
+	}
+}
+
+func TestBatchSummaryRouteUsesProjectScopeAuth(t *testing.T) {
+	server := &Server{}
+	parts := []string{"api", "projects", "prj_demo", "campaigns", "cmp_demo", "batch-summary"}
+	scope, ok, err := server.resolveRequestAuthScope(
+		httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-summary", nil),
+		parts,
+	)
+	if err != nil {
+		t.Fatalf("resolveRequestAuthScope returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected batch-summary route to resolve auth scope")
+	}
+	if scope.ProjectID != "prj_demo" || scope.CampaignID != "cmp_demo" || !scope.AllowAdmin {
+		t.Fatalf("unexpected scope: %#v", scope)
+	}
+	if !routeAllowsAdminSession(parts, http.MethodGet) {
+		t.Fatal("batch-summary should allow admin session reads")
+	}
+}
+
+func TestBatchManifestRouteUsesProjectScopeAuth(t *testing.T) {
+	server := &Server{}
+	parts := []string{"api", "projects", "prj_demo", "campaigns", "cmp_demo", "batch-manifest"}
+	scope, ok, err := server.resolveRequestAuthScope(
+		httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest", nil),
+		parts,
+	)
+	if err != nil {
+		t.Fatalf("resolveRequestAuthScope returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected batch-manifest route to resolve auth scope")
+	}
+	if scope.ProjectID != "prj_demo" || scope.CampaignID != "cmp_demo" || !scope.AllowAdmin {
+		t.Fatalf("unexpected scope: %#v", scope)
+	}
+	if !routeAllowsAdminSession(parts, http.MethodGet) {
+		t.Fatal("batch-manifest should allow admin session reads")
+	}
+}
+
+func TestSceneRegenerationRouteUsesProjectScopeAuth(t *testing.T) {
+	server := &Server{}
+	parts := []string{"api", "projects", "prj_demo", "campaigns", "cmp_demo", "scene-regenerations"}
+	scope, ok, err := server.resolveRequestAuthScope(
+		httptest.NewRequest(http.MethodPost, "/api/projects/prj_demo/campaigns/cmp_demo/scene-regenerations", nil),
+		parts,
+	)
+	if err != nil {
+		t.Fatalf("resolveRequestAuthScope returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected scene-regenerations route to resolve auth scope")
+	}
+	if scope.ProjectID != "prj_demo" || scope.CampaignID != "cmp_demo" || !scope.AllowAdmin {
+		t.Fatalf("unexpected scope: %#v", scope)
+	}
+	if !routeAllowsAdminSession(parts, http.MethodPost) {
+		t.Fatal("scene-regenerations should allow admin session writes")
+	}
+
+	route, action := inferAuditRoute(parts, http.MethodPost)
+	if route != "/api/projects/{project_id}/campaigns/{campaign_id}/scene-regenerations" {
+		t.Fatalf("unexpected route %q", route)
+	}
+	if action != "regenerate_scene" {
+		t.Fatalf("unexpected action %q", action)
 	}
 }
 
@@ -494,5 +589,64 @@ func TestParseBatchProgressQuery(t *testing.T) {
 	}
 	if query.Limit != domain.MaxBatchProgressLimit {
 		t.Fatalf("limit = %d, want cap %d", query.Limit, domain.MaxBatchProgressLimit)
+	}
+}
+
+func TestParseBatchStorySummaryQuery(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-summary?session_id=s1&batch_id=b1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=999", nil)
+
+	query, err := parseBatchStorySummaryQuery(request, "prj_demo", "cmp_demo")
+	if err != nil {
+		t.Fatalf("parseBatchStorySummaryQuery returned error: %v", err)
+	}
+	if query.ProjectID != "prj_demo" || query.CampaignID != "cmp_demo" || query.SessionID != "s1" || query.BatchID != "b1" {
+		t.Fatalf("unexpected scope/query ids: %#v", query)
+	}
+	if query.StoryID != "story_1" || query.Source != "codex" || query.Status != "completed" || !query.IncludeSetup {
+		t.Fatalf("optional filters were not parsed: %#v", query)
+	}
+	if query.Limit != domain.MaxBatchProgressLimit {
+		t.Fatalf("limit = %d, want cap %d", query.Limit, domain.MaxBatchProgressLimit)
+	}
+}
+
+func TestParseBatchManifestQuery(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest?session_id=s1&batch_id=b1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=999&selected_only=false&include_rejected=true", nil)
+
+	query, err := parseBatchManifestQuery(request, "prj_demo", "cmp_demo")
+	if err != nil {
+		t.Fatalf("parseBatchManifestQuery returned error: %v", err)
+	}
+	if query.ProjectID != "prj_demo" || query.CampaignID != "cmp_demo" || query.SessionID != "s1" || query.BatchID != "b1" {
+		t.Fatalf("unexpected scope/query ids: %#v", query)
+	}
+	if query.StoryID != "story_1" || query.Source != "codex" || query.Status != "completed" || !query.IncludeSetup {
+		t.Fatalf("optional filters were not parsed: %#v", query)
+	}
+	if query.SelectedOnly || !query.IncludeRejected {
+		t.Fatalf("manifest options were not parsed: %#v", query)
+	}
+	if query.Limit != domain.MaxBatchProgressLimit {
+		t.Fatalf("limit = %d, want cap %d", query.Limit, domain.MaxBatchProgressLimit)
+	}
+}
+
+func TestParseBatchManifestQueryDefaultsSelectedOnly(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest?session_id=s1", nil)
+
+	query, err := parseBatchManifestQuery(request, "prj_demo", "cmp_demo")
+	if err != nil {
+		t.Fatalf("parseBatchManifestQuery returned error: %v", err)
+	}
+	if !query.SelectedOnly || query.IncludeRejected {
+		t.Fatalf("unexpected manifest defaults: %#v", query)
+	}
+}
+
+func TestParseBatchManifestQueryRequiresSessionOrBatch(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest", nil)
+
+	if _, err := parseBatchManifestQuery(request, "prj_demo", "cmp_demo"); err == nil {
+		t.Fatal("expected missing session_id and batch_id to fail")
 	}
 }

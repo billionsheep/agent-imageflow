@@ -14,6 +14,7 @@ import {
   type AgentImageflowProject,
   type AgentImageflowWorkspace,
 } from '../lib/agentImageflowApi'
+import { getLocalhostMismatchWarning } from '../lib/operatorReview'
 import { isApiProxyAvailable, isApiProxyLocked, readClientDevProxyConfig } from '../lib/devProxy'
 import { useStore, exportData, importData, clearData, type SettingsTab } from '../store'
 import {
@@ -508,6 +509,9 @@ export default function SettingsModal() {
   const zipDownloadRouteSummary = enabledZipDownloadRouteCount
     ? `已开启 ${enabledZipDownloadRouteCount} 项使用压缩包进行批量下载的途径`
     : '未开启任何使用压缩包进行批量下载的途径'
+  const managedHostMismatchWarning = typeof window === 'undefined'
+    ? null
+    : getLocalhostMismatchWarning(window.location.origin, normalizeAgentImageflowApiBaseUrl(draft.imageflowApiBaseUrl))
 
   const workspaceScopeOptions = ensureCurrentManagedScopeOption(
     managedScopeSnapshot.workspaces.filter((workspace) => !workspace.archived).map((workspace) => ({
@@ -1602,7 +1606,7 @@ export default function SettingsModal() {
               <div className="space-y-4">
                 <div className="block rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
                   <div className="mb-1 flex items-center justify-between gap-3">
-                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">服务端托管模式</span>
+                    <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Agent ImageFlow 服务端连接</span>
                     <button
                       type="button"
                       onClick={() => commitSettings({ ...draft, imageflowManagedMode: !draft.imageflowManagedMode })}
@@ -1615,7 +1619,7 @@ export default function SettingsModal() {
                     </button>
                   </div>
                   <div data-selectable-text className="mb-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                    开启后，提交会创建服务端 ImageTask，由 Worker 生成并登记 Asset；关闭后继续使用浏览器直连 provider。
+                    开启后，Web 使用这台 Agent ImageFlow 的服务端能力创建 ImageTask、登记 Asset 和查看 Recent Assets；真实 provider key / provider base URL 保持在服务端配置中。关闭后才回到旧版浏览器直连 provider。
                   </div>
                   <div className={`grid gap-3 ${draft.imageflowManagedMode ? '' : 'opacity-60'}`}>
                     <label className="block">
@@ -1628,9 +1632,17 @@ export default function SettingsModal() {
                         disabled={!draft.imageflowManagedMode}
                         className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
                       />
+                      <span data-selectable-text className="mt-1 block text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                        这是 Agent ImageFlow server 地址，不是上游生图 provider 地址。
+                      </span>
                     </label>
+                    {managedHostMismatchWarning && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                        {managedHostMismatchWarning}
+                      </div>
+                    )}
                     <label className="block">
-                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Project API Key</span>
+                      <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Project API Key（外部/API fallback）</span>
                       <input
                         value={draft.imageflowApiKey}
                         onChange={(e) => setDraft({ ...draft, imageflowApiKey: e.target.value })}
@@ -1640,10 +1652,13 @@ export default function SettingsModal() {
                         disabled={!draft.imageflowManagedMode}
                         className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
                       />
+                      <span data-selectable-text className="mt-1 block text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                        主要给 MCP / CLI / REST 外部 project 调用使用；Web 日常 Recent Assets 查看优先使用 Admin session。
+                      </span>
                     </label>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <label className="block min-w-0">
-                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Basic 用户名</span>
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Basic 用户名（fallback）</span>
                         <input
                           value={draft.imageflowBasicUsername}
                           onChange={(e) => setDraft({ ...draft, imageflowBasicUsername: e.target.value })}
@@ -1655,7 +1670,7 @@ export default function SettingsModal() {
                         />
                       </label>
                       <label className="block min-w-0">
-                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Basic 密码</span>
+                        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Basic 密码（fallback）</span>
                         <input
                           value={draft.imageflowBasicPassword}
                           onChange={(e) => setDraft({ ...draft, imageflowBasicPassword: e.target.value })}
@@ -1666,6 +1681,9 @@ export default function SettingsModal() {
                           className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
                         />
                       </label>
+                    </div>
+                    <div data-selectable-text className="rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-[11px] leading-relaxed text-gray-500 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400">
+                      Basic auth 用于自托管实例或反向代理保护；Admin 登录负责 Web 控制台会话。两者都不是 provider key。
                     </div>
                     <div className="rounded-xl border border-gray-200/70 bg-white/70 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
                       <div className="mb-2 flex items-center justify-between gap-3">
@@ -2000,6 +2018,9 @@ export default function SettingsModal() {
                         disabled={!draft.imageflowManagedMode}
                         className="w-full rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-blue-300 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
                       />
+                      <span data-selectable-text className="mt-1 block text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                        这里只选择服务端 adapter / profile；真实 provider secret 不在 Web 中填写或展示。
+                      </span>
                     </label>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-xs text-gray-500 dark:text-gray-400">使用项目质量配置</span>
@@ -2265,6 +2286,9 @@ export default function SettingsModal() {
             
             {activeTab === 'api' && (
               <div className="space-y-4">
+                <div data-selectable-text className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                  这里是旧版/高级浏览器直连 provider 配置；Agent ImageFlow 正式资产生产和 Recent Assets 审看优先走“习惯配置”里的服务端连接。
+                </div>
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">当前配置</span>

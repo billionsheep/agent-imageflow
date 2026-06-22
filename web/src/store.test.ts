@@ -299,6 +299,51 @@ describe('mask draft lifecycle in store actions', () => {
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
   })
 
+  it('passes project visual context selectors to managed ImageFlow tasks without a frontend API key', async () => {
+    const originalFetch = globalThis.fetch
+    let requestBody: Record<string, unknown> | null = null
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body === 'string') {
+        requestBody = JSON.parse(init.body) as Record<string, unknown>
+      }
+      return new Response(JSON.stringify({ error_code: 'mock_failure', error_message: 'mock failure' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    globalThis.fetch = fetchMock as typeof fetch
+    try {
+      useStore.setState({
+        settings: normalizeSettings({
+          ...DEFAULT_SETTINGS,
+          apiKey: '',
+          imageflowManagedMode: true,
+          imageflowWorkspaceId: 'ws_pet',
+          imageflowProjectId: 'prj_pet',
+          imageflowCampaignId: 'cmp_story',
+          imageflowUseProjectVisualContext: true,
+          imageflowCharacterIds: ['dog_mochi', 'cat_orange'],
+          imageflowReferenceAssetIds: ['asset_style'],
+          imageflowPromptRecipeId: 'pet_story_cover',
+        }),
+        prompt: '三只萌宠在月光厨房里找点心',
+        params: { ...DEFAULT_PARAMS, n: 2 },
+      })
+
+      await submitTask()
+
+      expect(fetchMock).toHaveBeenCalled()
+      expect(requestBody).toMatchObject({
+        character_ids: ['dog_mochi', 'cat_orange'],
+        reference_asset_ids: ['asset_style'],
+        prompt_recipe_id: 'pet_story_cover',
+        use_project_visual_context: true,
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('stores decoded image size as actual size when the API omits size', async () => {
     const { callImageApi } = await import('./lib/api')
     vi.mocked(callImageApi).mockClear()

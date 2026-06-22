@@ -3,12 +3,12 @@ import { useStore } from '../store'
 import { useVersionCheck } from '../hooks/useVersionCheck'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
-import { preloadAgentWorkspace, preloadScopeManagerModal, preloadSettingsModal } from '../lib/lazyModules'
+import { preloadAgentWorkspace, preloadProductionViewModal, preloadProjectContextModal, preloadScopeManagerModal, preloadSettingsModal } from '../lib/lazyModules'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
-import { CollectionManageIcon, EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
+import { CodeIcon, CollectionManageIcon, EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -25,6 +25,8 @@ export default function Header() {
   const setAppMode = useStore((s) => s.setAppMode)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setShowScopeManager = useStore((s) => s.setShowScopeManager)
+  const setShowProjectContext = useStore((s) => s.setShowProjectContext)
+  const setShowProductionView = useStore((s) => s.setShowProductionView)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const agentMobileHeaderVisible = useStore((s) => s.agentMobileHeaderVisible)
   const agentConversations = useStore((s) => s.agentConversations)
@@ -87,6 +89,8 @@ export default function Header() {
 
   const installTooltip = useTooltip()
   const helpTooltip = useTooltip()
+  const productionTooltip = useTooltip()
+  const projectContextTooltip = useTooltip()
   const scopeTooltip = useTooltip()
   const settingsTooltip = useTooltip()
 
@@ -294,6 +298,48 @@ export default function Header() {
               </button>
               <ViewportTooltip visible={helpTooltip.visible} className="whitespace-nowrap">
                 操作指南
+              </ViewportTooltip>
+            </div>
+            <div
+              className="relative"
+              onPointerEnter={preloadProductionViewModal}
+              onFocusCapture={preloadProductionViewModal}
+              onPointerDown={preloadProductionViewModal}
+              {...productionTooltip.handlers}
+            >
+              <button
+                onClick={() => {
+                  dismissAllTooltips()
+                  setShowProductionView(true)
+                }}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                aria-label="Production View"
+              >
+                <HistoryIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </button>
+              <ViewportTooltip visible={productionTooltip.visible} className="whitespace-nowrap">
+                Production View
+              </ViewportTooltip>
+            </div>
+            <div
+              className="relative"
+              onPointerEnter={preloadProjectContextModal}
+              onFocusCapture={preloadProjectContextModal}
+              onPointerDown={preloadProjectContextModal}
+              {...projectContextTooltip.handlers}
+            >
+              <button
+                onClick={() => {
+                  dismissAllTooltips()
+                  setShowProjectContext(true)
+                }}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                aria-label="Project Context"
+              >
+                <CodeIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              </button>
+              <ViewportTooltip visible={projectContextTooltip.visible} className="whitespace-nowrap">
+                Project Context
               </ViewportTooltip>
             </div>
             <div

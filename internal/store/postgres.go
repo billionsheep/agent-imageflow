@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -723,6 +726,29 @@ func (s *PostgresStore) GetTask(ctx context.Context, taskID string) (domain.Task
 	return task, err
 }
 
+func (s *PostgresStore) GetSceneRegenerationSourceTask(ctx context.Context, taskID string) (domain.Task, error) {
+	return s.GetTask(ctx, taskID)
+}
+
+func (s *PostgresStore) ResolveLatestSceneTask(ctx context.Context, projectID, campaignID string, identity domain.SceneIdentity) (domain.Task, error) {
+	built := buildResolveLatestSceneTaskQuery(identity, projectID, campaignID)
+	row := s.db.QueryRowContext(ctx, built.SQL, built.Args...)
+	task, _, err := scanTaskWithHash(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Task{}, ErrNotFound
+	}
+	return task, err
+}
+
+func (s *PostgresStore) CountSceneRegenerations(ctx context.Context, projectID, campaignID string, identity domain.SceneIdentity) (int, error) {
+	built := buildCountSceneRegenerationsQuery(identity, projectID, campaignID)
+	var count int
+	if err := s.db.QueryRowContext(ctx, built.SQL, built.Args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *PostgresStore) GetTaskScope(ctx context.Context, taskID string) (domain.Scope, error) {
 	var scope domain.Scope
 	err := s.db.QueryRowContext(ctx, `
@@ -1165,6 +1191,597 @@ func (s *PostgresStore) GetBatchProgress(ctx context.Context, query domain.Batch
 		return domain.BatchProgressResponse{}, err
 	}
 	return response, nil
+}
+
+type batchStorySummarySQLQuery struct {
+	SQL  string
+	Args []any
+}
+
+func buildBatchStorySummaryBaseConditions(query domain.BatchStorySummaryQuery) ([]string, []any) {
+	args := []any{query.ProjectID, query.CampaignID}
+	conditions := []string{"gt.project_id = $1", "gt.campaign_id = $2"}
+	addStringCondition := func(sqlExpr string, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(sqlExpr, len(args)))
+	}
+	addStringCondition("gt.structured_input_json->'metadata_json'->>'session_id' = $%d", query.SessionID)
+	addStringCondition("gt.structured_input_json->'metadata_json'->>'batch_id' = $%d", query.BatchID)
+	addStringCondition("gt.structured_input_json->'metadata_json'->>'story_id' = $%d", query.StoryID)
+	addStringCondition("gt.structured_input_json->'metadata_json'->>'source' = $%d", query.Source)
+	addStringCondition("gt.status = $%d", query.Status)
+	return conditions, args
+}
+
+func batchStorySummaryExclusionCondition(alias string) string {
+	metadata := alias + ".structured_input_json->'metadata_json'"
+	return fmt.Sprintf(`(
+		COALESCE(NULLIF(%[1]s->>'scene_id', ''), '') = '' OR
+		COALESCE(%[1]s->>'task_role', '') IN ('setup', 'reference_setup', 'visual_context_setup', 'calibration') OR
+		LOWER(COALESCE(%[1]s->>'exclude_from_story_summary', 'false')) = 'true'
+	)`, metadata)
+}
+
+func buildBatchStorySummaryTasksQuery(query domain.BatchStorySummaryQuery) batchStorySummarySQLQuery {
+	conditions, args := buildBatchStorySummaryBaseConditions(query)
+	if !query.IncludeSetup {
+		conditions = append(conditions, "NOT "+batchStorySummaryExclusionCondition("gt"))
+	}
+	args = append(args, query.Limit)
+	limitPlaceholder := len(args)
+
+	return batchStorySummarySQLQuery{
+		SQL: fmt.Sprintf(`
+		WITH limited_tasks AS (
+			SELECT gt.*
+			FROM generation_task gt
+			WHERE %s
+			ORDER BY gt.created_at ASC, gt.id ASC
+			LIMIT $%d
+		)
+		SELECT gt.id, gt.status, gt.created_at, gt.updated_at, gt.error_code, gt.error_message,
+			gt.structured_input_json,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'source', '') AS source,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'session_id', '') AS session_id,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'batch_id', '') AS batch_id,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'story_id', '') AS story_id,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'scene_id', '') AS scene_id,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'target_path', '') AS task_target_path,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'scene_order', '') AS scene_order,
+			COALESCE(gt.structured_input_json->'metadata_json'->>'regenerated_from_task_id', '') AS regenerated_from_task_id,
+			COUNT(a.id) OVER (PARTITION BY gt.id) AS task_asset_count,
+			COALESCE(attempts.attempt_count, 0) AS attempt_count,
+			COALESCE(attempts.retrying, false) AS retrying,
+			COALESCE(attempts.error_stage, '') AS error_stage,
+			a.id AS asset_id, a.status AS asset_status, a.created_at AS asset_created_at,
+			COALESCE(v.provider, '') AS asset_provider,
+			COALESCE(v.model, '') AS asset_model,
+			COALESCE(v.prompt, '') AS asset_prompt
+		FROM limited_tasks gt
+		LEFT JOIN (
+			SELECT task_id,
+				COUNT(*) AS attempt_count,
+				BOOL_OR(retry_after > now()) AS retrying,
+				MAX(NULLIF(error_stage, '')) AS error_stage
+			FROM task_attempt
+			GROUP BY task_id
+		) attempts ON attempts.task_id = gt.id
+		LEFT JOIN asset a ON a.task_id = gt.id
+		LEFT JOIN asset_version v ON v.id = a.current_version_id
+		ORDER BY gt.created_at ASC, gt.id ASC, a.created_at ASC, a.id ASC
+	`, strings.Join(conditions, " AND "), limitPlaceholder),
+		Args: args,
+	}
+}
+
+func buildBatchStorySummaryExcludedCountQuery(query domain.BatchStorySummaryQuery) batchStorySummarySQLQuery {
+	conditions, args := buildBatchStorySummaryBaseConditions(query)
+	conditions = append(conditions, batchStorySummaryExclusionCondition("gt"))
+	return batchStorySummarySQLQuery{
+		SQL: fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM generation_task gt
+		WHERE %s
+	`, strings.Join(conditions, " AND ")),
+		Args: args,
+	}
+}
+
+func buildSceneIdentityConditions(identity domain.SceneIdentity, projectID, campaignID string) ([]string, []any) {
+	conditions := []string{}
+	args := []any{}
+	addStringCondition := func(format string, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(format, len(args)))
+	}
+	addStringCondition("project_id = $%d", projectID)
+	addStringCondition("campaign_id = $%d", campaignID)
+	addStringCondition("structured_input_json->'metadata_json'->>'session_id' = $%d", identity.SessionID)
+	addStringCondition("structured_input_json->'metadata_json'->>'batch_id' = $%d", identity.BatchID)
+	addStringCondition("structured_input_json->'metadata_json'->>'story_id' = $%d", identity.StoryID)
+	addStringCondition("structured_input_json->'metadata_json'->>'scene_id' = $%d", identity.SceneID)
+	addStringCondition("structured_input_json->'metadata_json'->>'source' = $%d", identity.Source)
+	if len(conditions) == 0 {
+		conditions = append(conditions, "1=0")
+	}
+	return conditions, args
+}
+
+func buildResolveLatestSceneTaskQuery(identity domain.SceneIdentity, projectID, campaignID string) batchStorySummarySQLQuery {
+	conditions, args := buildSceneIdentityConditions(identity, projectID, campaignID)
+	return batchStorySummarySQLQuery{
+		SQL: taskSelect() + `
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`,
+		Args: args,
+	}
+}
+
+func buildCountSceneRegenerationsQuery(identity domain.SceneIdentity, projectID, campaignID string) batchStorySummarySQLQuery {
+	conditions, args := buildSceneIdentityConditions(identity, projectID, campaignID)
+	conditions = append(conditions, "COALESCE(structured_input_json->'metadata_json'->>'regenerated_from_task_id', '') <> ''")
+	return batchStorySummarySQLQuery{
+		SQL: `
+		SELECT COUNT(*)
+		FROM generation_task
+		WHERE ` + strings.Join(conditions, " AND "),
+		Args: args,
+	}
+}
+
+func (s *PostgresStore) GetBatchStorySummary(ctx context.Context, query domain.BatchStorySummaryQuery) (domain.BatchStorySummaryResponse, error) {
+	query.ProjectID = strings.TrimSpace(query.ProjectID)
+	query.CampaignID = strings.TrimSpace(query.CampaignID)
+	query.SessionID = strings.TrimSpace(query.SessionID)
+	query.BatchID = strings.TrimSpace(query.BatchID)
+	query.StoryID = strings.TrimSpace(query.StoryID)
+	query.Source = strings.TrimSpace(query.Source)
+	query.Status = strings.TrimSpace(query.Status)
+	if query.Limit <= 0 {
+		query.Limit = domain.DefaultBatchProgressLimit
+	}
+	if query.Limit > domain.MaxBatchProgressLimit {
+		query.Limit = domain.MaxBatchProgressLimit
+	}
+	if query.ProjectID == "" || query.CampaignID == "" {
+		return domain.BatchStorySummaryResponse{}, fmt.Errorf("project_id and campaign_id are required")
+	}
+	if query.SessionID == "" && query.BatchID == "" {
+		return domain.BatchStorySummaryResponse{}, fmt.Errorf("session_id or batch_id is required")
+	}
+
+	excludedQuery := buildBatchStorySummaryExcludedCountQuery(query)
+	var excludedSetupTaskCount int
+	if err := s.db.QueryRowContext(ctx, excludedQuery.SQL, excludedQuery.Args...).Scan(&excludedSetupTaskCount); err != nil {
+		return domain.BatchStorySummaryResponse{}, err
+	}
+
+	tasksQuery := buildBatchStorySummaryTasksQuery(query)
+	rows, err := s.db.QueryContext(ctx, tasksQuery.SQL, tasksQuery.Args...)
+	if err != nil {
+		return domain.BatchStorySummaryResponse{}, err
+	}
+	defer rows.Close()
+
+	response := domain.BatchStorySummaryResponse{
+		GeneratedAt: time.Now().UTC(),
+		ProjectID:   query.ProjectID,
+		CampaignID:  query.CampaignID,
+		SessionID:   query.SessionID,
+		BatchID:     query.BatchID,
+		Source:      query.Source,
+		StoryID:     query.StoryID,
+		Stories:     []domain.BatchStorySummaryStory{},
+		Scenes:      []domain.BatchStorySummaryScene{},
+	}
+	response.Counts.ExcludedSetupTaskCount = excludedSetupTaskCount
+
+	sceneByKey := map[string]*domain.BatchStorySummaryScene{}
+	taskSeen := map[string]bool{}
+	for rows.Next() {
+		row, err := scanBatchStorySummaryRow(rows)
+		if err != nil {
+			return domain.BatchStorySummaryResponse{}, err
+		}
+		if strings.TrimSpace(row.SceneID) == "" {
+			continue
+		}
+		key := row.StoryID + "\x00" + row.SceneID
+		scene := sceneByKey[key]
+		if scene == nil {
+			scene = &domain.BatchStorySummaryScene{
+				StoryID:       row.StoryID,
+				SceneID:       row.SceneID,
+				SceneOrder:    deriveSceneOrder(row.SceneID, row.SceneOrder),
+				TargetPath:    strings.TrimSpace(row.TaskTargetPath),
+				Status:        "empty",
+				VisualContext: extractBatchStoryVisualContext(row.StructuredInputJSON),
+				Tasks:         []domain.BatchStorySummaryTask{},
+				Assets:        []domain.BatchStorySummaryAsset{},
+			}
+			sceneByKey[key] = scene
+		}
+		if !taskSeen[row.TaskID] {
+			taskSeen[row.TaskID] = true
+			previousLatestUpdatedAt := latestTaskUpdatedAt(scene.Tasks)
+			task := domain.BatchStorySummaryTask{
+				TaskID:       row.TaskID,
+				Status:       row.Status,
+				AssetCount:   row.TaskAssetCount,
+				AttemptCount: row.AttemptCount,
+				Retrying:     row.Retrying,
+				ErrorStage:   strings.TrimSpace(row.ErrorStage),
+				CreatedAt:    row.CreatedAt,
+				UpdatedAt:    row.UpdatedAt,
+			}
+			if row.ErrorCode.Valid {
+				task.ErrorCode = &row.ErrorCode.String
+			}
+			if row.ErrorMessage.Valid {
+				task.ErrorMessage = &row.ErrorMessage.String
+			}
+			scene.Tasks = append(scene.Tasks, task)
+			scene.Counts.TaskCount++
+			scene.Counts.AttemptCount += task.AttemptCount
+			addBatchStorySummaryTaskCounts(&response.Counts, task)
+			if row.RegeneratedFromTaskID != "" {
+				scene.RegeneratedFromTaskID = row.RegeneratedFromTaskID
+				scene.RegenerationCount++
+			}
+			if scene.LatestTaskID == "" || row.UpdatedAt.After(previousLatestUpdatedAt) || (row.UpdatedAt.Equal(previousLatestUpdatedAt) && row.TaskID > scene.LatestTaskID) {
+				scene.LatestTaskID = row.TaskID
+			}
+			if scene.TargetPath == "" && strings.TrimSpace(row.TaskTargetPath) != "" {
+				scene.TargetPath = strings.TrimSpace(row.TaskTargetPath)
+			}
+			if isBatchStoryVisualContextEmpty(scene.VisualContext) {
+				scene.VisualContext = extractBatchStoryVisualContext(row.StructuredInputJSON)
+			}
+		}
+		if row.AssetID.Valid {
+			status := publicAssetStatus(row.AssetStatus.String)
+			asset := domain.BatchStorySummaryAsset{
+				AssetID:      row.AssetID.String,
+				TaskID:       row.TaskID,
+				Status:       status,
+				Provider:     strings.TrimSpace(row.AssetProvider),
+				Model:        strings.TrimSpace(row.AssetModel),
+				Prompt:       strings.TrimSpace(row.AssetPrompt),
+				DownloadURL:  "/api/assets/" + row.AssetID.String + "/original",
+				ThumbnailURL: "/api/assets/" + row.AssetID.String + "/thumbnail",
+				MetadataURL:  "/api/assets/" + row.AssetID.String + "/metadata",
+				TargetPath:   firstNonEmpty(scene.TargetPath, strings.TrimSpace(row.TaskTargetPath)),
+				CreatedAt:    row.AssetCreatedAt.Time,
+			}
+			scene.Assets = append(scene.Assets, asset)
+			addBatchStorySummaryAssetCounts(&response.Counts, &scene.Counts, asset)
+			if status == "selected" {
+				if scene.PrimarySelectedAssetID == "" || row.AssetCreatedAt.Time.After(primarySelectedAssetTime(scene.Assets, scene.PrimarySelectedAssetID)) || (row.AssetCreatedAt.Time.Equal(primarySelectedAssetTime(scene.Assets, scene.PrimarySelectedAssetID)) && row.AssetID.String > scene.PrimarySelectedAssetID) {
+					scene.PrimarySelectedAssetID = row.AssetID.String
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return domain.BatchStorySummaryResponse{}, err
+	}
+
+	for _, scene := range sceneByKey {
+		scene.Status = deriveBatchStorySceneStatus(*scene)
+		response.Scenes = append(response.Scenes, *scene)
+	}
+	sort.Slice(response.Scenes, func(i, j int) bool {
+		left, right := response.Scenes[i], response.Scenes[j]
+		if left.StoryID != right.StoryID {
+			return left.StoryID < right.StoryID
+		}
+		if left.SceneOrder != right.SceneOrder {
+			if left.SceneOrder == 0 {
+				return false
+			}
+			if right.SceneOrder == 0 {
+				return true
+			}
+			return left.SceneOrder < right.SceneOrder
+		}
+		return left.SceneID < right.SceneID
+	})
+	addBatchStorySummarySceneCounts(&response)
+	response.Stories = buildBatchStorySummaryStories(response.Scenes)
+	response.Counts.StoryCount = len(response.Stories)
+	return response, nil
+}
+
+type batchStorySummaryRow struct {
+	TaskID                string
+	Status                string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ErrorCode             sql.NullString
+	ErrorMessage          sql.NullString
+	StructuredInputJSON   json.RawMessage
+	StoryID               string
+	SceneID               string
+	TaskTargetPath        string
+	SceneOrder            string
+	RegeneratedFromTaskID string
+	TaskAssetCount        int
+	AttemptCount          int
+	Retrying              bool
+	ErrorStage            string
+	AssetID               sql.NullString
+	AssetStatus           sql.NullString
+	AssetCreatedAt        sql.NullTime
+	AssetProvider         string
+	AssetModel            string
+	AssetPrompt           string
+}
+
+func scanBatchStorySummaryRow(rows *sql.Rows) (batchStorySummaryRow, error) {
+	var row batchStorySummaryRow
+	var source, sessionID, batchID string
+	err := rows.Scan(
+		&row.TaskID,
+		&row.Status,
+		&row.CreatedAt,
+		&row.UpdatedAt,
+		&row.ErrorCode,
+		&row.ErrorMessage,
+		&row.StructuredInputJSON,
+		&source,
+		&sessionID,
+		&batchID,
+		&row.StoryID,
+		&row.SceneID,
+		&row.TaskTargetPath,
+		&row.SceneOrder,
+		&row.RegeneratedFromTaskID,
+		&row.TaskAssetCount,
+		&row.AttemptCount,
+		&row.Retrying,
+		&row.ErrorStage,
+		&row.AssetID,
+		&row.AssetStatus,
+		&row.AssetCreatedAt,
+		&row.AssetProvider,
+		&row.AssetModel,
+		&row.AssetPrompt,
+	)
+	return row, err
+}
+
+func addBatchStorySummaryTaskCounts(counts *domain.BatchStorySummaryCounts, item domain.BatchStorySummaryTask) {
+	counts.TaskCount++
+	counts.AttemptCount += item.AttemptCount
+	if item.Retrying {
+		counts.RetryingCount++
+	}
+	switch item.Status {
+	case domain.TaskQueued:
+		counts.QueuedCount++
+	case domain.TaskRunning:
+		counts.RunningCount++
+	case domain.TaskCompleted:
+		counts.SucceededCount++
+	case domain.TaskPartiallyCompleted:
+		counts.PartialCount++
+	case domain.TaskFailed, domain.TaskEnqueueFailed:
+		counts.FailedCount++
+	}
+}
+
+func addBatchStorySummaryAssetCounts(total *domain.BatchStorySummaryCounts, scene *domain.BatchStorySceneCounts, item domain.BatchStorySummaryAsset) {
+	total.AssetCount++
+	scene.AssetCount++
+	switch item.Status {
+	case "generated":
+		total.GeneratedAssetCount++
+		scene.GeneratedAssetCount++
+	case "selected":
+		total.SelectedAssetCount++
+		scene.SelectedAssetCount++
+	case domain.AssetRejected:
+		total.RejectedAssetCount++
+		scene.RejectedAssetCount++
+	}
+}
+
+func addBatchStorySummarySceneCounts(response *domain.BatchStorySummaryResponse) {
+	response.Counts.SceneCount = len(response.Scenes)
+	for i := range response.Scenes {
+		scene := &response.Scenes[i]
+		for _, task := range scene.Tasks {
+			switch task.Status {
+			case domain.TaskCompleted:
+				scene.Counts.SucceededCount++
+			case domain.TaskFailed, domain.TaskEnqueueFailed:
+				scene.Counts.FailedCount++
+			}
+		}
+		if scene.PrimarySelectedAssetID != "" {
+			response.Counts.SceneWithSelectedCount++
+		} else {
+			response.Counts.SceneMissingSelectedCount++
+		}
+	}
+}
+
+func buildBatchStorySummaryStories(scenes []domain.BatchStorySummaryScene) []domain.BatchStorySummaryStory {
+	storyMap := map[string]*domain.BatchStorySummaryStory{}
+	order := []string{}
+	for _, scene := range scenes {
+		story := storyMap[scene.StoryID]
+		if story == nil {
+			story = &domain.BatchStorySummaryStory{StoryID: scene.StoryID}
+			storyMap[scene.StoryID] = story
+			order = append(order, scene.StoryID)
+		}
+		story.SceneCount++
+		if scene.PrimarySelectedAssetID != "" {
+			story.SelectedSceneCount++
+		}
+		story.Scenes = append(story.Scenes, scene.SceneID)
+	}
+	sort.Strings(order)
+	stories := make([]domain.BatchStorySummaryStory, 0, len(order))
+	for _, storyID := range order {
+		stories = append(stories, *storyMap[storyID])
+	}
+	return stories
+}
+
+func deriveBatchStorySceneStatus(scene domain.BatchStorySummaryScene) string {
+	if len(scene.Tasks) == 0 {
+		return "empty"
+	}
+	anyRetrying := false
+	anyRunning := false
+	anyQueued := false
+	anyPartial := false
+	allFailed := true
+	allCompleted := true
+	hasCompleted := false
+	hasFailed := false
+	for _, task := range scene.Tasks {
+		if task.Retrying {
+			anyRetrying = true
+		}
+		switch task.Status {
+		case domain.TaskRunning:
+			anyRunning = true
+			allFailed = false
+			allCompleted = false
+		case domain.TaskQueued:
+			anyQueued = true
+			allFailed = false
+			allCompleted = false
+		case domain.TaskPartiallyCompleted:
+			anyPartial = true
+			allFailed = false
+			allCompleted = false
+		case domain.TaskFailed, domain.TaskEnqueueFailed:
+			hasFailed = true
+			allCompleted = false
+		case domain.TaskCompleted:
+			hasCompleted = true
+			allFailed = false
+		default:
+			allFailed = false
+			allCompleted = false
+		}
+	}
+	switch {
+	case anyRetrying:
+		return "retrying"
+	case anyRunning:
+		return "running"
+	case anyQueued:
+		return "queued"
+	case anyPartial || (hasCompleted && hasFailed):
+		return "partial"
+	case allFailed:
+		return "failed"
+	case allCompleted && len(scene.Assets) > 0:
+		return "completed"
+	default:
+		return "empty"
+	}
+}
+
+func publicAssetStatus(status string) string {
+	switch status {
+	case domain.AssetDraft:
+		return "generated"
+	case domain.AssetApproved:
+		return "selected"
+	default:
+		return status
+	}
+}
+
+var trailingSceneNumberPattern = regexp.MustCompile(`(\d+)$`)
+
+func deriveSceneOrder(sceneID, rawOrder string) int {
+	rawOrder = strings.TrimSpace(rawOrder)
+	if rawOrder != "" {
+		if parsed, err := strconv.Atoi(rawOrder); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	matches := trailingSceneNumberPattern.FindStringSubmatch(strings.TrimSpace(sceneID))
+	if len(matches) == 2 {
+		if parsed, err := strconv.Atoi(matches[1]); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func extractBatchStoryVisualContext(raw json.RawMessage) domain.BatchStoryVisualContext {
+	var payload struct {
+		CharacterIDs      []string `json:"character_ids"`
+		ReferenceAssetIDs []string `json:"reference_asset_ids"`
+		PromptRecipeID    string   `json:"prompt_recipe_id"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &payload) != nil {
+		return domain.BatchStoryVisualContext{}
+	}
+	return domain.BatchStoryVisualContext{
+		CharacterIDs:      trimStringSlice(payload.CharacterIDs),
+		ReferenceAssetIDs: trimStringSlice(payload.ReferenceAssetIDs),
+		PromptRecipeID:    strings.TrimSpace(payload.PromptRecipeID),
+	}
+}
+
+func trimStringSlice(values []string) []string {
+	cleaned := []string{}
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	return cleaned
+}
+
+func isBatchStoryVisualContextEmpty(value domain.BatchStoryVisualContext) bool {
+	return len(value.CharacterIDs) == 0 && len(value.ReferenceAssetIDs) == 0 && strings.TrimSpace(value.PromptRecipeID) == ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func latestTaskUpdatedAt(tasks []domain.BatchStorySummaryTask) time.Time {
+	var latest time.Time
+	for _, task := range tasks {
+		if task.UpdatedAt.After(latest) {
+			latest = task.UpdatedAt
+		}
+	}
+	return latest
+}
+
+func primarySelectedAssetTime(assets []domain.BatchStorySummaryAsset, assetID string) time.Time {
+	for _, asset := range assets {
+		if asset.AssetID == assetID {
+			return asset.CreatedAt
+		}
+	}
+	return time.Time{}
 }
 
 func addBatchProgressTaskCounts(counts *domain.BatchProgressCounts, item domain.BatchProgressTask) {

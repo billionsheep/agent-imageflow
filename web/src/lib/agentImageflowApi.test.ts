@@ -1,19 +1,24 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentImageflowHeaders,
+  buildAgentImageflowAssetReviewUrl,
   buildAgentImageflowAssetsUrl,
   buildAgentImageflowAssetUrl,
   buildAgentImageflowBatchProgressUrl,
+  buildAgentImageflowBatchManifestUrl,
   buildAgentImageflowAdminLoginUrl,
   buildAgentImageflowAdminLogoutUrl,
   buildAgentImageflowAdminMeUrl,
   buildAgentImageflowCampaignsUrl,
   buildAgentImageflowCampaignUrl,
+  buildAgentImageflowBatchStorySummaryUrl,
   buildAgentImageflowInputFilesUrl,
   buildAgentImageflowProjectUrl,
   buildAgentImageflowProjectsUrl,
   buildAgentImageflowProviderProfileUrl,
+  buildAgentImageflowProjectVisualContextUrl,
   buildAgentImageflowQualityProfileUrl,
+  buildAgentImageflowSceneRegenerationsUrl,
   buildAgentImageflowRecentAssetsUrl,
   buildAgentImageflowStorageGovernanceUrl,
   buildAgentImageflowStorageIntegrityUrl,
@@ -25,11 +30,18 @@ import {
   normalizeAgentImageflowAssetResponse,
   normalizeAgentImageflowAssetListResponse,
   normalizeAgentImageflowAssetStatus,
+  normalizeAgentImageflowBatchStorySummaryResponse,
   normalizeAgentImageflowTaskResponse,
   normalizeAgentImageflowApiBaseUrl,
+  getAgentImageflowBatchManifest,
+  regenerateAgentImageflowSceneTask,
 } from './agentImageflowApi'
 
 describe('agentImageflowApi', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('normalizes the service base URL', () => {
     expect(normalizeAgentImageflowApiBaseUrl('http://localhost:8081///')).toBe('http://localhost:8081')
     expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://localhost:8081')
@@ -47,6 +59,8 @@ describe('agentImageflowApi', () => {
     expect(buildAgentImageflowTaskStatusUrl('http://localhost:8081', 'task_1')).toBe('http://localhost:8081/api/tasks/task_1')
     expect(buildAgentImageflowTaskAttemptsUrl('http://localhost:8081', 'task_1')).toBe('http://localhost:8081/api/tasks/task_1/attempts')
     expect(buildAgentImageflowAssetUrl('http://localhost:8081', 'asset_1')).toBe('http://localhost:8081/api/assets/asset_1')
+    expect(buildAgentImageflowAssetReviewUrl('http://localhost:8081', 'asset_1', 'select')).toBe('http://localhost:8081/api/assets/asset_1/approve')
+    expect(buildAgentImageflowAssetReviewUrl('http://localhost:8081', 'asset_1', 'reject')).toBe('http://localhost:8081/api/assets/asset_1/reject')
     expect(buildAgentImageflowAdminLoginUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/login')
     expect(buildAgentImageflowAdminMeUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/me')
     expect(buildAgentImageflowAdminLogoutUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/logout')
@@ -102,6 +116,36 @@ describe('agentImageflowApi', () => {
       batchId: 'batch_1',
       limit: 50,
     })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-progress?session_id=session_1&batch_id=batch_1&limit=50')
+    expect(buildAgentImageflowBatchManifestUrl('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      sessionId: 'session_1',
+      batchId: 'batch_1',
+      storyId: 'story_1',
+      source: 'codex',
+      status: 'completed',
+      includeSetup: true,
+      limit: 100,
+      selectedOnly: false,
+      includeRejected: true,
+    })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-manifest?session_id=session_1&batch_id=batch_1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=100&selected_only=false&include_rejected=true')
+    expect(buildAgentImageflowBatchStorySummaryUrl('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      sessionId: 'session_1',
+      batchId: 'batch_1',
+      storyId: 'story_1',
+      source: 'codex',
+      status: 'completed',
+      includeSetup: true,
+      limit: 100,
+    })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-summary?session_id=session_1&batch_id=batch_1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=100')
+    expect(buildAgentImageflowSceneRegenerationsUrl('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/scene-regenerations')
     expect(buildAgentImageflowQualityProfileUrl('http://localhost:8081/', {
       workspaceId: 'ws_default',
       projectId: 'prj_xhs_anime',
@@ -110,6 +154,10 @@ describe('agentImageflowApi', () => {
       workspaceId: 'ws_default',
       projectId: 'prj_xhs_anime',
     })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/provider-profile')
+    expect(buildAgentImageflowProjectVisualContextUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+    })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/visual-context')
     expect(buildAgentImageflowStorageGovernanceUrl('http://localhost:8081/', {
       workspaceId: 'ws_default',
       projectId: 'prj_xhs_anime',
@@ -181,5 +229,168 @@ describe('agentImageflowApi', () => {
         metadata_url: '/metadata-b',
       },
     }])[0].status).toBe('selected')
+
+    expect(normalizeAgentImageflowBatchStorySummaryResponse({
+      generated_at: '2026-06-22T00:00:00Z',
+      project_id: 'prj_xhs_anime',
+      campaign_id: 'cmp_7day_cover',
+      counts: {
+        story_count: 1,
+        scene_count: 1,
+        scene_with_selected_count: 1,
+        scene_missing_selected_count: 0,
+        task_count: 1,
+        queued_count: 0,
+        running_count: 0,
+        succeeded_count: 1,
+        partial_count: 0,
+        failed_count: 0,
+        retrying_count: 0,
+        asset_count: 1,
+        generated_asset_count: 0,
+        selected_asset_count: 1,
+        rejected_asset_count: 0,
+        attempt_count: 1,
+        excluded_setup_task_count: 0,
+      },
+      stories: [],
+      scenes: [{
+        story_id: 'story_1',
+        scene_id: 'scene_001',
+        status: 'completed',
+        counts: {
+          task_count: 1,
+          succeeded_count: 1,
+          failed_count: 0,
+          asset_count: 1,
+          selected_asset_count: 1,
+          rejected_asset_count: 0,
+          attempt_count: 1,
+        },
+        tasks: [],
+        assets: [{
+          asset_id: 'asset_3',
+          task_id: 'task_1',
+          status: 'approved',
+          download_url: '/original',
+          thumbnail_url: '/thumbnail',
+          metadata_url: '/metadata',
+        }],
+      }],
+    }).scenes[0].assets[0].status).toBe('selected')
+  })
+
+  it('posts a scene regeneration payload to the project campaign action URL', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      task_id: 'task_new',
+      status: 'queued',
+      regenerated_from_task_id: 'task_old',
+      regenerate_no: 2,
+      project_id: 'prj_xhs_anime',
+      campaign_id: 'cmp_7day_cover',
+      session_id: 'session_1',
+      batch_id: 'batch_1',
+      story_id: 'story_1',
+      scene_id: 'scene_001',
+      copied_visual_context_snapshot: {
+        character_ids: ['dog_mochi'],
+        reference_asset_ids: ['asset_ref'],
+        prompt_recipe_id: 'pet_story_cover',
+        character_count: 1,
+        reference_count: 1,
+        has_prompt_recipe: true,
+      },
+      warnings: [{
+        code: 'selected_asset_preserved',
+        message: 'Existing selected assets were not changed.',
+      }],
+    }), { status: 200 }))
+
+    const response = await regenerateAgentImageflowSceneTask('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      apiKey: 'project-secret',
+    }, {
+      source_task_id: 'task_old',
+      regenerate_reason: 'scene failed',
+      created_by: 'web',
+    })
+
+    expect(response.task_id).toBe('task_new')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/scene-regenerations')
+    expect(init).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': 'project-secret',
+      },
+    })
+    expect(JSON.parse(String(init?.body))).toEqual({
+      source_task_id: 'task_old',
+      regenerate_reason: 'scene failed',
+      created_by: 'web',
+    })
+  })
+
+  it('gets a batch manifest with auth headers on the project campaign URL', async () => {
+    const manifest = {
+      generated_at: '2026-06-22T00:00:00Z',
+      project_id: 'prj_xhs_anime',
+      campaign_id: 'cmp_7day_cover',
+      session_id: 'session_1',
+      batch_id: 'batch_1',
+      selected_only: true,
+      include_rejected: false,
+      counts: { asset_count: 1 },
+      tasks: [],
+      assets: [{
+        asset_id: 'asset_1',
+        task_id: 'task_1',
+        story_id: 'story_1',
+        scene_id: 'scene_001',
+        status: 'approved',
+        provider: 'mock',
+        model: 'mock-image',
+        prompt: 'pet cafe',
+        download_url: '/api/assets/asset_1/original',
+        thumbnail_url: '/api/assets/asset_1/thumbnail',
+        metadata_url: '/api/assets/asset_1/metadata',
+        target_path: 'stories/story_1/scene_001.png',
+        created_at: '2026-06-22T00:00:00Z',
+        visual_context: {
+          character_ids: ['dog_mochi'],
+        },
+      }],
+      scenes: [],
+      stories: [],
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    const response = await getAgentImageflowBatchManifest('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      apiKey: 'project-secret',
+    }, {
+      sessionId: 'session_1',
+      selectedOnly: true,
+      includeRejected: false,
+    })
+
+    expect(response.assets[0].status).toBe('selected')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-manifest?session_id=session_1&selected_only=true&include_rejected=false')
+    expect(init).toMatchObject({
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'X-API-Key': 'project-secret',
+      },
+    })
   })
 })

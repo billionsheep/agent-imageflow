@@ -182,6 +182,262 @@ func (s *Service) GetBatchProgress(ctx context.Context, query domain.BatchProgre
 	return s.store.GetBatchProgress(ctx, query)
 }
 
+func (s *Service) GetBatchStorySummary(ctx context.Context, query domain.BatchStorySummaryQuery) (domain.BatchStorySummaryResponse, error) {
+	return s.store.GetBatchStorySummary(ctx, query)
+}
+
+func (s *Service) GetBatchManifest(ctx context.Context, query domain.BatchManifestQuery) (domain.BatchManifestResponse, error) {
+	summary, err := s.GetBatchStorySummary(ctx, query.BatchStorySummaryQuery)
+	if err != nil {
+		return domain.BatchManifestResponse{}, err
+	}
+	return buildBatchManifest(summary, query), nil
+}
+
+func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.BatchManifestQuery) domain.BatchManifestResponse {
+	manifest := domain.BatchManifestResponse{
+		GeneratedAt:     time.Now().UTC(),
+		ProjectID:       summary.ProjectID,
+		CampaignID:      summary.CampaignID,
+		SessionID:       summary.SessionID,
+		BatchID:         summary.BatchID,
+		Source:          summary.Source,
+		StoryID:         summary.StoryID,
+		SelectedOnly:    query.SelectedOnly,
+		IncludeRejected: query.IncludeRejected,
+		Stories:         summary.Stories,
+		Tasks:           []domain.BatchManifestTask{},
+		Assets:          []domain.BatchManifestAsset{},
+		Scenes:          []domain.BatchManifestScene{},
+	}
+	manifest.Counts = summary.Counts
+	manifest.Counts.AssetCount = 0
+	manifest.Counts.GeneratedAssetCount = 0
+	manifest.Counts.SelectedAssetCount = 0
+	manifest.Counts.RejectedAssetCount = 0
+	manifest.Counts.StoryCount = len(summary.Stories)
+	manifest.Counts.SceneCount = len(summary.Scenes)
+	manifest.Counts.SceneWithSelectedCount = 0
+	manifest.Counts.SceneMissingSelectedCount = 0
+	manifest.Counts.TaskCount = 0
+	manifest.Counts.QueuedCount = 0
+	manifest.Counts.RunningCount = 0
+	manifest.Counts.SucceededCount = 0
+	manifest.Counts.PartialCount = 0
+	manifest.Counts.FailedCount = 0
+	manifest.Counts.RetryingCount = 0
+	manifest.Counts.AttemptCount = 0
+
+	for _, scene := range summary.Scenes {
+		if scene.PrimarySelectedAssetID != "" {
+			manifest.Counts.SceneWithSelectedCount++
+		} else {
+			manifest.Counts.SceneMissingSelectedCount++
+		}
+		manifestScene := domain.BatchManifestScene{
+			StoryID:                scene.StoryID,
+			SceneID:                scene.SceneID,
+			Status:                 scene.Status,
+			TargetPath:             scene.TargetPath,
+			LatestTaskID:           scene.LatestTaskID,
+			PrimarySelectedAssetID: scene.PrimarySelectedAssetID,
+			RegenerationCount:      scene.RegenerationCount,
+			AssetIDs:               []string{},
+			SelectedAssetIDs:       []string{},
+			TaskIDs:                []string{},
+			VisualContext:          scene.VisualContext,
+		}
+		for _, task := range scene.Tasks {
+			manifest.Tasks = append(manifest.Tasks, domain.BatchManifestTask{
+				TaskID:                task.TaskID,
+				StoryID:               scene.StoryID,
+				SceneID:               scene.SceneID,
+				Status:                task.Status,
+				AssetCount:            task.AssetCount,
+				AttemptCount:          task.AttemptCount,
+				Retrying:              task.Retrying,
+				ErrorStage:            task.ErrorStage,
+				ErrorCode:             task.ErrorCode,
+				ErrorMessage:          task.ErrorMessage,
+				CreatedAt:             task.CreatedAt,
+				UpdatedAt:             task.UpdatedAt,
+				RegeneratedFromTaskID: firstNonEmpty(task.RegeneratedFromTaskID, scene.RegeneratedFromTaskID),
+				RegenerateNo:          task.RegenerateNo,
+			})
+			manifestScene.TaskIDs = append(manifestScene.TaskIDs, task.TaskID)
+			addBatchManifestTaskCounts(&manifest.Counts, task)
+		}
+		for _, asset := range scene.Assets {
+			if !batchManifestIncludesAsset(asset.Status, query.SelectedOnly, query.IncludeRejected) {
+				continue
+			}
+			manifestAsset := domain.BatchManifestAsset{
+				AssetID:       asset.AssetID,
+				TaskID:        asset.TaskID,
+				StoryID:       scene.StoryID,
+				SceneID:       scene.SceneID,
+				Status:        asset.Status,
+				Provider:      asset.Provider,
+				Model:         asset.Model,
+				Prompt:        asset.Prompt,
+				DownloadURL:   asset.DownloadURL,
+				ThumbnailURL:  asset.ThumbnailURL,
+				MetadataURL:   asset.MetadataURL,
+				TargetPath:    firstNonEmpty(asset.TargetPath, scene.TargetPath),
+				CreatedAt:     asset.CreatedAt,
+				VisualContext: scene.VisualContext,
+			}
+			manifest.Assets = append(manifest.Assets, manifestAsset)
+			manifestScene.AssetIDs = append(manifestScene.AssetIDs, asset.AssetID)
+			if asset.Status == "selected" {
+				manifestScene.SelectedAssetIDs = append(manifestScene.SelectedAssetIDs, asset.AssetID)
+			}
+			addBatchManifestAssetCounts(&manifest.Counts, asset.Status)
+		}
+		manifest.Scenes = append(manifest.Scenes, manifestScene)
+	}
+	return manifest
+}
+
+func addBatchManifestTaskCounts(counts *domain.BatchManifestCounts, task domain.BatchStorySummaryTask) {
+	counts.TaskCount++
+	counts.AttemptCount += task.AttemptCount
+	if task.Retrying {
+		counts.RetryingCount++
+	}
+	switch task.Status {
+	case domain.TaskQueued:
+		counts.QueuedCount++
+	case domain.TaskRunning:
+		counts.RunningCount++
+	case domain.TaskCompleted:
+		counts.SucceededCount++
+	case domain.TaskPartiallyCompleted:
+		counts.PartialCount++
+	case domain.TaskFailed, domain.TaskEnqueueFailed:
+		counts.FailedCount++
+	}
+}
+
+func batchManifestIncludesAsset(status string, selectedOnly, includeRejected bool) bool {
+	switch {
+	case selectedOnly:
+		return status == "selected"
+	case includeRejected:
+		return status == "generated" || status == "selected" || status == domain.AssetRejected
+	default:
+		return status == "generated" || status == "selected"
+	}
+}
+
+func addBatchManifestAssetCounts(counts *domain.BatchManifestCounts, status string) {
+	counts.AssetCount++
+	switch status {
+	case "generated":
+		counts.GeneratedAssetCount++
+	case "selected":
+		counts.SelectedAssetCount++
+	case domain.AssetRejected:
+		counts.RejectedAssetCount++
+	}
+}
+
+func (s *Service) RegenerateSceneTask(ctx context.Context, scope domain.Scope, req domain.SceneRegenerateRequest) (domain.SceneRegenerateResponse, error) {
+	scope.ProjectID = strings.TrimSpace(scope.ProjectID)
+	scope.CampaignID = strings.TrimSpace(scope.CampaignID)
+	if scope.ProjectID == "" || scope.CampaignID == "" {
+		return domain.SceneRegenerateResponse{}, fmt.Errorf("project_id and campaign_id are required")
+	}
+	if strings.TrimSpace(req.ProjectID) != "" && strings.TrimSpace(req.ProjectID) != scope.ProjectID {
+		return domain.SceneRegenerateResponse{}, fmt.Errorf("request project_id does not match route project_id")
+	}
+	if strings.TrimSpace(req.CampaignID) != "" && strings.TrimSpace(req.CampaignID) != scope.CampaignID {
+		return domain.SceneRegenerateResponse{}, fmt.Errorf("request campaign_id does not match route campaign_id")
+	}
+
+	warnings := []domain.SceneRegenerateWarning{{
+		Code:    "selected_asset_preserved",
+		Message: "Existing selected and rejected assets were not changed.",
+	}}
+	sourceTaskID := strings.TrimSpace(req.SourceTaskID)
+	resolvedTaskSelector := "source_task_id"
+	var source domain.Task
+	var err error
+	if sourceTaskID != "" {
+		source, err = s.store.GetSceneRegenerationSourceTask(ctx, sourceTaskID)
+	} else {
+		if req.SceneIdentity == nil {
+			return domain.SceneRegenerateResponse{}, fmt.Errorf("source_task_id or scene_identity is required")
+		}
+		identity := normalizeSceneIdentity(*req.SceneIdentity)
+		if err := validateSceneIdentity(identity); err != nil {
+			return domain.SceneRegenerateResponse{}, err
+		}
+		if identity.TaskSelector == "" {
+			identity.TaskSelector = "latest"
+		}
+		if identity.TaskSelector != "latest" {
+			return domain.SceneRegenerateResponse{}, fmt.Errorf("unsupported scene task_selector %q", identity.TaskSelector)
+		}
+		resolvedTaskSelector = identity.TaskSelector
+		source, err = s.store.ResolveLatestSceneTask(ctx, scope.ProjectID, scope.CampaignID, identity)
+		if err == nil {
+			warnings = append(warnings, domain.SceneRegenerateWarning{
+				Code:    "scene_identity_resolved",
+				Message: "scene_identity was resolved to latest task " + source.ID + ".",
+			})
+		}
+	}
+	if err != nil {
+		return domain.SceneRegenerateResponse{}, err
+	}
+	if source.ProjectID != scope.ProjectID || source.CampaignID != scope.CampaignID {
+		return domain.SceneRegenerateResponse{}, fmt.Errorf("source task does not belong to project_id=%s campaign_id=%s", scope.ProjectID, scope.CampaignID)
+	}
+	scope.WorkspaceID = source.WorkspaceID
+
+	sourceIdentity, err := sceneIdentityFromTask(source)
+	if err != nil {
+		return domain.SceneRegenerateResponse{}, err
+	}
+	sourceIdentity.TaskSelector = resolvedTaskSelector
+	count, err := s.store.CountSceneRegenerations(ctx, scope.ProjectID, scope.CampaignID, sourceIdentity)
+	if err != nil {
+		return domain.SceneRegenerateResponse{}, err
+	}
+	req.SourceTaskID = source.ID
+	req.ProjectID = scope.ProjectID
+	req.CampaignID = scope.CampaignID
+	req.SceneIdentity = &sourceIdentity
+	req.RegenerationNumber = count + 1
+	if strings.TrimSpace(req.RequestSource) == "" {
+		req.RequestSource = "rest"
+	}
+
+	built, err := buildSceneRegenerationCreateTaskRequest(source, req)
+	if err != nil {
+		return domain.SceneRegenerateResponse{}, err
+	}
+	task, err := s.CreateTask(ctx, scope, built.Request)
+	if err != nil {
+		return domain.SceneRegenerateResponse{}, err
+	}
+	return domain.SceneRegenerateResponse{
+		TaskID:                      task.ID,
+		Status:                      task.Status,
+		RegeneratedFromTaskID:       source.ID,
+		RegenerateNo:                req.RegenerationNumber,
+		ProjectID:                   scope.ProjectID,
+		CampaignID:                  scope.CampaignID,
+		SessionID:                   built.SceneIdentity.SessionID,
+		BatchID:                     built.SceneIdentity.BatchID,
+		StoryID:                     built.SceneIdentity.StoryID,
+		SceneID:                     built.SceneIdentity.SceneID,
+		CopiedVisualContextSnapshot: built.CopiedVisualContextSnapshot,
+		Warnings:                    warnings,
+	}, nil
+}
+
 func (s *Service) GetProjectQualityProfile(ctx context.Context, workspaceID, projectID string) (domain.ProjectQualityProfileResponse, error) {
 	profile, err := s.store.GetProjectQualityProfile(ctx, workspaceID, projectID)
 	if err != nil {
@@ -271,6 +527,14 @@ func (s *Service) GetAsset(ctx context.Context, assetID string) (domain.AssetRes
 		return domain.AssetResponse{}, err
 	}
 	return s.assetResponse(item), nil
+}
+
+func (s *Service) GetAssetMetadata(ctx context.Context, assetID string) (domain.AssetMetadataResponse, error) {
+	item, err := s.store.GetAssetWithVersion(ctx, assetID)
+	if err != nil {
+		return domain.AssetMetadataResponse{}, err
+	}
+	return s.assetMetadataResponse(item), nil
 }
 
 func (s *Service) GetAssetFile(ctx context.Context, assetID, kind string) (string, string, error) {
@@ -565,7 +829,7 @@ func (s *Service) taskResponse(ctx context.Context, task domain.Task) (domain.Ta
 			AssetID:      item.ID,
 			Status:       item.Status,
 			ThumbnailURL: s.assetURL(item.ID, "thumbnail"),
-			MetadataURL:  s.assetURL(item.ID, ""),
+			MetadataURL:  s.assetURL(item.ID, "metadata"),
 		})
 	}
 	return response, nil
@@ -590,7 +854,31 @@ func (s *Service) assetResponse(item domain.AssetWithVersion) domain.AssetRespon
 			LocalPath:    item.Version.FilePath,
 			DownloadURL:  s.assetURL(item.ID, "original"),
 			ThumbnailURL: s.assetURL(item.ID, "thumbnail"),
-			MetadataURL:  s.assetURL(item.ID, ""),
+			MetadataURL:  s.assetURL(item.ID, "metadata"),
+		},
+		CreatedAt: item.CreatedAt,
+	}
+}
+
+func (s *Service) assetMetadataResponse(item domain.AssetWithVersion) domain.AssetMetadataResponse {
+	return domain.AssetMetadataResponse{
+		AssetID:        item.ID,
+		WorkspaceID:    item.WorkspaceID,
+		ProjectID:      item.ProjectID,
+		CampaignID:     item.CampaignID,
+		TaskID:         item.TaskID,
+		CurrentVersion: item.Version.Version,
+		Status:         item.Status,
+		Hash:           item.Version.Hash,
+		Provider:       item.Version.Provider,
+		Model:          item.Version.Model,
+		Prompt:         item.Version.Prompt,
+		ParametersJSON: item.Version.ParametersJSON,
+		MetadataJSON:   domain.NormalizeMetadataJSON(metadataJSONFromStructuredInput(item.TaskStructuredInputJSON)),
+		Delivery: domain.PublicDeliveryInfo{
+			DownloadURL:  s.assetURL(item.ID, "original"),
+			ThumbnailURL: s.assetURL(item.ID, "thumbnail"),
+			MetadataURL:  s.assetURL(item.ID, "metadata"),
 		},
 		CreatedAt: item.CreatedAt,
 	}
@@ -930,4 +1218,443 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	}
 	hash := sha256.Sum256(structured)
 	return req, structured, hex.EncodeToString(hash[:]), nil
+}
+
+type sceneRegenerationBuildResult struct {
+	Request                     domain.CreateTaskRequest
+	SceneIdentity               domain.SceneIdentity
+	CopiedVisualContextSnapshot domain.SceneRegenerateVisualContextSnapshot
+}
+
+type sceneRegenerationSourceInput struct {
+	Title                    string                  `json:"title"`
+	Purpose                  string                  `json:"purpose"`
+	Prompt                   string                  `json:"prompt"`
+	NegativePrompt           string                  `json:"negative_prompt"`
+	StylePreset              string                  `json:"style_preset"`
+	PromptTemplate           string                  `json:"prompt_template"`
+	TemplateVariables        map[string]any          `json:"template_variables"`
+	ReferenceImages          []domain.ReferenceImage `json:"reference_images"`
+	CharacterIDs             []string                `json:"character_ids"`
+	ReferenceAssetIDs        []string                `json:"reference_asset_ids"`
+	PromptRecipeID           string                  `json:"prompt_recipe_id"`
+	UseProjectVisualContext  bool                    `json:"use_project_visual_context"`
+	MaskImage                *domain.MaskImage       `json:"mask_image"`
+	BestOfConfig             *domain.BestOfConfig    `json:"best_of_config"`
+	GenerationConfig         json.RawMessage         `json:"generation_config"`
+	UseProjectQualityProfile bool                    `json:"use_project_quality_profile"`
+	AspectRatio              string                  `json:"aspect_ratio"`
+	OutputFormat             string                  `json:"output_format"`
+	RequestedCount           int                     `json:"requested_count"`
+	Provider                 string                  `json:"provider"`
+	SelectionMode            string                  `json:"selection_mode"`
+	ReviewRequired           bool                    `json:"review_required"`
+	MetadataJSON             json.RawMessage         `json:"metadata_json"`
+}
+
+func buildSceneRegenerationCreateTaskRequest(source domain.Task, req domain.SceneRegenerateRequest) (sceneRegenerationBuildResult, error) {
+	input := sceneRegenerationInputFromTask(source)
+	metadata, err := sceneRegenerationMetadataMap(input.MetadataJSON)
+	if err != nil {
+		return sceneRegenerationBuildResult{}, err
+	}
+	identity, err := sceneIdentityFromMetadata(metadata)
+	if err != nil {
+		return sceneRegenerationBuildResult{}, err
+	}
+
+	createReq := domain.CreateTaskRequest{
+		Title:                    input.Title,
+		Purpose:                  input.Purpose,
+		Prompt:                   input.Prompt,
+		NegativePrompt:           input.NegativePrompt,
+		StylePreset:              input.StylePreset,
+		PromptTemplate:           input.PromptTemplate,
+		TemplateVariables:        input.TemplateVariables,
+		ReferenceImages:          cloneReferenceImages(input.ReferenceImages),
+		CharacterIDs:             append([]string(nil), input.CharacterIDs...),
+		ReferenceAssetIDs:        append([]string(nil), input.ReferenceAssetIDs...),
+		PromptRecipeID:           input.PromptRecipeID,
+		UseProjectVisualContext:  input.UseProjectVisualContext,
+		MaskImage:                input.MaskImage,
+		BestOfConfig:             input.BestOfConfig,
+		GenerationConfig:         cloneRawMessage(input.GenerationConfig),
+		UseProjectQualityProfile: input.UseProjectQualityProfile,
+		AspectRatio:              input.AspectRatio,
+		OutputFormat:             input.OutputFormat,
+		RequestedCount:           input.RequestedCount,
+		Provider:                 input.Provider,
+		SelectionMode:            input.SelectionMode,
+		ReviewRequired:           input.ReviewRequired,
+	}
+	overrides, err := applySceneRegenerationOverrides(&createReq, req.Overrides)
+	if err != nil {
+		return sceneRegenerationBuildResult{}, err
+	}
+
+	metadata["regenerated_from_task_id"] = source.ID
+	metadata["regenerate_no"] = req.RegenerationNumber
+	if reason := strings.TrimSpace(req.RegenerateReason); reason != "" {
+		metadata["regenerate_reason"] = reason
+	}
+	if requestSource := strings.TrimSpace(req.RequestSource); requestSource != "" {
+		metadata["regenerate_request_source"] = requestSource
+	}
+	if actor := strings.TrimSpace(req.CreatedBy); actor != "" {
+		metadata["regenerated_by"] = actor
+	}
+	metadata["regenerated_at"] = time.Now().UTC().Format(time.RFC3339)
+	metadata["regeneration_overrides"] = overrides
+	metadata["source_scene_identity"] = map[string]any{
+		"session_id":     identity.SessionID,
+		"batch_id":       identity.BatchID,
+		"story_id":       identity.StoryID,
+		"scene_id":       identity.SceneID,
+		"source":         identity.Source,
+		"task_selector":  firstNonEmpty(sceneIdentityTaskSelector(req), "source_task_id"),
+		"source_task_id": source.ID,
+	}
+	if root := regenerationRootTaskID(metadata); root != "" {
+		metadata["regeneration_root_task_id"] = root
+	}
+	metadataRaw, err := json.Marshal(metadata)
+	if err != nil {
+		return sceneRegenerationBuildResult{}, err
+	}
+	createReq.MetadataJSON = metadataRaw
+
+	return sceneRegenerationBuildResult{
+		Request:                     createReq,
+		SceneIdentity:               identity,
+		CopiedVisualContextSnapshot: sceneRegenerationVisualSnapshot(createReq),
+	}, nil
+}
+
+func sceneIdentityTaskSelector(req domain.SceneRegenerateRequest) string {
+	if req.SceneIdentity == nil {
+		return ""
+	}
+	return strings.TrimSpace(req.SceneIdentity.TaskSelector)
+}
+
+func sceneRegenerationInputFromTask(task domain.Task) sceneRegenerationSourceInput {
+	var input sceneRegenerationSourceInput
+	if len(task.StructuredInputJSON) > 0 {
+		_ = json.Unmarshal(task.StructuredInputJSON, &input)
+	}
+	if input.Title == "" {
+		input.Title = task.Title
+	}
+	if input.Purpose == "" {
+		input.Purpose = task.Purpose
+	}
+	if input.Prompt == "" {
+		input.Prompt = task.Prompt
+	}
+	if input.NegativePrompt == "" {
+		input.NegativePrompt = task.NegativePrompt
+	}
+	if input.StylePreset == "" {
+		input.StylePreset = task.StylePreset
+	}
+	if input.AspectRatio == "" {
+		input.AspectRatio = task.AspectRatio
+	}
+	if input.OutputFormat == "" {
+		input.OutputFormat = task.OutputFormat
+	}
+	if input.Provider == "" {
+		input.Provider = task.Provider
+	}
+	if input.SelectionMode == "" {
+		input.SelectionMode = task.SelectionMode
+	}
+	if input.RequestedCount == 0 {
+		input.RequestedCount = task.RequestedCount
+	}
+	if len(input.MetadataJSON) == 0 {
+		input.MetadataJSON = metadataJSONFromStructuredInput(task.StructuredInputJSON)
+	}
+	return input
+}
+
+func sceneIdentityFromTask(task domain.Task) (domain.SceneIdentity, error) {
+	input := sceneRegenerationInputFromTask(task)
+	metadata, err := sceneRegenerationMetadataMap(input.MetadataJSON)
+	if err != nil {
+		return domain.SceneIdentity{}, err
+	}
+	return sceneIdentityFromMetadata(metadata)
+}
+
+func sceneIdentityFromMetadata(metadata map[string]any) (domain.SceneIdentity, error) {
+	identity := domain.SceneIdentity{
+		SessionID: stringFromMetadata(metadata, "session_id"),
+		BatchID:   stringFromMetadata(metadata, "batch_id"),
+		StoryID:   stringFromMetadata(metadata, "story_id"),
+		SceneID:   stringFromMetadata(metadata, "scene_id"),
+		Source:    stringFromMetadata(metadata, "source"),
+	}
+	if err := validateSceneIdentity(identity); err != nil {
+		return domain.SceneIdentity{}, err
+	}
+	return identity, nil
+}
+
+func validateSceneIdentity(identity domain.SceneIdentity) error {
+	if strings.TrimSpace(identity.SessionID) == "" ||
+		strings.TrimSpace(identity.BatchID) == "" ||
+		strings.TrimSpace(identity.StoryID) == "" ||
+		strings.TrimSpace(identity.SceneID) == "" {
+		return fmt.Errorf("source task metadata_json must include session_id, batch_id, story_id and scene_id")
+	}
+	return nil
+}
+
+func normalizeSceneIdentity(identity domain.SceneIdentity) domain.SceneIdentity {
+	identity.SessionID = strings.TrimSpace(identity.SessionID)
+	identity.BatchID = strings.TrimSpace(identity.BatchID)
+	identity.StoryID = strings.TrimSpace(identity.StoryID)
+	identity.SceneID = strings.TrimSpace(identity.SceneID)
+	identity.Source = strings.TrimSpace(identity.Source)
+	identity.TaskSelector = strings.TrimSpace(identity.TaskSelector)
+	return identity
+}
+
+func sceneRegenerationMetadataMap(raw json.RawMessage) (map[string]any, error) {
+	var metadata map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &metadata) != nil || metadata == nil {
+		return nil, fmt.Errorf("source task metadata_json must include session_id, batch_id, story_id and scene_id")
+	}
+	return metadata, nil
+}
+
+func stringFromMetadata(metadata map[string]any, key string) string {
+	value, ok := metadata[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func applySceneRegenerationOverrides(req *domain.CreateTaskRequest, overrides domain.SceneRegenerateOverrides) (map[string]any, error) {
+	applied := map[string]any{}
+	if overrides.Prompt != nil {
+		req.Prompt = strings.TrimSpace(*overrides.Prompt)
+		applied["prompt"] = req.Prompt
+	}
+	if overrides.NegativePrompt != nil {
+		req.NegativePrompt = strings.TrimSpace(*overrides.NegativePrompt)
+		applied["negative_prompt"] = req.NegativePrompt
+	}
+	if overrides.PromptRecipeID != nil {
+		req.PromptRecipeID = strings.TrimSpace(*overrides.PromptRecipeID)
+		applied["prompt_recipe_id"] = req.PromptRecipeID
+	}
+	if overrides.CharacterIDs != nil {
+		req.CharacterIDs = append([]string(nil), overrides.CharacterIDs...)
+		applied["character_ids"] = append([]string(nil), overrides.CharacterIDs...)
+	}
+	if overrides.ReferenceAssetIDs != nil {
+		req.ReferenceAssetIDs = append([]string(nil), overrides.ReferenceAssetIDs...)
+		applied["reference_asset_ids"] = append([]string(nil), overrides.ReferenceAssetIDs...)
+	}
+	if overrides.ReferenceImages != nil {
+		if err := validateSafeReferenceImages(overrides.ReferenceImages); err != nil {
+			return nil, err
+		}
+		req.ReferenceImages = cloneReferenceImages(overrides.ReferenceImages)
+		applied["reference_images"] = cloneReferenceImages(overrides.ReferenceImages)
+	}
+	if overrides.QualityProfileID != nil {
+		qualityProfileID := strings.TrimSpace(*overrides.QualityProfileID)
+		if qualityProfileID != "" {
+			req.UseProjectQualityProfile = true
+		}
+		applied["quality_profile_id"] = qualityProfileID
+	}
+	if len(overrides.GenerationConfig) > 0 {
+		merged, err := mergeGenerationConfig(req.GenerationConfig, overrides.GenerationConfig)
+		if err != nil {
+			return nil, err
+		}
+		req.GenerationConfig = merged
+		var safe map[string]any
+		_ = json.Unmarshal(overrides.GenerationConfig, &safe)
+		applied["generation_config"] = safe
+	}
+	if overrides.RequestedCount != nil {
+		req.RequestedCount = *overrides.RequestedCount
+		applied["requested_count"] = req.RequestedCount
+	}
+	if overrides.SelectionMode != nil {
+		req.SelectionMode = strings.TrimSpace(*overrides.SelectionMode)
+		applied["selection_mode"] = req.SelectionMode
+	}
+	if overrides.AspectRatio != nil {
+		req.AspectRatio = strings.TrimSpace(*overrides.AspectRatio)
+		applied["aspect_ratio"] = req.AspectRatio
+	}
+	if overrides.OutputFormat != nil {
+		req.OutputFormat = strings.TrimSpace(*overrides.OutputFormat)
+		applied["output_format"] = req.OutputFormat
+	}
+	if overrides.Provider != nil {
+		req.Provider = strings.TrimSpace(*overrides.Provider)
+		applied["provider"] = req.Provider
+	}
+	if overrides.Model != nil {
+		model := strings.TrimSpace(*overrides.Model)
+		merged, err := setGenerationConfigString(req.GenerationConfig, "model", model)
+		if err != nil {
+			return nil, err
+		}
+		req.GenerationConfig = merged
+		applied["model"] = model
+	}
+	return applied, nil
+}
+
+func mergeGenerationConfig(base, override json.RawMessage) (json.RawMessage, error) {
+	baseMap, err := generationConfigMap(base)
+	if err != nil {
+		return nil, err
+	}
+	overrideMap, err := generationConfigMap(override)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSafeJSONMap(overrideMap); err != nil {
+		return nil, err
+	}
+	for key, value := range overrideMap {
+		baseMap[key] = value
+	}
+	return json.Marshal(baseMap)
+}
+
+func setGenerationConfigString(raw json.RawMessage, key, value string) (json.RawMessage, error) {
+	config, err := generationConfigMap(raw)
+	if err != nil {
+		return nil, err
+	}
+	if value == "" {
+		delete(config, key)
+	} else {
+		config[key] = value
+	}
+	return json.Marshal(config)
+}
+
+func generationConfigMap(raw json.RawMessage) (map[string]any, error) {
+	if len(raw) == 0 {
+		return map[string]any{}, nil
+	}
+	var config map[string]any
+	if err := json.Unmarshal(raw, &config); err != nil || config == nil {
+		return nil, fmt.Errorf("generation_config must be a JSON object")
+	}
+	return config, nil
+}
+
+func validateSafeJSONMap(values map[string]any) error {
+	for key, value := range values {
+		if isSensitiveOverrideKey(key) {
+			return fmt.Errorf("generation_config contains unsupported sensitive field %q", key)
+		}
+		if err := validateSafeJSONValue(key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSafeJSONValue(key string, value any) error {
+	switch typed := value.(type) {
+	case string:
+		if isLocalAbsolutePathLike(typed) {
+			return fmt.Errorf("generation_config field %q contains a local absolute path", key)
+		}
+	case []any:
+		for _, item := range typed {
+			if err := validateSafeJSONValue(key, item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		return validateSafeJSONMap(typed)
+	}
+	return nil
+}
+
+func isSensitiveOverrideKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, marker := range []string{"api_key", "provider_key", "secret", "token", "cookie", "authorization", "password"} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSafeReferenceImages(images []domain.ReferenceImage) error {
+	for _, image := range images {
+		if isLocalAbsolutePathLike(image.URL) {
+			return fmt.Errorf("reference_images may not contain local absolute paths")
+		}
+	}
+	return nil
+}
+
+func isLocalAbsolutePathLike(value string) bool {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "file:") || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, "/") {
+		return true
+	}
+	if len(value) >= 3 && value[1] == ':' && (value[2] == '\\' || value[2] == '/') {
+		return true
+	}
+	return false
+}
+
+func regenerationRootTaskID(metadata map[string]any) string {
+	if root := stringFromMetadata(metadata, "regeneration_root_task_id"); root != "" {
+		return root
+	}
+	return stringFromMetadata(metadata, "regenerated_from_task_id")
+}
+
+func sceneRegenerationVisualSnapshot(req domain.CreateTaskRequest) domain.SceneRegenerateVisualContextSnapshot {
+	snapshot := domain.SceneRegenerateVisualContextSnapshot{
+		CharacterIDs:      append([]string(nil), req.CharacterIDs...),
+		ReferenceAssetIDs: append([]string(nil), req.ReferenceAssetIDs...),
+		PromptRecipeID:    strings.TrimSpace(req.PromptRecipeID),
+		CharacterCount:    len(req.CharacterIDs),
+		ReferenceCount:    len(req.ReferenceAssetIDs),
+	}
+	snapshot.HasPromptRecipe = snapshot.PromptRecipeID != ""
+	return snapshot
+}
+
+func cloneReferenceImages(images []domain.ReferenceImage) []domain.ReferenceImage {
+	if images == nil {
+		return nil
+	}
+	copied := make([]domain.ReferenceImage, len(images))
+	copy(copied, images)
+	return copied
+}
+
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	copied := make([]byte, len(raw))
+	copy(copied, raw)
+	return json.RawMessage(copied)
 }

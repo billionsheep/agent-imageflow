@@ -104,4 +104,4 @@ docker compose exec api /app/vag task create --file /app/examples/tasks/sample-p
 
 - Changes: 完成 P1-PCTX-001 到 P1-PCTX-006。新增 `project.metadata_json.visual_context` 契约、角色卡、reference binding、prompt recipe、`CreateTask` visual context 展开、REST `GET/POST /visual-context`、CLI `vag project context get/set`、MCP create task 引用字段、provider parameters 快照和示例 JSON。
 - Verification: `go test ./...` passed；`npm --prefix web test -- --run` passed；`npm --prefix web run build` passed with existing chunk-size warning；`docker compose config --quiet` passed；Docker mock smoke 创建 `prj_pctx_smoke_1781964012 / cmp_pctx_smoke_1781964012`，CLI/REST task `task_099adb62c6c7d7cb25cb -> asset_84172190f72d61f701c2` completed/approved，MCP task `task_582c7440fd46425545cc -> asset_50d7842428660394d469` completed/approved。
-- Remaining gaps: P1-PCTX-007 examples 已完成；P1-PCTX-008 到 P1-PCTX-009 仍待后续推进，包括最小 Web project context 面板和萌宠故事多 scene 回归。
+- Remaining gaps at the time: P1-PCTX-007 examples 后续已完成；P1-PCTX-008 到 P1-PCTX-009 当时排在后续实施计划中。Current status: P1-PCTX-008 已在 `slice-038` 完成，P1-PCTX-009 已在 `slice-039` 完成。

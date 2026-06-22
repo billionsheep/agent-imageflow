@@ -52,6 +52,7 @@ import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
 import { getCustomQueuedImageResult } from './lib/openaiCompatibleImageApi'
+import type { OperatorReviewProductionFilters } from './lib/operatorReview'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob, validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
@@ -927,9 +928,15 @@ interface AppState {
   setLightboxImageId: (id: string | null, list?: string[]) => void
   showSettings: boolean
   showScopeManager: boolean
+  showProjectContext: boolean
+  showProductionView: boolean
+  productionViewSeed: OperatorReviewProductionFilters | null
+  projectContextReferenceAssetId: string | null
   settingsTabRequest: SettingsTab | null
   setShowSettings: (v: boolean, tab?: SettingsTab) => void
   setShowScopeManager: (v: boolean) => void
+  setShowProjectContext: (v: boolean, referenceAssetId?: string | null) => void
+  setShowProductionView: (v: boolean, seed?: OperatorReviewProductionFilters | null) => void
   supportPromptOpen: boolean
   supportPromptDismissed: boolean
   supportPromptSkippedForImportedData: boolean
@@ -1615,6 +1622,10 @@ export const useStore = create<AppState>()(
       },
       showSettings: false,
       showScopeManager: false,
+      showProjectContext: false,
+      showProductionView: false,
+      productionViewSeed: null,
+      projectContextReferenceAssetId: null,
       settingsTabRequest: null,
       setShowSettings: (showSettings, settingsTabRequest) => {
         if (showSettings) dismissAllTooltips()
@@ -1627,6 +1638,20 @@ export const useStore = create<AppState>()(
       setShowScopeManager: (showScopeManager) => {
         if (showScopeManager) dismissAllTooltips()
         set({ showScopeManager })
+      },
+      setShowProjectContext: (showProjectContext, referenceAssetId) => {
+        if (showProjectContext) dismissAllTooltips()
+        set({
+          showProjectContext,
+          projectContextReferenceAssetId: showProjectContext ? referenceAssetId ?? null : null,
+        })
+      },
+      setShowProductionView: (showProductionView, productionViewSeed) => {
+        if (showProductionView) dismissAllTooltips()
+        set({
+          showProductionView,
+          productionViewSeed: showProductionView ? productionViewSeed ?? null : null,
+        })
       },
       supportPromptOpen: false,
       supportPromptDismissed: false,
@@ -2754,6 +2779,15 @@ async function submitManagedImageflowTask() {
     ...params,
     n: Math.min(4, Math.max(1, Math.trunc(params.n || 1))),
   }
+  const characterIds = normalizedSettings.imageflowCharacterIds.filter(Boolean)
+  const referenceAssetIds = normalizedSettings.imageflowReferenceAssetIds.filter(Boolean)
+  const promptRecipeId = normalizedSettings.imageflowPromptRecipeId.trim()
+  const useProjectVisualContext = Boolean(
+    normalizedSettings.imageflowUseProjectVisualContext ||
+    characterIds.length > 0 ||
+    referenceAssetIds.length > 0 ||
+    promptRecipeId,
+  )
   const inputImageIds = uniqueIds(orderedInputImages.map((image) => image.id))
   const now = Date.now()
   const task: TaskRecord = {
@@ -2803,6 +2837,10 @@ async function submitManagedImageflowTask() {
       requested_count: taskParams.n,
       provider: requestProvider,
       reference_images: uploadedInputs.referenceImages,
+      character_ids: characterIds.length ? characterIds : undefined,
+      reference_asset_ids: referenceAssetIds.length ? referenceAssetIds : undefined,
+      prompt_recipe_id: promptRecipeId || undefined,
+      use_project_visual_context: useProjectVisualContext,
       mask_image: uploadedInputs.maskImage,
       generation_config: {
         quality: taskParams.quality,
@@ -2828,6 +2866,10 @@ async function submitManagedImageflowTask() {
         advanced_input_mode: uploadedInputs.advancedInputMode,
         selection_mode: 'auto',
         use_project_quality_profile: normalizedSettings.imageflowUseProjectQualityProfile,
+        use_project_visual_context: useProjectVisualContext,
+        character_ids: characterIds,
+        reference_asset_ids: referenceAssetIds,
+        prompt_recipe_id: promptRecipeId || undefined,
       },
     }, auth)
     const [assets, attempts] = await Promise.all([

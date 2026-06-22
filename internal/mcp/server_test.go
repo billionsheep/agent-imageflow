@@ -52,6 +52,21 @@ func TestInitializeAndToolsList(t *testing.T) {
 			t.Fatalf("tools/list missing %s in %#v", name, names)
 		}
 	}
+	for _, item := range tools {
+		tool := item.(map[string]any)
+		if tool["name"] != "list_image_assets" {
+			continue
+		}
+		schema := tool["inputSchema"].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		for _, property := range []string{"project_id", "campaign_id", "source", "session_id", "batch_id", "status", "keyword", "limit"} {
+			if _, ok := properties[property]; !ok {
+				t.Fatalf("list_image_assets schema missing %s: %#v", property, properties)
+			}
+		}
+		return
+	}
+	t.Fatalf("list_image_assets schema was not found")
 }
 
 func TestToolCallUsesDefaultsAndStructuredContent(t *testing.T) {
@@ -122,6 +137,67 @@ func TestToolCallMapsCompatibilityStatuses(t *testing.T) {
 	if !strings.Contains(text, `"status": "selected"`) || strings.Contains(text, `"status": "approved"`) {
 		t.Fatalf("text content did not use semantic status: %s", text)
 	}
+	if strings.Contains(text, "local_path") {
+		t.Fatalf("text content exposed local path: %s", text)
+	}
+	delivery := structured["delivery"].(map[string]any)
+	if _, ok := delivery["local_path"]; ok {
+		t.Fatalf("structured content exposed local path: %#v", delivery)
+	}
+}
+
+func TestListImageAssetsPassesFiltersAndDefaults(t *testing.T) {
+	service := &fakeService{}
+	server := New(service, Defaults{WorkspaceID: "ws_default", ProjectID: "prj_default", CampaignID: "cmp_default"})
+	input := `{"jsonrpc":"2.0","id":"list","method":"tools/call","params":{"name":"list_image_assets","arguments":{"source":"mcp","session_id":"session_1","batch_id":"batch_1","status":"selected","keyword":"hero","limit":24}}}` + "\n"
+
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	query := service.listQuery
+	if query.ProjectID != "prj_default" || query.CampaignID != "cmp_default" {
+		t.Fatalf("defaults were not applied to list scope: %#v", query)
+	}
+	if query.Source != "mcp" || query.SessionID != "session_1" || query.BatchID != "batch_1" {
+		t.Fatalf("metadata filters were not passed through: %#v", query)
+	}
+	if query.Status != "selected" || query.Keyword != "hero" || query.Limit != 24 {
+		t.Fatalf("list filters were not passed through: %#v", query)
+	}
+
+	response := decodeResponses(t, out.String())[0]
+	result := response["result"].(map[string]any)
+	if result["isError"] != false {
+		t.Fatalf("tool result was error: %#v", result)
+	}
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if strings.Contains(text, "local_path") {
+		t.Fatalf("list response exposed local path: %s", text)
+	}
+	assets := result["structuredContent"].([]any)
+	delivery := assets[0].(map[string]any)["delivery"].(map[string]any)
+	if _, ok := delivery["local_path"]; ok {
+		t.Fatalf("list structured content exposed local path: %#v", delivery)
+	}
+}
+
+func TestListImageAssetsAllowsExplicitScopeAndLimitPassthrough(t *testing.T) {
+	service := &fakeService{}
+	server := New(service, Defaults{ProjectID: "prj_default", CampaignID: "cmp_default"})
+	input := `{"jsonrpc":"2.0","id":"list","method":"tools/call","params":{"name":"list_image_assets","arguments":{"project_id":"prj_explicit","campaign_id":"cmp_explicit","limit":100}}}` + "\n"
+
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	query := service.listQuery
+	if query.ProjectID != "prj_explicit" || query.CampaignID != "cmp_explicit" {
+		t.Fatalf("explicit scope was not passed through: %#v", query)
+	}
+	if query.Limit != 100 {
+		t.Fatalf("limit was not passed through: %#v", query)
+	}
 }
 
 func decodeResponses(t *testing.T, output string) []map[string]any {
@@ -144,6 +220,7 @@ func decodeResponses(t *testing.T, output string) []map[string]any {
 type fakeService struct {
 	createScope   domain.Scope
 	createRequest domain.CreateTaskRequest
+	listQuery     domain.AssetListQuery
 }
 
 func (f *fakeService) CreateTask(ctx context.Context, scope domain.Scope, req domain.CreateTaskRequest) (domain.TaskResponse, error) {
@@ -184,6 +261,7 @@ func (f *fakeService) GetTask(ctx context.Context, taskID string) (domain.TaskRe
 }
 
 func (f *fakeService) ListAssets(ctx context.Context, query domain.AssetListQuery) ([]domain.AssetResponse, error) {
+	f.listQuery = query
 	return []domain.AssetResponse{fakeAsset(domain.AssetDraft)}, nil
 }
 

@@ -234,12 +234,16 @@ func routeAllowsAdminSession(parts []string, method string) bool {
 		match(parts, "api", "tasks", "*", "attempts") ||
 		match(parts, "api", "projects", "*", "campaigns", "*", "assets") ||
 		match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress") ||
+		match(parts, "api", "projects", "*", "campaigns", "*", "batch-summary") ||
+		match(parts, "api", "projects", "*", "campaigns", "*", "batch-manifest") ||
 		match(parts, "api", "assets", "*") ||
+		match(parts, "api", "assets", "*", "metadata") ||
 		match(parts, "api", "assets", "*", "original") ||
 		match(parts, "api", "assets", "*", "thumbnail")):
 		return true
 	case method == http.MethodPost && (match(parts, "api", "assets", "*", "approve") ||
-		match(parts, "api", "assets", "*", "reject")):
+		match(parts, "api", "assets", "*", "reject") ||
+		match(parts, "api", "projects", "*", "campaigns", "*", "scene-regenerations")):
 		return true
 	default:
 		return false

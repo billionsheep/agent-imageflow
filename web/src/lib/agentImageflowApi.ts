@@ -211,6 +211,67 @@ export interface AgentImageflowProviderProfileResponse {
   provider_profile: AgentImageflowProviderProfile
 }
 
+export type AgentImageflowVisualContextStatus = 'active' | 'archived' | string
+export type AgentImageflowReferencePurpose = 'character' | 'style' | 'scene' | 'prop'
+
+export interface AgentImageflowCharacterProfile {
+  id: string
+  name: string
+  status: AgentImageflowVisualContextStatus
+  updated_at?: string
+  role?: string
+  appearance?: string
+  personality?: string
+  forbidden?: string[]
+  primary_asset_id?: string
+  reference_asset_ids?: string[]
+}
+
+export interface AgentImageflowProjectReferenceBinding {
+  id: string
+  asset_id: string
+  purpose: AgentImageflowReferencePurpose
+  label?: string
+  weight?: number
+  notes?: string
+  character_id?: string
+  status: AgentImageflowVisualContextStatus
+  updated_at?: string
+}
+
+export interface AgentImageflowPromptBlock {
+  id?: string
+  role?: string
+  text: string
+}
+
+export interface AgentImageflowPromptRecipe {
+  id: string
+  name: string
+  status: AgentImageflowVisualContextStatus
+  updated_at?: string
+  prompt_blocks?: AgentImageflowPromptBlock[]
+  negative_prompt?: string
+  default_aspect_ratio?: string
+  default_output_format?: string
+  default_provider?: string
+  default_model?: string
+  generation_config?: Record<string, unknown>
+}
+
+export interface AgentImageflowProjectVisualContext {
+  characters?: AgentImageflowCharacterProfile[]
+  references?: AgentImageflowProjectReferenceBinding[]
+  prompt_recipes?: AgentImageflowPromptRecipe[]
+  updated_at?: string
+}
+
+export interface AgentImageflowProjectVisualContextResponse {
+  workspace_id: string
+  project_id: string
+  visual_context: AgentImageflowProjectVisualContext
+}
+
 export interface AgentImageflowAssetListQuery {
   limit?: number
   offset?: number
@@ -360,6 +421,21 @@ export interface AgentImageflowBatchProgressQuery {
   limit?: number
 }
 
+export interface AgentImageflowBatchStorySummaryQuery {
+  sessionId?: string
+  batchId?: string
+  storyId?: string
+  source?: string
+  status?: string
+  includeSetup?: boolean
+  limit?: number
+}
+
+export interface AgentImageflowBatchManifestQuery extends AgentImageflowBatchStorySummaryQuery {
+  selectedOnly?: boolean
+  includeRejected?: boolean
+}
+
 export interface AgentImageflowBatchProgressTask {
   task_id: string
   status: string
@@ -391,6 +467,202 @@ export interface AgentImageflowBatchProgressResponse {
     attempt_count: number
   }
   tasks: AgentImageflowBatchProgressTask[]
+}
+
+export interface AgentImageflowBatchStorySummaryCounts {
+  story_count: number
+  scene_count: number
+  scene_with_selected_count: number
+  scene_missing_selected_count: number
+  task_count: number
+  queued_count: number
+  running_count: number
+  succeeded_count: number
+  partial_count: number
+  failed_count: number
+  retrying_count: number
+  asset_count: number
+  generated_asset_count: number
+  selected_asset_count: number
+  rejected_asset_count: number
+  attempt_count: number
+  excluded_setup_task_count: number
+}
+
+export interface AgentImageflowBatchStorySummaryStory {
+  story_id: string
+  scene_count: number
+  selected_scene_count: number
+  scenes: string[]
+}
+
+export interface AgentImageflowBatchStorySummarySceneCounts {
+  task_count: number
+  succeeded_count: number
+  failed_count: number
+  asset_count: number
+  selected_asset_count: number
+  rejected_asset_count: number
+  attempt_count: number
+}
+
+export interface AgentImageflowBatchStorySummaryTask {
+  task_id: string
+  status: string
+  asset_count: number
+  attempt_count: number
+  retrying: boolean
+  error_stage?: string
+  error_code?: string
+  error_message?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AgentImageflowBatchStorySummaryAsset {
+  asset_id: string
+  task_id: string
+  status: string
+  provider?: string
+  model?: string
+  prompt?: string
+  download_url: string
+  thumbnail_url: string
+  metadata_url: string
+  target_path?: string
+  created_at?: string
+}
+
+export interface AgentImageflowBatchStorySummaryScene {
+  story_id: string
+  scene_id: string
+  scene_order?: number
+  target_path?: string
+  status: string
+  latest_task_id?: string
+  primary_selected_asset_id?: string
+  regenerated_from_task_id?: string
+  regeneration_count?: number
+  counts: AgentImageflowBatchStorySummarySceneCounts
+  visual_context?: {
+    character_ids?: string[]
+    reference_asset_ids?: string[]
+    prompt_recipe_id?: string
+  }
+  tasks: AgentImageflowBatchStorySummaryTask[]
+  assets: AgentImageflowBatchStorySummaryAsset[]
+}
+
+export interface AgentImageflowBatchStorySummaryResponse {
+  generated_at: string
+  project_id: string
+  campaign_id: string
+  session_id?: string
+  batch_id?: string
+  source?: string
+  story_id?: string
+  counts: AgentImageflowBatchStorySummaryCounts
+  stories: AgentImageflowBatchStorySummaryStory[]
+  scenes: AgentImageflowBatchStorySummaryScene[]
+}
+
+export interface AgentImageflowBatchManifestCounts {
+  [key: string]: number
+}
+
+export interface AgentImageflowBatchManifestTask {
+  task_id: string
+  status?: string
+  story_id?: string
+  scene_id?: string
+  target_path?: string
+  visual_context?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface AgentImageflowBatchManifestAsset {
+  asset_id: string
+  task_id?: string
+  status?: string
+  story_id?: string
+  scene_id?: string
+  download_url?: string
+  thumbnail_url?: string
+  metadata_url?: string
+  target_path?: string
+  visual_context?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface AgentImageflowBatchManifestScene {
+  story_id: string
+  scene_id: string
+  target_path?: string
+  primary_selected_asset_id?: string
+  visual_context?: Record<string, unknown>
+  tasks?: AgentImageflowBatchManifestTask[]
+  assets?: AgentImageflowBatchManifestAsset[]
+  [key: string]: unknown
+}
+
+export interface AgentImageflowBatchManifestStory {
+  story_id: string
+  scenes?: string[] | AgentImageflowBatchManifestScene[]
+  [key: string]: unknown
+}
+
+export interface AgentImageflowBatchManifestResponse {
+  generated_at: string
+  project_id: string
+  campaign_id: string
+  session_id?: string
+  batch_id?: string
+  source?: string
+  story_id?: string
+  selected_only: boolean
+  include_rejected: boolean
+  counts: AgentImageflowBatchManifestCounts
+  tasks: AgentImageflowBatchManifestTask[]
+  assets: AgentImageflowBatchManifestAsset[]
+  scenes: AgentImageflowBatchManifestScene[]
+  stories: AgentImageflowBatchManifestStory[]
+}
+
+export interface AgentImageflowSceneRegenerationInput {
+  source_task_id: string
+  regenerate_reason?: string
+  created_by?: string
+  overrides?: Record<string, unknown>
+}
+
+export interface AgentImageflowSceneRegenerationWarning {
+  code: string
+  message: string
+}
+
+export interface AgentImageflowCopiedVisualContextSnapshot {
+  character_ids?: string[]
+  reference_asset_ids?: string[]
+  prompt_recipe_id?: string
+  character_count?: number
+  reference_count?: number
+  has_prompt_recipe?: boolean
+  [key: string]: unknown
+}
+
+export interface AgentImageflowSceneRegenerationResponse {
+  task_id: string
+  status: string
+  regenerated_from_task_id: string
+  regenerate_no: number
+  project_id: string
+  campaign_id: string
+  session_id?: string
+  batch_id?: string
+  story_id?: string
+  scene_id?: string
+  copied_visual_context_snapshot?: AgentImageflowCopiedVisualContextSnapshot
+  warnings?: AgentImageflowSceneRegenerationWarning[]
 }
 
 export interface AgentImageflowAssetListEntry {
@@ -565,6 +837,86 @@ export function buildAgentImageflowBatchProgressUrl(
   return text ? `${url}?${text}` : url
 }
 
+export function buildAgentImageflowBatchStorySummaryUrl(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  query?: AgentImageflowBatchStorySummaryQuery,
+): string {
+  const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  const url = [
+    base,
+    'api',
+    'projects',
+    encodeURIComponent(scope.projectId),
+    'campaigns',
+    encodeURIComponent(scope.campaignId),
+    'batch-summary',
+  ].join('/')
+  const params = new URLSearchParams()
+  const appendString = (key: string, value?: string) => {
+    const trimmed = value?.trim()
+    if (trimmed) params.set(key, trimmed)
+  }
+  appendString('session_id', query?.sessionId)
+  appendString('batch_id', query?.batchId)
+  appendString('story_id', query?.storyId)
+  appendString('source', query?.source)
+  appendString('status', query?.status)
+  if (query?.includeSetup) params.set('include_setup', 'true')
+  if (query?.limit && Number.isFinite(query.limit)) params.set('limit', String(Math.max(1, Math.trunc(query.limit))))
+  const text = params.toString()
+  return text ? `${url}?${text}` : url
+}
+
+export function buildAgentImageflowBatchManifestUrl(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  query?: AgentImageflowBatchManifestQuery,
+): string {
+  const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  const url = [
+    base,
+    'api',
+    'projects',
+    encodeURIComponent(scope.projectId),
+    'campaigns',
+    encodeURIComponent(scope.campaignId),
+    'batch-manifest',
+  ].join('/')
+  const params = new URLSearchParams()
+  const appendString = (key: string, value?: string) => {
+    const trimmed = value?.trim()
+    if (trimmed) params.set(key, trimmed)
+  }
+  appendString('session_id', query?.sessionId)
+  appendString('batch_id', query?.batchId)
+  appendString('story_id', query?.storyId)
+  appendString('source', query?.source)
+  appendString('status', query?.status)
+  if (query?.includeSetup) params.set('include_setup', 'true')
+  if (query?.limit && Number.isFinite(query.limit)) params.set('limit', String(Math.max(1, Math.trunc(query.limit))))
+  if (typeof query?.selectedOnly === 'boolean') params.set('selected_only', String(query.selectedOnly))
+  if (typeof query?.includeRejected === 'boolean') params.set('include_rejected', String(query.includeRejected))
+  const text = params.toString()
+  return text ? `${url}?${text}` : url
+}
+
+export function buildAgentImageflowSceneRegenerationsUrl(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+): string {
+  const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  return [
+    base,
+    'api',
+    'projects',
+    encodeURIComponent(scope.projectId),
+    'campaigns',
+    encodeURIComponent(scope.campaignId),
+    'scene-regenerations',
+  ].join('/')
+}
+
 export function buildAgentImageflowQualityProfileUrl(baseUrl: string, scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>): string {
   const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
   return [
@@ -591,8 +943,26 @@ export function buildAgentImageflowProviderProfileUrl(baseUrl: string, scope: Pi
   ].join('/')
 }
 
+export function buildAgentImageflowProjectVisualContextUrl(baseUrl: string, scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>): string {
+  const base = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  return [
+    base,
+    'api',
+    'workspaces',
+    encodeURIComponent(scope.workspaceId),
+    'projects',
+    encodeURIComponent(scope.projectId),
+    'visual-context',
+  ].join('/')
+}
+
 export function buildAgentImageflowAssetUrl(baseUrl: string, assetId: string): string {
   return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/assets/${encodeURIComponent(assetId)}`
+}
+
+export function buildAgentImageflowAssetReviewUrl(baseUrl: string, assetId: string, action: 'select' | 'reject'): string {
+  const pathAction = action === 'select' ? 'approve' : 'reject'
+  return `${buildAgentImageflowAssetUrl(baseUrl, assetId)}/${pathAction}`
 }
 
 export function normalizeAgentImageflowAssetStatus(status: string): string {
@@ -620,6 +990,40 @@ export function normalizeAgentImageflowAssetResponse(response: AgentImageflowAss
 
 export function normalizeAgentImageflowAssetListResponse(response: AgentImageflowAssetResponse[]): AgentImageflowAssetResponse[] {
   return response.map(normalizeAgentImageflowAssetResponse)
+}
+
+export function normalizeAgentImageflowBatchStorySummaryResponse(response: AgentImageflowBatchStorySummaryResponse): AgentImageflowBatchStorySummaryResponse {
+  return {
+    ...response,
+    scenes: response.scenes?.map((scene) => ({
+      ...scene,
+      assets: scene.assets?.map((asset) => ({
+        ...asset,
+        status: normalizeAgentImageflowAssetStatus(asset.status),
+      })) ?? [],
+      tasks: scene.tasks ?? [],
+    })) ?? [],
+    stories: response.stories ?? [],
+  }
+}
+
+export function normalizeAgentImageflowBatchManifestResponse(response: AgentImageflowBatchManifestResponse): AgentImageflowBatchManifestResponse {
+  return {
+    ...response,
+    assets: response.assets?.map((asset) => ({
+      ...asset,
+      status: asset.status ? normalizeAgentImageflowAssetStatus(asset.status) : asset.status,
+    })) ?? [],
+    scenes: response.scenes?.map((scene) => ({
+      ...scene,
+      assets: scene.assets?.map((asset) => ({
+        ...asset,
+        status: asset.status ? normalizeAgentImageflowAssetStatus(asset.status) : asset.status,
+      })),
+    })) ?? [],
+    tasks: response.tasks ?? [],
+    stories: response.stories ?? [],
+  }
 }
 
 export function buildAgentImageflowHeaders(
@@ -901,6 +1305,44 @@ export async function getAgentImageflowBatchProgress(
   })
 }
 
+export async function getAgentImageflowBatchStorySummary(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  auth?: AgentImageflowAuth,
+  query?: AgentImageflowBatchStorySummaryQuery,
+): Promise<AgentImageflowBatchStorySummaryResponse> {
+  const response = await requestJson<AgentImageflowBatchStorySummaryResponse>(buildAgentImageflowBatchStorySummaryUrl(baseUrl, scope, query), {
+    headers: buildAgentImageflowHeaders(auth),
+  })
+  return normalizeAgentImageflowBatchStorySummaryResponse(response)
+}
+
+export async function getAgentImageflowBatchManifest(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  auth?: AgentImageflowAuth,
+  query?: AgentImageflowBatchManifestQuery,
+): Promise<AgentImageflowBatchManifestResponse> {
+  const response = await requestJson<AgentImageflowBatchManifestResponse>(buildAgentImageflowBatchManifestUrl(baseUrl, scope, query), {
+    method: 'GET',
+    headers: buildAgentImageflowHeaders(auth),
+  })
+  return normalizeAgentImageflowBatchManifestResponse(response)
+}
+
+export async function regenerateAgentImageflowSceneTask(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'projectId' | 'campaignId'>,
+  auth: AgentImageflowAuth | undefined,
+  input: AgentImageflowSceneRegenerationInput,
+): Promise<AgentImageflowSceneRegenerationResponse> {
+  return requestJson<AgentImageflowSceneRegenerationResponse>(buildAgentImageflowSceneRegenerationsUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
+  })
+}
+
 export async function getAgentImageflowQualityProfile(
   baseUrl: string,
   scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
@@ -941,6 +1383,16 @@ export async function getAgentImageflowProviderProfile(
   })
 }
 
+export async function getAgentImageflowProjectVisualContext(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowProjectVisualContextResponse> {
+  return requestJson<AgentImageflowProjectVisualContextResponse>(buildAgentImageflowProjectVisualContextUrl(baseUrl, scope), {
+    headers: buildAgentImageflowHeaders(auth),
+  })
+}
+
 export async function updateAgentImageflowQualityProfile(
   baseUrl: string,
   scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
@@ -951,6 +1403,19 @@ export async function updateAgentImageflowQualityProfile(
     method: 'POST',
     headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(profile),
+  })
+}
+
+export async function updateAgentImageflowProjectVisualContext(
+  baseUrl: string,
+  scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
+  visualContext: AgentImageflowProjectVisualContext,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowProjectVisualContextResponse> {
+  return requestJson<AgentImageflowProjectVisualContextResponse>(buildAgentImageflowProjectVisualContextUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ visual_context: visualContext }),
   })
 }
 
@@ -975,7 +1440,7 @@ export async function getAgentImageflowAsset(baseUrl: string, assetId: string, a
 }
 
 export async function selectAgentImageflowAsset(baseUrl: string, assetId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowAssetResponse> {
-  const response = await requestJson<AgentImageflowAssetResponse>(`${buildAgentImageflowAssetUrl(baseUrl, assetId)}/approve`, {
+  const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowAssetReviewUrl(baseUrl, assetId, 'select'), {
     method: 'POST',
     headers: buildAgentImageflowHeaders(auth),
   })
@@ -987,7 +1452,7 @@ export async function approveAgentImageflowAsset(baseUrl: string, assetId: strin
 }
 
 export async function rejectAgentImageflowAsset(baseUrl: string, assetId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowAssetResponse> {
-  const response = await requestJson<AgentImageflowAssetResponse>(`${buildAgentImageflowAssetUrl(baseUrl, assetId)}/reject`, {
+  const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowAssetReviewUrl(baseUrl, assetId, 'reject'), {
     method: 'POST',
     headers: buildAgentImageflowHeaders(auth),
   })
