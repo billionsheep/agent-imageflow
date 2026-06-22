@@ -2,7 +2,7 @@
 
 本文档定义 MVP 之后第二批需求。目标是把 Agent ImageFlow 从“已经能生成并登记资产的服务端能力”推进到“公共图片资产能力平台的可见、可查、可治理、可集成”。
 
-Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Dashboard、Storage Governance、Provider Profile、Project Production Context、Batch Story Export Foundation、Web Operator Review Console 和 Deployment Release Pipeline 主线已在后续 CSV 中完成或吸收。Batch / Story / Scene View、JSON manifest、ZIP 后置边界和 NAS/Docker 文件访问的详细场景与收口记录见 `docs/project/stories/slice-040-batch-story-export-scenarios.md` 到 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`；V1 baseline、剩余任务和未来方向见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。后续新需求需要重新确认范围并生成独立 CSV。
+Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Dashboard、Storage Governance、Provider Profile、Project Production Context、Batch Story Export Foundation、Web Operator Review Console、Deployment Release Pipeline 和 Web Console Auth Gate / Localization / Product Fit 主线已在后续 CSV 中完成或吸收。Batch / Story / Scene View、JSON manifest、ZIP 后置边界和 NAS/Docker 文件访问的详细场景与收口记录见 `docs/project/stories/slice-040-batch-story-export-scenarios.md` 到 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`；V1 baseline、剩余任务和未来方向见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。后续新需求需要重新确认范围并生成独立 CSV。
 
 ## V1 Follow-up Priorities
 
@@ -13,6 +13,11 @@ Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Da
 3. Usage Tracking and Edit Lineage：记录资产被哪些内容使用，以及 regenerate/edit lineage。
 4. Export Pack ZIP and Multi Select：在 JSON manifest 稳定后补小批量 selected assets ZIP。
 5. Deployment and Secret Hardening：补登录失败限流、Secure cookie/HTTPS 检查、服务端配置状态和 non-exposure regression。
+6. MCP Service Pack：为新 agent 准备 MCP 接入说明、配置示例、萌宠调用示例和 mock smoke，明确 Project API Key / Basic Auth / Admin Login / provider key 边界。
+7. Character Reference Intake and Consistency：补角色图像入库、input-file 提升为 asset、角色主图/参考图绑定、MCP 创建任务自动带参考和 provider 参考图诊断，避免把纯文生图成功误判为角色一致性成功。
+8. Web Review Feedback and Stability：修复 Select/Reject 只有 toast 没有明显状态变化、Production View 局部状态不清晰、下拉菜单切换整页闪烁和请求风暴。
+9. Safe Delete and Trial Reset：补受控数据生命周期能力，支持废图/失败任务/测试 batch/campaign 的 dry-run、保护、审计和重置；MCP 第一轮不开放 workspace/project/campaign 硬删除。
+10. Settings Information Architecture：重新设计设置页分组和凭据语义展示，先出方案再实现。
 
 继续后置：账号运营系统、小红书自动发布、通用 DAM、模板市场、多人协作、SaaS 注册计费、每用户 provider key 和视觉质检 AI。
 

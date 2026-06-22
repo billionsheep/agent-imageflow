@@ -246,6 +246,8 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/access-config", "get_access_config"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/access-config", "update_access_config"
+	case isRead && match(parts, "api", "admin", "runtime-status"):
+		return "/api/admin/runtime-status", "get_runtime_status"
 	case isRead && match(parts, "api", "tasks", "*", "attempts"):
 		return "/api/tasks/{task_id}/attempts", "list_task_attempts"
 	case isRead && match(parts, "api", "tasks", "*"):

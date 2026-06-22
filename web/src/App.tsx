@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { activateFirstImportedProfile, buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
@@ -6,11 +6,14 @@ import { isDefaultConfigOnlyEnabled, mergeImportedSettings } from './lib/apiProf
 import { getCustomProviderConfigUrl, loadCustomProviderSettingsFromUrl } from './lib/customProviderConfigUrl'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import type { AppSettings } from './types'
+import { AgentImageflowApiError, getAgentImageflowAdminMe, logoutAgentImageflowAdmin, normalizeAgentImageflowApiBaseUrl, type AgentImageflowAdminSessionResponse } from './lib/agentImageflowApi'
+import { getConsoleAuthView } from './lib/consoleAuth'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import ServerAssetLibrary from './components/ServerAssetLibrary'
 import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
+import ConsoleLoginScreen from './components/ConsoleLoginScreen'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import ImageContextMenu from './components/ImageContextMenu'
@@ -93,6 +96,8 @@ function LazyModalFallback({ variant = 'panel' }: { variant?: 'panel' | 'lightbo
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
+  const settings = useStore((s) => s.settings)
+  const showToast = useStore((s) => s.showToast)
   const appMode = useStore((s) => s.appMode)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
@@ -103,6 +108,10 @@ export default function App() {
   const showProjectContext = useStore((s) => s.showProjectContext)
   const showProductionView = useStore((s) => s.showProductionView)
   const maskEditorImageId = useStore((s) => s.maskEditorImageId)
+  const [adminSession, setAdminSession] = useState<AgentImageflowAdminSessionResponse | null>(null)
+  const [adminChecking, setAdminChecking] = useState(true)
+  const baseUrl = useMemo(() => normalizeAgentImageflowApiBaseUrl(settings.imageflowApiBaseUrl), [settings.imageflowApiBaseUrl])
+  const authView = getConsoleAuthView(adminChecking, adminSession)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -181,9 +190,53 @@ export default function App() {
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    setAdminChecking(true)
+    void getAgentImageflowAdminMe(baseUrl)
+      .then((session) => {
+        if (!cancelled) setAdminSession(session)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const configured = !(error instanceof AgentImageflowApiError && error.errorCode === 'admin_not_configured')
+        setAdminSession({ authenticated: false, configured })
+      })
+      .finally(() => {
+        if (!cancelled) setAdminChecking(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [baseUrl])
+
+  const handleLogout = async () => {
+    try {
+      const session = await logoutAgentImageflowAdmin(baseUrl)
+      setAdminSession(session)
+      showToast('已退出控制台', 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  if (authView !== 'console') {
+    return (
+      <>
+        <ConsoleLoginScreen
+          checking={adminChecking}
+          session={adminSession}
+          onSessionChange={setAdminSession}
+          onCheckingChange={setAdminChecking}
+        />
+        <Toast />
+      </>
+    )
+  }
+
   return (
     <>
-      <Header />
+      <Header adminSession={adminSession} onLogout={() => void handleLogout()} />
       {appMode === 'agent' ? (
         <Suspense fallback={<LazyModalFallback variant="fullscreen" />}>
           <AgentWorkspace />

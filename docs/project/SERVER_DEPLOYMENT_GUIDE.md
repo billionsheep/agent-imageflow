@@ -108,11 +108,22 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 
 Postgres 和 Redis 不暴露宿主机端口。
 
-## 反向代理
+## 反向代理与同源入口
 
-反向代理必须把 `/api/*` 和 `/healthz` 转发到 API，把其他路径转发到 Web。
+推荐生产入口只暴露 Web/HTTPS origin。Web 镜像内置 Nginx 会把 `/api/*` 和 `/healthz` 代理到 compose 内部 `api:8081`，因此外部反向代理可以简单转发到 Web 宿主机端口。
 
-Caddy 示例：
+简单 Caddy 示例：
+
+```caddyfile
+imageflow.example.com {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:8080
+}
+```
+
+如果希望外部反向代理直接分流 API 和 Web，也可以使用下面的高级模式：
+
+高级 Caddy 示例：
 
 ```caddyfile
 imageflow.example.com {
@@ -132,7 +143,9 @@ imageflow.example.com {
 }
 ```
 
-Web Settings 里的 Agent ImageFlow API URL 建议填写同一个公开 HTTPS 域名，例如 `https://imageflow.example.com`。不要在远程浏览器里保留 `http://localhost:8081`，否则浏览器会访问操作者本机的 localhost。
+`PUBLIC_BASE_URL` 应设置为用户浏览器打开的 Web/HTTPS origin，例如 `https://imageflow.example.com`。Web Settings 里的 Agent ImageFlow API URL 留空时会使用当前 Web origin；高级场景也应填写同一个公开 HTTPS 域名。不要在远程浏览器里保留 `http://localhost:8081`，否则浏览器会访问操作者本机的 localhost。
+
+API 独立端口只给同机反向代理、运维或受控内网使用，不建议直接暴露给浏览器用户。
 
 ## Smoke 验收
 
@@ -143,6 +156,12 @@ curl -fsS https://imageflow.example.com/healthz
 curl -fsSI https://imageflow.example.com/
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
+
+Admin 登录后重点检查：
+
+- Recent Assets 缩略图能显示，不弹出浏览器原生 Basic Auth 登录框。
+- asset original / thumbnail / metadata URL 使用 Web/HTTPS 同源入口。
+- Settings 中的 Agent ImageFlow API URL 可留空，且不是 provider base URL。
 
 MCP stdio 只读工具列表：
 

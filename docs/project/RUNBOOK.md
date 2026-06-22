@@ -509,7 +509,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 1. 在服务器执行 `docker login ghcr.io`，使用只具备 `read:packages` 权限的 GitHub token 或 deploy token。
 2. 从 `.env.example.prod` 复制出 `.env.prod`，只在服务器编辑真实值。
 3. 设置 `IMAGE_TAG`，可用 `main`、`vX.Y.Z` 或 `sha-xxxxxxx`。
-4. 设置 `PUBLIC_BASE_URL=https://your-domain.example`。
+4. 设置 `PUBLIC_BASE_URL=https://your-domain.example`，推荐指向 Web/HTTPS 公开入口，而不是 API 独立端口。
 5. 设置 `DATABASE_URL` 与 `POSTGRES_PASSWORD`；如果密码包含 URL 特殊字符，`DATABASE_URL` 中需要 URL encode。
 6. 设置 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`ADMIN_SESSION_SECRET`。
 7. 按需设置 `BASIC_AUTH_USERNAME`、`BASIC_AUTH_PASSWORD` 和 project API key。
@@ -517,13 +517,19 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 9. 如使用 NAS，把 `AGENT_IMAGEFLOW_STORAGE_ROOT` 设置为宿主机/NAS 路径；留空则使用 Docker named volume。
 10. 执行 pull/up，并通过反向代理开放 HTTPS。
 
-反向代理路由必须保持这个边界：
+生产浏览器入口推荐保持同源：
+
+- Web 镜像已代理 `/api/*` 与 `/healthz` 到 compose 内部 API；外部反向代理可以只把公开域名转发到 Web 宿主机端口。
+- `PUBLIC_BASE_URL` 应与用户浏览器打开的 Web origin 一致，保证 thumbnail/original/metadata URL 不跳到 API 独立端口。
+- API 宿主机端口只给同机反向代理或运维使用，不应作为日常 Web 用户入口。
+
+如果外部反向代理选择绕过 Web 镜像直接分流，也必须保持这个边界：
 
 - `/api/*` 转发到 API，例如宿主机 `127.0.0.1:8081`。
 - `/healthz` 转发到 API，便于上线 smoke 和外部健康检查。
 - 其他路径转发到 Web 镜像，例如宿主机 `127.0.0.1:8080`。
 
-Web Settings 里的 Agent ImageFlow API URL 建议填写同一个公开 HTTPS 域名，例如 `https://your-domain.example`，不要在远程浏览器里保留 `http://localhost:8081`；否则浏览器会访问操作者本机的 localhost，而不是服务器。
+Web Settings 里的 Agent ImageFlow API URL 留空时会默认使用当前 Web origin。高级场景可以填写同一个公开 HTTPS 域名，例如 `https://your-domain.example`，不要在远程浏览器里保留 `http://localhost:8081`；否则浏览器会访问操作者本机的 localhost，而不是服务器。
 
 版本更新步骤：
 
@@ -598,11 +604,16 @@ ADMIN_SESSION_TTL_SECONDS=43200
 
 说明：
 
+- Web 控制台现在采用前置 Admin 登录页：未登录时只显示登录页，不展示 Header、InputBar、资产库、Production View、Project Context 或 Settings 主体。
 - Admin session 只用于 Web 控制台和管理读取路径，不替代 project API key。
 - Provider API key 固定在服务端环境变量中，不返回给 Web、不写入 localStorage、不进入响应 JSON。
 - MCP / CLI / REST 外部 project 级调用继续使用 project API key，也可按需叠加 Basic Auth。
 - 如果启用了 Admin credentials，scope 管理、Recent Assets 和控制台读取路径需要 Admin session 或 Basic Auth。
-- 本地浏览器手测时不要混用 `127.0.0.1` Web origin 和 `localhost` API base；Admin cookie 绑定 host，建议统一使用 `http://localhost:8080` + `http://localhost:8081`。
+- Web 登录者使用的是服务器配置好的平台能力，不需要也不应该在 Web 里填写 provider key 或 provider base URL。
+- 本地浏览器手测时不要混用 `127.0.0.1` Web origin 和 `localhost` API base；Admin cookie 绑定 host。生产/preview 推荐使用同一个 Web origin，让 `/api/*` 和图片 delivery 都走同源入口。
+- 本地 Vite preview/dev 常用端口 `4173` / `5173` 没有 Web 镜像里的 Nginx `/api` 代理，Web 留空 API URL 时会按当前页面 host 自动回退到 `http://127.0.0.1:8081` 或 `http://localhost:8081`；生产 Web 镜像或正式反代仍保持同源 `/api`。
+- 已登录 Admin session 可读取 asset thumbnail/original/metadata；未登录仍返回 401，但图片类 delivery 不返回会触发浏览器原生 Basic Auth 弹窗的 challenge。
+- 如果用户看到旧的 provider/base URL 配置，它属于高级/旧模式兼容路径；正式资产生产优先走服务端托管模式和服务器配置的 provider。
 
 Admin login smoke：
 
@@ -1291,7 +1302,7 @@ npm --prefix web run dev -- --host 0.0.0.0 --port 8080
 在 Web 设置页的“习惯配置”中开启“服务端托管模式”，默认配置为：
 
 ```text
-API URL: http://localhost:8081
+API URL: (留空时使用当前 Web origin；本地 CLI/测试环境回退 http://localhost:8081)
 Project API Key: (optional)
 Basic 用户名: (optional)
 Basic 密码: (optional)
@@ -1314,6 +1325,8 @@ Selection mode: auto
 - 托管模式默认传 `selection_mode=auto`；多候选任务完成后，服务端会按任务输入或项目级 quality profile 中的 `best_of_config` 自动 selected 一张候选。
 - 如果服务端启用了 Basic Auth 或项目级 API key，Web 会自动附带 `Authorization: Basic ...` 和 `X-API-Key`。
 - Web 服务端资产库默认展示 Recent Assets；用户使用 Admin 登录后，不需要手填 project API key 也可以看到 MCP / CLI / REST / Web 生成的最近资产。
+- 生产部署时，Agent ImageFlow API URL 不是 provider base URL；provider key/base URL 只来自服务器环境变量。
+- Web Current Scope 可通过 workspace / project / campaign 三级下拉切换业务空间，Recent Assets、Production View 和 Project Context 会跟随当前 scope。
 - 资产卡会显示 workspace / project / campaign，并可点击 `Scope` 切换当前 scope；`Scope` 视图仍可查看当前 campaign 的资产。
 - 资产卡的 `Reference` 动作会打开 Project Context modal，用当前 asset 建立 character/style/scene/prop reference binding；该动作不改变 asset 文件或 selected/rejected 状态。
 - 未登录或 401 会显示 unauthorized/login 状态，不再和真实空列表、筛选无结果混成 `0 shown`。

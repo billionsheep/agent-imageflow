@@ -9,6 +9,7 @@ import {
   buildAgentImageflowAdminLoginUrl,
   buildAgentImageflowAdminLogoutUrl,
   buildAgentImageflowAdminMeUrl,
+  buildAgentImageflowRuntimeStatusUrl,
   buildAgentImageflowCampaignsUrl,
   buildAgentImageflowCampaignUrl,
   buildAgentImageflowBatchStorySummaryUrl,
@@ -33,6 +34,7 @@ import {
   normalizeAgentImageflowBatchStorySummaryResponse,
   normalizeAgentImageflowTaskResponse,
   normalizeAgentImageflowApiBaseUrl,
+  resolveAgentImageflowDeliveryUrl,
   getAgentImageflowBatchManifest,
   regenerateAgentImageflowSceneTask,
 } from './agentImageflowApi'
@@ -45,6 +47,50 @@ describe('agentImageflowApi', () => {
   it('normalizes the service base URL', () => {
     expect(normalizeAgentImageflowApiBaseUrl('http://localhost:8081///')).toBe('http://localhost:8081')
     expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://localhost:8081')
+  })
+
+  it('uses the browser origin as the empty service base URL when available', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { location: { origin: 'https://imageflow.example.com' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('')).toBe('https://imageflow.example.com')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('falls back to a host-matched local API for Vite dev and preview origins', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:4173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://127.0.0.1:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://localhost:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('keeps saved local API settings on the same host as the current local page', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:4173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('http://localhost:8081')).toBe('http://127.0.0.1:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:4173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('http://127.0.0.1:8081')).toBe('http://localhost:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
   })
 
   it('builds the server-side ImageTask URL from scope ids', () => {
@@ -64,6 +110,7 @@ describe('agentImageflowApi', () => {
     expect(buildAgentImageflowAdminLoginUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/login')
     expect(buildAgentImageflowAdminMeUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/me')
     expect(buildAgentImageflowAdminLogoutUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/logout')
+    expect(buildAgentImageflowRuntimeStatusUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/runtime-status')
     expect(buildAgentImageflowWorkspacesUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/workspaces')
     expect(buildAgentImageflowWorkspaceUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default')
     expect(buildAgentImageflowProjectsUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default/projects')
@@ -186,6 +233,12 @@ describe('agentImageflowApi', () => {
       'X-API-Key': 'project-secret',
       Authorization: 'Basic YWRtaW46c2VjcmV0',
     })
+  })
+
+  it('rewrites asset delivery URLs to the active same-origin API base', () => {
+    expect(resolveAgentImageflowDeliveryUrl('https://imageflow.example.com', '/api/assets/asset_1/thumbnail')).toBe('https://imageflow.example.com/api/assets/asset_1/thumbnail')
+    expect(resolveAgentImageflowDeliveryUrl('https://imageflow.example.com', 'http://163.7.5.68:18081/api/assets/asset_1/thumbnail')).toBe('https://imageflow.example.com/api/assets/asset_1/thumbnail')
+    expect(resolveAgentImageflowDeliveryUrl('https://imageflow.example.com', 'https://cdn.example.com/public/asset_1.webp')).toBe('https://cdn.example.com/public/asset_1.webp')
   })
 
   it('normalizes task and asset response statuses', () => {

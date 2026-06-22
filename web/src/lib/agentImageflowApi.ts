@@ -22,6 +22,36 @@ export interface AgentImageflowAdminSessionResponse {
   configured: boolean
 }
 
+export interface AgentImageflowRuntimeStatusResponse {
+  authenticated: boolean
+  username?: string
+  admin_configured: boolean
+  basic_auth_configured: boolean
+  public_base_url?: string
+  default_provider?: string
+  provider_timeout_seconds?: number
+  worker?: {
+    concurrency?: number
+  }
+  rate_limits?: {
+    window_seconds?: number
+    instance_max_requests?: number
+    project_max_requests?: number
+  }
+  providers?: {
+    openai_compatible?: {
+      configured?: boolean
+      model?: string
+      max_concurrency?: number
+    }
+    fal?: {
+      configured?: boolean
+      model?: string
+      max_concurrency?: number
+    }
+  }
+}
+
 export interface AgentImageflowWorkspace {
   workspace_id: string
   name: string
@@ -711,8 +741,57 @@ export function isAgentImageflowUnauthorizedError(error: unknown): boolean {
   return error instanceof AgentImageflowApiError && (error.status === 401 || error.status === 403)
 }
 
+function getDefaultAgentImageflowApiBaseUrl(): string {
+  const browserOrigin = typeof window !== 'undefined' ? window.location?.origin?.trim() : ''
+  if (browserOrigin && !/^file:\/\//i.test(browserOrigin)) {
+    try {
+      const url = new URL(browserOrigin)
+      const isLocalHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1' || url.hostname === '[::1]'
+      if (isLocalHost && (url.port === '4173' || url.port === '5173')) {
+        const apiHost = url.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+        return `${url.protocol}//${apiHost}:8081`
+      }
+    } catch {
+      // Fall back to the raw origin below when the browser provides an unusual value.
+    }
+    return browserOrigin.replace(/\/+$/, '')
+  }
+  return 'http://localhost:8081'
+}
+
 export function normalizeAgentImageflowApiBaseUrl(baseUrl: string): string {
-  return (baseUrl || 'http://localhost:8081').trim().replace(/\/+$/, '')
+  const normalized = (baseUrl || getDefaultAgentImageflowApiBaseUrl()).trim().replace(/\/+$/, '')
+  const browserOrigin = typeof window !== 'undefined' ? window.location?.origin?.trim() : ''
+  if (!normalized || !browserOrigin) return normalized
+  try {
+    const base = new URL(normalized)
+    const origin = new URL(browserOrigin)
+    const isLocalPage = origin.hostname === 'localhost' || origin.hostname === '127.0.0.1' || origin.hostname === '::1' || origin.hostname === '[::1]'
+    const isLocalApi = base.hostname === 'localhost' || base.hostname === '127.0.0.1' || base.hostname === '::1' || base.hostname === '[::1]'
+    if (isLocalPage && isLocalApi && base.port === '8081' && origin.hostname !== base.hostname) {
+      const apiHost = origin.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+      return `${base.protocol}//${apiHost}:8081`
+    }
+  } catch {
+    return normalized
+  }
+  return normalized
+}
+
+export function resolveAgentImageflowDeliveryUrl(baseUrl: string, value?: string): string {
+  const text = value?.trim()
+  if (!text) return ''
+  const normalizedBase = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  try {
+    const url = new URL(text, normalizedBase)
+    if (url.pathname.startsWith('/api/')) {
+      return `${normalizedBase}${url.pathname}${url.search}${url.hash}`
+    }
+    return text
+  } catch {
+    if (text.startsWith('/api/')) return `${normalizedBase}${text}`
+    return text
+  }
 }
 
 export function buildAgentImageflowTaskUrl(baseUrl: string, scope: AgentImageflowScope): string {
@@ -752,6 +831,10 @@ export function buildAgentImageflowAdminMeUrl(baseUrl: string): string {
 
 export function buildAgentImageflowAdminLogoutUrl(baseUrl: string): string {
   return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/logout`
+}
+
+export function buildAgentImageflowRuntimeStatusUrl(baseUrl: string): string {
+  return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/runtime-status`
 }
 
 export function buildAgentImageflowProjectsUrl(baseUrl: string, workspaceId: string): string {
@@ -1093,6 +1176,10 @@ export async function loginAgentImageflowAdmin(
 
 export async function getAgentImageflowAdminMe(baseUrl: string): Promise<AgentImageflowAdminSessionResponse> {
   return requestJson<AgentImageflowAdminSessionResponse>(buildAgentImageflowAdminMeUrl(baseUrl))
+}
+
+export async function getAgentImageflowRuntimeStatus(baseUrl: string): Promise<AgentImageflowRuntimeStatusResponse> {
+  return requestJson<AgentImageflowRuntimeStatusResponse>(buildAgentImageflowRuntimeStatusUrl(baseUrl))
 }
 
 export async function logoutAgentImageflowAdmin(baseUrl: string): Promise<AgentImageflowAdminSessionResponse> {

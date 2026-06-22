@@ -1,5 +1,41 @@
 # Decisions
 
+## 2026-06-22: Character Reference Intake 成为 P1 角色一致性补强切片
+
+- Decision: 追加 `issues/next-phase-p1-character-reference-intake-consistency.csv`，把“角色卡图像入库、绑定、参与生成和可视化验收”作为独立 P1 切片，而不是继续把它归入已经完成的 Project Visual Context 第一版。
+- Reason: 真实试用证明当前只能算 MCP 文生图链路跑通：角色卡只有文字描述，没有 `primary_asset_id` / `reference_asset_ids`；用户上传和裁切的图停留在 campaign `input-files`，没有沉淀为正式 asset，也没有绑定进 Project Visual Context；绕过参考图后的成功任务不能证明角色一致性。
+- Impact: 后续验收必须区分三层结果：平台链路成功、参考图参与成功、角色一致性人工判断通过。第一轮补 input-file promote、character primary/reference asset binding、Web 角色卡缩略图、MCP 接入边界、provider reference canary/诊断和 pet character consistency smoke；不做通用 DAM、AI 自动视觉质检或 provider key 下发。
+
+## 2026-06-22: Web Review Feedback and Stability 作为真实试用 UX follow-up
+
+- Decision: 追加 `issues/next-phase-p1-web-review-feedback-stability.csv`，专门处理 Select/Reject 状态反馈不明显、Production View 局部状态不清晰、下拉菜单切换造成整页闪烁和请求风暴的问题。
+- Reason: P1 Web UX Smoothness 已完成一轮启动和刷新稳定性修复，但真实使用中仍复现两个高频摩擦：审图动作只有 toast 不足以让用户确认状态，scope/filter/recipe 等下拉变更仍可能触发大范围重绘或空态闪烁。
+- Impact: 后续 Web 验收必须包含可见状态变化、optimistic update、失败回滚、局部 summary 更新、下拉切换保留旧内容、请求去重/节流和 browser regression evidence。该切片不重新设计 Settings 信息架构，不引入新设计系统，不运行真实 provider。
+
+## 2026-06-22: Safe Delete and Trial Reset 作为后续 P1 数据生命周期切片
+
+- Decision: 追加 `issues/next-phase-p1-safe-delete-and-trial-reset.csv`，目标是补受控删除、归档和试用重置能力，解决本地/服务器试用中 task、asset、batch、campaign 只增不减的问题。
+- Reason: 当前 MCP 只暴露 `create_image_task`、`get_image_task`、`list_image_assets`、`select_image_asset`、`reject_image_asset` 和 `get_asset_delivery_info`，没有删除类 tool；现有 scope delete 更适合空 scope，Storage Governance 更偏底层清理。用户真实试用时需要按废图、失败任务、batch/session/campaign 安全清理，而不是重置整个 Docker volume。
+- Impact: 第一轮删除能力优先放在 Admin Web/REST/CLI，采用 dry-run、二次确认、selected/published/approved 保护、审计和恢复说明；MCP 不开放 workspace/project/campaign 硬删除。若未来要给 MCP 增加删除能力，只考虑低风险 archive/reject 类动作，并单独确认 schema、权限和误删保护。
+
+## 2026-06-22: MCP Service Pack 作为后续 P1 agent onboarding 小切片
+
+- Decision: 在 Settings 信息架构之前或并行追加 `issues/next-phase-p1-mcp-service-pack.csv`，目标是把现有 MCP 能力整理成低成本接入服务包，而不是扩展新的 MCP 协议能力。
+- Reason: 后续用户会频繁新开线程或让不同 agent 调 Agent ImageFlow 生图。若每个 agent 都要理解完整项目、scope、key、tools、参数和返回值，接入成本太高；一份 guide + config + pet scene 示例 + mock smoke 可以用很小改动换来很高复用收益。
+- Impact: P1-MCP-SVC-001 只新增文档和示例，明确 Project API Key、Basic Auth、Admin Login、provider key 的边界；不做远程 HTTP MCP、新账号系统、多用户权限、provider key 下发、tool schema 大改或真实 provider 默认 smoke。
+
+## 2026-06-22: Web 控制台采用前置 Admin 登录页
+
+- Decision: Web 控制台默认是服务器托管的图片资产生产平台入口。浏览器未通过 Admin session 时，只显示全局登录页，不渲染 Header、InputBar、资产库、Production View、Project Context 或 Settings 主体；登录后用户使用服务器环境变量中配置好的 provider 能力，退出后回到登录页。
+- Reason: 用户明确希望把原先藏在资产库局部的登录前置化，避免未登录用户误以为 Web 是“每个浏览器用户自带 provider key/base URL 的生图前端”。这也降低了公网部署时误操作旧 provider 路径、看到无意义长 ID 或误解凭据边界的风险。
+- Impact: `Admin Login` 是进入 Web 控制台的门；`Project API Key` 继续服务 MCP/CLI/REST 外部 project 调用；`Basic Auth` 继续作为实例级保护；`provider key/base URL` 继续只属于服务器环境变量或受控服务端配置。Settings 信息架构仍需后续独立设计，本轮只做 server-first 文案收敛和主路径中文化。
+
+## 2026-06-22: 生产 Web 入口采用同源 Admin delivery
+
+- Decision: 服务器部署后的正式浏览器入口采用 Web 同源模式：Web 镜像代理 `/api/*` 与 `/healthz` 到内部 API，`PUBLIC_BASE_URL` 指向 Web/HTTPS 公开 origin；Admin session cookie 可授权 asset thumbnail/original/metadata 读取。实例级 Basic Auth 继续作为外部 API/运维保护，但图片 delivery 的未授权响应不返回浏览器原生 Basic challenge。
+- Reason: 公网部署后 Web 与 API 分端口会形成不同 origin，`<img>` 无法携带 Web settings 里的 Authorization header，导致缩略图 401 和浏览器弹出 `http://host:api_port` 登录框。用户需要的是登录 Web 后直接审图，而不是在图片资源请求上处理 Basic Auth。
+- Impact: Web 默认 Agent ImageFlow API URL 改为浏览器当前 origin 优先，本地非浏览器环境回退 `http://localhost:8081`；新增 Admin runtime status 只读接口和控制台安全摘要；资产库增加 Current Scope 导航并把 Project Context 提升为 project 工作区入口。Basic Auth、Admin Login、Project API Key、provider key 继续是四种不同概念，provider key 不进入前端 bundle、localStorage、响应 JSON 或日志。
+
 ## 2026-06-22: 当前 main 作为 V1 baseline，后续只按独立 CSV 继续推进
 
 - Decision: 当前 `main` 可暂定为 Agent ImageFlow V1 baseline。V1 已包含核心资产生产、Project Visual Context、Batch/Story/Scene Production View、Web Operator Review Console、JSON manifest、NAS/Docker 文件访问边界和 GHCR 发布流水线。后续不再复开已完成的 P1/P2 CSV，而是按 `docs/project/V1_BASELINE_AND_ROADMAP.md` 重新拆独立 CSV。

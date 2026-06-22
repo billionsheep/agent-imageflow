@@ -125,6 +125,108 @@ func TestAuthorizeRequestRejectsAnonymousRecentAssets(t *testing.T) {
 	}
 }
 
+func TestAssetDeliveryUnauthorizedDoesNotSendBasicChallenge(t *testing.T) {
+	server := &Server{
+		options: Options{
+			BasicAuthUsername: "basic",
+			BasicAuthPassword: "secret",
+		},
+	}
+	for _, parts := range [][]string{
+		{"api", "assets", "asset_1", "thumbnail"},
+		{"api", "assets", "asset_1", "original"},
+		{"api", "assets", "asset_1", "metadata"},
+	} {
+		if !routeAllowsAdminSession(parts, http.MethodGet) {
+			t.Fatalf("expected delivery route %v to allow admin session", parts)
+		}
+		if shouldSendBasicChallenge(parts, http.MethodGet) {
+			t.Fatalf("delivery route %v should suppress browser Basic challenge", parts)
+		}
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/"+strings.Join(parts, "/"), nil)
+
+		authorized, _, _, err := server.authorizeRequest(recorder, request, parts)
+		if err != nil {
+			t.Fatalf("authorizeRequest returned error for %v: %v", parts, err)
+		}
+		if authorized {
+			t.Fatalf("expected anonymous delivery request to be rejected for %v", parts)
+		}
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for %v, got %d body=%s", parts, recorder.Code, recorder.Body.String())
+		}
+		if got := recorder.Header().Get("WWW-Authenticate"); got != "" {
+			t.Fatalf("delivery route %v should not send browser Basic challenge, got %q", parts, got)
+		}
+	}
+}
+
+func TestRuntimeStatusRequiresAdminAndRedactsSecrets(t *testing.T) {
+	server := &Server{
+		options: Options{
+			BasicAuthUsername: "basic",
+			BasicAuthPassword: "basic-secret",
+			AdminUsername:     "admin",
+			AdminPassword:     "admin-secret",
+			AdminSessionTTL:   time.Hour,
+			Runtime: RuntimeStatusOptions{
+				PublicBaseURL:                  "https://imageflow.example.com",
+				DefaultProvider:                "openai-compatible",
+				OpenAICompatibleModel:          "gpt-image-2",
+				OpenAICompatibleConfigured:     true,
+				OpenAICompatibleMaxConcurrency: 2,
+				FalModel:                       "fal-model",
+				FalConfigured:                  false,
+				FalMaxConcurrency:              1,
+				ProviderTimeoutSeconds:         300,
+				WorkerConcurrency:              1,
+				RateLimitWindowSeconds:         60,
+				RateLimitInstanceMaxRequests:   120,
+				RateLimitProjectMaxRequests:    60,
+			},
+		},
+	}
+
+	unauthorizedRecorder := httptest.NewRecorder()
+	server.ServeHTTP(unauthorizedRecorder, httptest.NewRequest(http.MethodGet, "/api/admin/runtime-status", nil))
+	if unauthorizedRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized runtime status without admin session, got %d", unauthorizedRecorder.Code)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/runtime-status", nil)
+	request.AddCookie(server.newAdminSessionCookie("admin", time.Now().Add(time.Hour)))
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("runtime status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, forbidden := range []string{"basic-secret", "admin-secret", "api_key", "password", "secret", "cookie", "token"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("runtime status leaked forbidden text %q in body %s", forbidden, body)
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode runtime status: %v", err)
+	}
+	if payload["authenticated"] != true || payload["username"] != "admin" {
+		t.Fatalf("unexpected runtime auth payload: %#v", payload)
+	}
+	if payload["default_provider"] != "openai-compatible" {
+		t.Fatalf("unexpected default provider: %#v", payload)
+	}
+	providers, ok := payload["providers"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected providers map, got %#v", payload["providers"])
+	}
+	openai, ok := providers["openai_compatible"].(map[string]any)
+	if !ok || openai["configured"] != true || openai["model"] != "gpt-image-2" {
+		t.Fatalf("unexpected openai-compatible status: %#v", providers["openai_compatible"])
+	}
+}
+
 func TestSetCORSEchoesOriginWhenCredentialsAreAllowed(t *testing.T) {
 	server := &Server{}
 	recorder := httptest.NewRecorder()

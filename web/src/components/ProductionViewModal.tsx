@@ -7,6 +7,7 @@ import {
   normalizeAgentImageflowApiBaseUrl,
   rejectAgentImageflowAsset,
   regenerateAgentImageflowSceneTask,
+  resolveAgentImageflowDeliveryUrl,
   selectAgentImageflowAsset,
   type AgentImageflowAuth,
   type AgentImageflowAssetResponse,
@@ -86,10 +87,7 @@ function statusClassName(status: string): string {
 }
 
 function resolveApiUrl(baseUrl: string, value?: string): string {
-  if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value
-  if (value.startsWith('/')) return `${baseUrl}${value}`
-  return value
+  return resolveAgentImageflowDeliveryUrl(baseUrl, value)
 }
 
 function getTaskErrorSummary(tasks: AgentImageflowBatchStorySummaryTask[]): string {
@@ -115,9 +113,9 @@ function pickPrimarySelectedAssetId(assets: AgentImageflowBatchStorySummaryAsset
 }
 
 function getManifestModeLabel(mode: ManifestMode): string {
-  if (mode === 'selected') return 'Selected manifest'
-  if (mode === 'includeRejected') return 'All + rejected'
-  return 'All manifest'
+  if (mode === 'selected') return '已选 manifest'
+  if (mode === 'includeRejected') return '全部含拒绝'
+  return '全部 manifest'
 }
 
 function toSafeManifestFilePart(value: string): string {
@@ -303,7 +301,7 @@ function SceneCard({
                   {scene.status}
                 </span>
                 <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${hasSelectedAsset ? statusClassName('selected') : statusClassName('queued')}`}>
-                  {hasSelectedAsset ? 'selected asset' : 'missing selected'}
+                  {hasSelectedAsset ? '已有选中图' : '缺少选中图'}
                 </span>
               </div>
               <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" title={scene.story_id}>
@@ -311,28 +309,28 @@ function SceneCard({
               </div>
             </div>
             <div className="grid min-w-[180px] grid-cols-3 gap-2 text-center">
-              <SummaryStat label="tasks" value={scene.counts.task_count} />
-              <SummaryStat label="assets" value={scene.counts.asset_count} />
-              <SummaryStat label="selected" value={selectedCoverage} tone={scene.counts.selected_asset_count > 0 ? 'good' : 'bad'} />
+              <SummaryStat label="任务" value={scene.counts.task_count} />
+              <SummaryStat label="资产" value={scene.counts.asset_count} />
+              <SummaryStat label="已选" value={selectedCoverage} tone={scene.counts.selected_asset_count > 0 ? 'good' : 'bad'} />
             </div>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="order" value={scene.scene_order} />
-            <Field label="latest task" value={scene.latest_task_id} />
-            <Field label="primary selected" value={scene.primary_selected_asset_id} />
+            <Field label="顺序" value={scene.scene_order} />
+            <Field label="最新任务" value={scene.latest_task_id} />
+            <Field label="主选资产" value={scene.primary_selected_asset_id} />
             <Field label="target" value={scene.target_path} />
-            <Field label="succeeded" value={scene.counts.succeeded_count} />
-            <Field label="failed" value={scene.counts.failed_count} />
-            <Field label="attempts" value={scene.counts.attempt_count} />
-            <Field label="rejected" value={scene.counts.rejected_asset_count} />
+            <Field label="成功" value={scene.counts.succeeded_count} />
+            <Field label="失败" value={scene.counts.failed_count} />
+            <Field label="尝试" value={scene.counts.attempt_count} />
+            <Field label="拒绝" value={scene.counts.rejected_asset_count} />
           </div>
 
           {scene.visual_context && (
             <div className="grid gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03] sm:grid-cols-3">
-              <Field label="characters" value={scene.visual_context.character_ids?.join(', ')} />
-              <Field label="references" value={scene.visual_context.reference_asset_ids?.join(', ')} />
-              <Field label="recipe" value={scene.visual_context.prompt_recipe_id} />
+              <Field label="角色" value={scene.visual_context.character_ids?.join(', ')} />
+              <Field label="参考图" value={scene.visual_context.reference_asset_ids?.join(', ')} />
+              <Field label="配方" value={scene.visual_context.prompt_recipe_id} />
             </div>
           )}
 
@@ -344,7 +342,7 @@ function SceneCard({
 
           <div className="grid gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
-              <span className="mb-1 block uppercase">regenerate reason</span>
+              <span className="mb-1 block uppercase">重生成原因</span>
               <input
                 value={regenerateReason}
                 onChange={(event) => onRegenerateReasonChange(sceneKey, event.target.value)}
@@ -354,7 +352,7 @@ function SceneCard({
               />
               {hasSelectedAsset && (
                 <span className="mt-1 block truncate text-[11px] text-emerald-700 dark:text-emerald-200">
-                  selected preserved; regenerate will not auto replace it
+                  已选图会保留；重生成不会自动替换它
                 </span>
               )}
             </label>
@@ -362,20 +360,20 @@ function SceneCard({
               type="button"
               onClick={() => onRegenerateScene(scene)}
               disabled={regenerateDisabled}
-              title={scene.latest_task_id ? `Regenerate from ${scene.latest_task_id}` : 'No latest task to regenerate'}
+              title={scene.latest_task_id ? `从 ${scene.latest_task_id} 重生成` : '没有可重生成的最新任务'}
               className="inline-flex h-8 min-w-[112px] items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
             >
-              {regeneratePending ? 'Creating' : 'Regenerate'}
+              {regeneratePending ? '创建中' : '重生成'}
             </button>
             {!scene.latest_task_id && (
               <div className="break-words text-[11px] text-gray-400 dark:text-gray-500 sm:col-span-2">
-                No latest task is available for this scene.
+                该 scene 没有可重生成的最新任务。
               </div>
             )}
             {regenerateResult && (
               <div className="min-w-0 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-100 sm:col-span-2">
                 <div className="truncate" title={`${regenerateResult.task_id} / ${regenerateResult.status}`}>
-                  new task {regenerateResult.task_id} · {regenerateResult.status}
+                  新任务 {regenerateResult.task_id} · {regenerateResult.status}
                 </div>
                 {regenerateResult.warnings && regenerateResult.warnings.length > 0 && (
                   <div className="mt-1 line-clamp-2 break-words text-emerald-700 dark:text-emerald-200">
@@ -397,7 +395,7 @@ function SceneCard({
                 <div className="min-w-0">
                   <div className="truncate text-xs font-medium text-gray-700 dark:text-gray-200" title={task.task_id}>{task.task_id}</div>
                   <div className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">
-                    {formatDate(task.created_at)} · assets {task.asset_count} · attempts {task.attempt_count}
+                    {formatDate(task.created_at)} · 资产 {task.asset_count} · 尝试 {task.attempt_count}
                   </div>
                 </div>
                 <span className={`w-fit rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClassName(task.retrying ? 'retrying' : task.status)}`}>
@@ -427,7 +425,7 @@ function SceneCard({
                       disabled={pendingAssetIds[asset.asset_id] || asset.status === 'selected'}
                       className="inline-flex h-7 min-w-[74px] items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
                     >
-                      {pendingAssetIds[asset.asset_id] ? 'Saving' : 'Select'}
+                      {pendingAssetIds[asset.asset_id] ? '保存中' : '选中'}
                     </button>
                     <button
                       type="button"
@@ -435,18 +433,18 @@ function SceneCard({
                       disabled={pendingAssetIds[asset.asset_id] || asset.status === 'rejected'}
                       className="inline-flex h-7 min-w-[74px] items-center justify-center rounded-lg border border-red-200 bg-red-50 px-2 text-[11px] font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
                     >
-                      {pendingAssetIds[asset.asset_id] ? 'Saving' : 'Reject'}
+                      {pendingAssetIds[asset.asset_id] ? '保存中' : '拒绝'}
                     </button>
                     {asset.download_url && (
                       <a href={resolveApiUrl(baseUrl, asset.download_url)} target="_blank" rel="noopener noreferrer" className="inline-flex h-7 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                         <LinkIcon className="h-3 w-3" />
-                        Original
+                        原图
                       </a>
                     )}
                     {asset.metadata_url && (
                       <a href={resolveApiUrl(baseUrl, asset.metadata_url)} target="_blank" rel="noopener noreferrer" className="inline-flex h-7 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                         <LinkIcon className="h-3 w-3" />
-                        Metadata
+                        元数据
                       </a>
                     )}
                   </div>
@@ -616,7 +614,7 @@ export default function ProductionViewModal() {
       showToast(`${getManifestModeLabel(mode)} 已导出`, 'success')
     } catch (nextError) {
       const message = isAgentImageflowUnauthorizedError(nextError)
-        ? 'unauthorized / login required'
+        ? '未授权 / 需要重新登录'
         : nextError instanceof Error ? nextError.message : String(nextError)
       if (isAgentImageflowUnauthorizedError(nextError)) setUnauthorized(true)
       setManifestError(message)
@@ -648,10 +646,10 @@ export default function ProductionViewModal() {
         ? await selectAgentImageflowAsset(baseUrl, asset.asset_id, auth)
         : await rejectAgentImageflowAsset(baseUrl, asset.asset_id, auth)
       setSummary((current) => current ? updateSummaryWithReviewedAsset(current, sceneKey, asset.asset_id, response) : current)
-      showToast(action === 'select' ? '已标记为 selected' : '已标记为 rejected', 'success')
+      showToast(action === 'select' ? '已标记为选中' : '已标记为拒绝', 'success')
     } catch (nextError) {
       const message = isAgentImageflowUnauthorizedError(nextError)
-        ? 'unauthorized / login required'
+        ? '未授权 / 需要重新登录'
         : nextError instanceof Error ? nextError.message : String(nextError)
       if (isAgentImageflowUnauthorizedError(nextError)) setUnauthorized(true)
       setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
@@ -691,11 +689,11 @@ export default function ProductionViewModal() {
         created_by: 'web',
       })
       setRegenerationResults((current) => ({ ...current, [sceneKey]: response }))
-      showToast(`已创建 regenerate task ${response.task_id}`, 'success')
+      showToast(`已创建重生成任务 ${response.task_id}`, 'success')
       await loadSummary()
     } catch (nextError) {
       const message = isAgentImageflowUnauthorizedError(nextError)
-        ? 'unauthorized / login required'
+        ? '未授权 / 需要重新登录'
         : nextError instanceof Error ? nextError.message : String(nextError)
       if (isAgentImageflowUnauthorizedError(nextError)) setUnauthorized(true)
       setRegenerationErrors((current) => ({ ...current, [sceneKey]: message }))
@@ -714,13 +712,13 @@ export default function ProductionViewModal() {
     : '0/0'
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/35 p-3 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-label="Production View">
+    <div className="fixed inset-0 z-[110] bg-black/35 p-3 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-label="批次生产视图">
       <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-lg border border-gray-200/80 bg-white shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-950 dark:ring-white/10">
         <div className="flex min-h-14 items-center justify-between gap-3 border-b border-gray-100 px-4 dark:border-white/[0.08]">
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">Production View</div>
+            <div className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">批次生产视图</div>
             <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-              {scopeReady ? `${scope.workspaceId} / ${scope.projectId} / ${scope.campaignId}` : 'scope incomplete'}
+              {scopeReady ? `${scope.workspaceId} / ${scope.projectId} / ${scope.campaignId}` : '业务空间不完整'}
             </div>
           </div>
           <button
@@ -747,13 +745,13 @@ export default function ProductionViewModal() {
                   onChange={(event) => updateFilter('status', event.target.value)}
                   className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-gray-950/50 dark:text-gray-100 dark:focus:border-blue-500/60"
                 >
-                  <option value="">All</option>
-                  <option value="queued">Queued</option>
-                  <option value="running">Running</option>
-                  <option value="completed">Completed</option>
-                  <option value="partially_completed">Partial</option>
-                  <option value="failed">Failed</option>
-                  <option value="enqueue_failed">Enqueue failed</option>
+                  <option value="">全部</option>
+                  <option value="queued">排队中</option>
+                  <option value="running">运行中</option>
+                  <option value="completed">已完成</option>
+                  <option value="partially_completed">部分完成</option>
+                  <option value="failed">失败</option>
+                  <option value="enqueue_failed">入队失败</option>
                 </select>
               </label>
               <FilterInput label="limit" value={filters.limit} placeholder="100" onChange={(value) => updateFilter('limit', value)} />
@@ -764,12 +762,12 @@ export default function ProductionViewModal() {
                   onChange={(event) => updateFilter('includeSetup', event.target.checked)}
                   className="mb-0.5"
                 />
-                <span className="truncate">include setup</span>
+                <span className="truncate">包含准备任务</span>
               </label>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
-                At least one of session_id or batch_id is required.
+                至少需要填写 session_id 或 batch_id 之一。
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -781,7 +779,7 @@ export default function ProductionViewModal() {
                       disabled={!scopeReady || !queryReady || Boolean(pendingManifestModes[mode])}
                       className="inline-flex h-9 min-w-[128px] items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
                     >
-                      {pendingManifestModes[mode] ? 'Exporting' : getManifestModeLabel(mode)}
+                      {pendingManifestModes[mode] ? '导出中' : getManifestModeLabel(mode)}
                     </button>
                   ))}
                 </div>
@@ -791,7 +789,7 @@ export default function ProductionViewModal() {
                     onClick={clearFilters}
                     className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-500 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
                   >
-                    Clear
+                    清空
                   </button>
                 )}
                 <button
@@ -800,7 +798,7 @@ export default function ProductionViewModal() {
                   className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200"
                 >
                   <RefreshIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                  Query
+                  查询
                 </button>
               </div>
             </div>
@@ -818,41 +816,41 @@ export default function ProductionViewModal() {
           )}
           {unauthorized && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
-              unauthorized / login required. 请先登录 Admin session，或在设置中配置可访问当前 project 的 Basic Auth / project API key。
+              未授权 / 需要登录。请重新登录控制台，或确认当前 project 的外部调用凭据可用。
             </div>
           )}
           {loading && summary && (
             <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
-              正在刷新 production summary，当前结果会保留到新结果返回。
+              正在刷新批次摘要，当前结果会保留到新结果返回。
             </div>
           )}
 
           {!summary && loading ? (
             <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-              正在加载 batch / story / scene summary...
+              正在加载 batch / story / scene 摘要...
             </div>
           ) : !summary && !loading && !unauthorized && !error ? (
             <div className="mt-4 rounded-lg border border-dashed border-gray-200 px-4 py-10 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-              {queryReady ? '已带入 batch / session filters，点击 Query 查看 production summary。' : '输入 session_id 或 batch_id 后查询 production summary。'}
+              {queryReady ? '已带入 batch / session 筛选，点击查询查看批次摘要。' : '输入 session_id 或 batch_id 后查询批次摘要。'}
             </div>
           ) : summary ? (
             <div className="mt-4 space-y-4">
               <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-8">
-                <SummaryStat label="stories" value={summary.counts.story_count} />
-                <SummaryStat label="scenes" value={summary.counts.scene_count} />
-                <SummaryStat label="selected coverage" value={selectedCoverage} tone={summary.counts.scene_missing_selected_count === 0 ? 'good' : 'bad'} />
-                <SummaryStat label="tasks" value={summary.counts.task_count} />
-                <SummaryStat label="assets" value={summary.counts.asset_count} />
-                <SummaryStat label="running" value={summary.counts.running_count} />
-                <SummaryStat label="failed" value={summary.counts.failed_count} tone={summary.counts.failed_count > 0 ? 'bad' : 'default'} />
-                <SummaryStat label="excluded setup" value={summary.counts.excluded_setup_task_count} />
+                <SummaryStat label="故事" value={summary.counts.story_count} />
+                <SummaryStat label="场景" value={summary.counts.scene_count} />
+                <SummaryStat label="选中覆盖" value={selectedCoverage} tone={summary.counts.scene_missing_selected_count === 0 ? 'good' : 'bad'} />
+                <SummaryStat label="任务" value={summary.counts.task_count} />
+                <SummaryStat label="资产" value={summary.counts.asset_count} />
+                <SummaryStat label="运行中" value={summary.counts.running_count} />
+                <SummaryStat label="失败" value={summary.counts.failed_count} tone={summary.counts.failed_count > 0 ? 'bad' : 'default'} />
+                <SummaryStat label="排除准备" value={summary.counts.excluded_setup_task_count} />
               </div>
 
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
                 <div className="space-y-3">
                   {summary.scenes.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-                      当前查询没有 scene production rows。
+                      当前查询没有场景生产记录。
                     </div>
                   ) : summary.scenes.map((scene) => (
                     <SceneCard
@@ -873,27 +871,27 @@ export default function ProductionViewModal() {
                 </div>
                 <aside className="min-w-0 space-y-3">
                   <div className="rounded-lg border border-gray-200/80 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
-                    <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">Batch</div>
+                    <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">批次</div>
                     <div className="mt-3 grid gap-2">
-                      <Field label="generated" value={formatDate(summary.generated_at)} />
-                      <Field label="project" value={summary.project_id} />
-                      <Field label="campaign" value={summary.campaign_id} />
-                      <Field label="session" value={summary.session_id} />
-                      <Field label="batch" value={summary.batch_id} />
-                      <Field label="source" value={summary.source} />
-                      <Field label="story filter" value={summary.story_id} />
+                      <Field label="生成时间" value={formatDate(summary.generated_at)} />
+                      <Field label="项目" value={summary.project_id} />
+                      <Field label="生产批次" value={summary.campaign_id} />
+                      <Field label="Session" value={summary.session_id} />
+                      <Field label="Batch" value={summary.batch_id} />
+                      <Field label="来源" value={summary.source} />
+                      <Field label="故事筛选" value={summary.story_id} />
                     </div>
                   </div>
                   <div className="rounded-lg border border-gray-200/80 bg-white p-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
-                    <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">Stories</div>
+                    <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">故事</div>
                     <div className="mt-3 space-y-2">
                       {summary.stories.length === 0 ? (
-                        <div className="text-xs text-gray-400 dark:text-gray-500">no stories</div>
+                        <div className="text-xs text-gray-400 dark:text-gray-500">暂无故事</div>
                       ) : summary.stories.map((story) => (
                         <div key={story.story_id} className="min-w-0 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
                           <div className="truncate text-xs font-medium text-gray-700 dark:text-gray-200" title={story.story_id}>{story.story_id}</div>
                           <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                            {story.selected_scene_count}/{story.scene_count} selected
+                            {story.selected_scene_count}/{story.scene_count} 已选中
                           </div>
                           <div className="mt-1 line-clamp-3 break-words text-[11px] text-gray-400 dark:text-gray-500" title={story.scenes.join(', ')}>
                             {story.scenes.join(', ')}

@@ -150,6 +150,17 @@ function compactText(value?: string): string {
   return value?.trim() || '-'
 }
 
+function activeItems<T extends { status?: string }>(items: T[]): T[] {
+  return items.filter((item) => item.status !== 'archived')
+}
+
+function compactListPreview(values: string[]): string {
+  const cleaned = values.map((value) => value.trim()).filter(Boolean)
+  if (cleaned.length === 0) return '-'
+  const visible = cleaned.slice(0, 3).join(', ')
+  return cleaned.length > 3 ? `${visible} +${cleaned.length - 3}` : visible
+}
+
 function parseJsonObject(text: string, label: string): Record<string, unknown> | undefined {
   const trimmed = text.trim()
   if (!trimmed || trimmed === '{}') return undefined
@@ -256,6 +267,23 @@ export default function ProjectContextModal() {
   const [referenceDraft, setReferenceDraft] = useState<ReferenceDraft>(EMPTY_REFERENCE_DRAFT)
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
   const [recipeDraft, setRecipeDraft] = useState<RecipeDraft>(EMPTY_RECIPE_DRAFT)
+  const activeCharacters = useMemo(() => activeItems(normalizedContext.characters), [normalizedContext.characters])
+  const activeReferences = useMemo(() => activeItems(normalizedContext.references), [normalizedContext.references])
+  const activeRecipes = useMemo(() => activeItems(normalizedContext.prompt_recipes), [normalizedContext.prompt_recipes])
+  const overviewRows = useMemo(() => [
+    {
+      label: '角色卡',
+      value: compactListPreview(activeCharacters.map((character) => character.name || character.id)),
+    },
+    {
+      label: '参考图',
+      value: compactListPreview(activeReferences.map((reference) => reference.label || `${reference.purpose}:${reference.asset_id}`)),
+    },
+    {
+      label: 'Prompt 配方',
+      value: compactListPreview(activeRecipes.map((recipe) => recipe.name || recipe.id)),
+    },
+  ], [activeCharacters, activeReferences, activeRecipes])
 
   const close = useCallback(() => setShowProjectContext(false), [setShowProjectContext])
   useCloseOnEscape(open, close)
@@ -456,16 +484,31 @@ export default function ProjectContextModal() {
       >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200/70 px-4 py-3 dark:border-white/[0.08]">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">Project Context</div>
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">项目视觉上下文</div>
             <div className="mt-1 break-all text-xs text-gray-500 dark:text-gray-400">
               {scopeReady ? `${scope.workspaceId} / ${scope.projectId}` : '请选择 workspace / project'}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <SummaryPill label="characters" value={normalizedContext.characters.length} />
-              <SummaryPill label="references" value={normalizedContext.references.length} />
-              <SummaryPill label="recipes" value={normalizedContext.prompt_recipes.length} />
-              <SummaryPill label="updated" value={formatDate(context?.updated_at)} />
+              <SummaryPill label="角色" value={normalizedContext.characters.length} />
+              <SummaryPill label="参考图" value={normalizedContext.references.length} />
+              <SummaryPill label="配方" value={normalizedContext.prompt_recipes.length} />
+              <SummaryPill label="更新" value={formatDate(context?.updated_at)} />
             </div>
+            {scopeReady && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {overviewRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className="min-w-0 rounded-xl border border-gray-200/70 bg-gray-50/70 px-3 py-2 text-xs dark:border-white/[0.08] dark:bg-white/[0.04]"
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{row.label}</div>
+                    <div className="mt-1 truncate text-gray-700 dark:text-gray-200" title={row.value}>
+                      {row.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -490,9 +533,9 @@ export default function ProjectContextModal() {
 
         <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-gray-200/70 bg-gray-50/70 px-4 py-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
           {([
-            ['characters', 'Characters'],
-            ['references', 'References'],
-            ['recipes', 'Prompt Recipes'],
+            ['characters', '角色卡'],
+            ['references', '参考图'],
+            ['recipes', 'Prompt 配方'],
           ] as const).map(([tab, label]) => (
             <button
               key={tab}
@@ -503,7 +546,7 @@ export default function ProjectContextModal() {
               {label}
             </button>
           ))}
-          {saving && <span className="ml-auto self-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">saving</span>}
+          {saving && <span className="ml-auto self-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">保存中</span>}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -513,7 +556,7 @@ export default function ProjectContextModal() {
             </div>
           ) : unauthorized ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
-              unauthorized / login required。请在同一 host 登录 Admin Console 后重试。
+              未授权 / 需要登录。请重新登录控制台后重试。
             </div>
           ) : (
             <>
@@ -532,34 +575,34 @@ export default function ProjectContextModal() {
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                   <form onSubmit={handleCharacterSubmit} className="space-y-3 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingCharacterId ? 'Edit Character' : 'New Character'}</div>
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingCharacterId ? '编辑角色卡' : '新建角色卡'}</div>
                       {editingCharacterId && (
                         <button type="button" onClick={() => { setEditingCharacterId(null); setCharacterDraft(EMPTY_CHARACTER_DRAFT) }} className="text-[11px] text-gray-500 hover:text-blue-600">
-                          Cancel
+                          取消
                         </button>
                       )}
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Field label="id"><input value={characterDraft.id} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, id: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="name"><input value={characterDraft.name} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="status">
+                      <Field label="名称"><input value={characterDraft.name} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="状态">
                         <select value={characterDraft.status} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, status: event.target.value }))} className={inputClass}>
-                          <option value="active">active</option>
-                          <option value="archived">archived</option>
+                          <option value="active">启用</option>
+                          <option value="archived">归档</option>
                         </select>
                       </Field>
-                      <Field label="role"><input value={characterDraft.role} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, role: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="角色定位"><input value={characterDraft.role} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, role: event.target.value }))} className={inputClass} /></Field>
                     </div>
-                    <Field label="appearance"><textarea value={characterDraft.appearance} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, appearance: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="personality"><textarea value={characterDraft.personality} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, personality: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="外观描述"><textarea value={characterDraft.appearance} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, appearance: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="性格描述"><textarea value={characterDraft.personality} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, personality: event.target.value }))} className={textareaClass} /></Field>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Field label="primary asset"><input value={characterDraft.primaryAssetId} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, primaryAssetId: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="reference assets"><textarea value={characterDraft.referenceAssetIdsText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referenceAssetIdsText: event.target.value }))} className={textareaClass} /></Field>
+                      <Field label="主参考资产"><input value={characterDraft.primaryAssetId} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, primaryAssetId: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="其他参考资产"><textarea value={characterDraft.referenceAssetIdsText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referenceAssetIdsText: event.target.value }))} className={textareaClass} /></Field>
                     </div>
-                    <Field label="forbidden"><textarea value={characterDraft.forbiddenText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, forbiddenText: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="禁止项"><textarea value={characterDraft.forbiddenText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, forbiddenText: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
-                      Save Character
+                      保存角色卡
                     </button>
                   </form>
 
@@ -576,16 +619,16 @@ export default function ProjectContextModal() {
                           <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{character.status || 'active'}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="break-words"><span className="text-gray-400">role:</span> {compactText(character.role)}</div>
-                          <div className="break-words"><span className="text-gray-400">appearance:</span> {compactText(character.appearance)}</div>
-                          <div className="break-words"><span className="text-gray-400">forbidden:</span> {(character.forbidden ?? []).join(', ') || '-'}</div>
-                          <div className="break-words"><span className="text-gray-400">references:</span> {[character.primary_asset_id, ...(character.reference_asset_ids ?? [])].filter(Boolean).join(', ') || '-'}</div>
+                          <div className="break-words"><span className="text-gray-400">定位：</span> {compactText(character.role)}</div>
+                          <div className="break-words"><span className="text-gray-400">外观：</span> {compactText(character.appearance)}</div>
+                          <div className="break-words"><span className="text-gray-400">禁止项：</span> {(character.forbidden ?? []).join(', ') || '-'}</div>
+                          <div className="break-words"><span className="text-gray-400">参考资产：</span> {[character.primary_asset_id, ...(character.reference_asset_ids ?? [])].filter(Boolean).join(', ') || '-'}</div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => { setEditingCharacterId(character.id); setCharacterDraft(characterToDraft(character)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">Edit</button>
+                          <button type="button" onClick={() => { setEditingCharacterId(character.id); setCharacterDraft(characterToDraft(character)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑</button>
                           <button type="button" onClick={() => archiveCharacter(character)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                             <ArchiveIcon className="h-3.5 w-3.5" />
-                            {character.status === 'archived' ? 'Restore' : 'Archive'}
+                            {character.status === 'archived' ? '恢复' : '归档'}
                           </button>
                         </div>
                       </article>
@@ -597,32 +640,32 @@ export default function ProjectContextModal() {
               {activeTab === 'references' && (
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                   <form onSubmit={handleReferenceSubmit} className="space-y-3 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">Mark Asset As Reference</div>
+                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">标记资产为参考图</div>
                     <Field label="asset_id"><input value={referenceDraft.assetId} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, assetId: event.target.value }))} className={inputClass} /></Field>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Field label="purpose">
+                      <Field label="用途">
                         <select value={referenceDraft.purpose} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, purpose: event.target.value as AgentImageflowReferencePurpose }))} className={inputClass}>
-                          <option value="character">character</option>
-                          <option value="style">style</option>
-                          <option value="scene">scene</option>
-                          <option value="prop">prop</option>
+                          <option value="character">角色</option>
+                          <option value="style">风格</option>
+                          <option value="scene">场景</option>
+                          <option value="prop">道具</option>
                         </select>
                       </Field>
-                      <Field label="character">
+                      <Field label="绑定角色">
                         <select value={referenceDraft.characterId} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, characterId: event.target.value }))} className={inputClass}>
-                          <option value="">none</option>
+                          <option value="">无</option>
                           {normalizedContext.characters.map((character) => (
                             <option key={character.id} value={character.id}>{character.name || character.id}</option>
                           ))}
                         </select>
                       </Field>
-                      <Field label="label"><input value={referenceDraft.label} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, label: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="weight"><input type="number" min="0.1" max="5" step="0.1" value={referenceDraft.weight} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, weight: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="标签"><input value={referenceDraft.label} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, label: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="权重"><input type="number" min="0.1" max="5" step="0.1" value={referenceDraft.weight} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, weight: event.target.value }))} className={inputClass} /></Field>
                     </div>
-                    <Field label="notes"><textarea value={referenceDraft.notes} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, notes: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="备注"><textarea value={referenceDraft.notes} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, notes: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
-                      Save Reference
+                      保存参考图
                     </button>
                   </form>
 
@@ -639,16 +682,16 @@ export default function ProjectContextModal() {
                           <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{reference.purpose}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="break-words"><span className="text-gray-400">status:</span> {reference.status || 'active'}</div>
-                          <div className="break-words"><span className="text-gray-400">character:</span> {compactText(reference.character_id)}</div>
-                          <div className="break-words"><span className="text-gray-400">weight:</span> {reference.weight ?? 1}</div>
-                          <div className="break-words"><span className="text-gray-400">notes:</span> {compactText(reference.notes)}</div>
+                          <div className="break-words"><span className="text-gray-400">状态：</span> {reference.status === 'archived' ? '归档' : '启用'}</div>
+                          <div className="break-words"><span className="text-gray-400">绑定角色：</span> {compactText(reference.character_id)}</div>
+                          <div className="break-words"><span className="text-gray-400">权重：</span> {reference.weight ?? 1}</div>
+                          <div className="break-words"><span className="text-gray-400">备注：</span> {compactText(reference.notes)}</div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => setReferenceDraft({ assetId: reference.asset_id, purpose: reference.purpose, label: reference.label ?? '', characterId: reference.character_id ?? '', weight: String(reference.weight ?? 1), notes: reference.notes ?? '' })} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">Edit Binding</button>
+                          <button type="button" onClick={() => setReferenceDraft({ assetId: reference.asset_id, purpose: reference.purpose, label: reference.label ?? '', characterId: reference.character_id ?? '', weight: String(reference.weight ?? 1), notes: reference.notes ?? '' })} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑绑定</button>
                           <button type="button" onClick={() => archiveReference(reference)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                             <ArchiveIcon className="h-3.5 w-3.5" />
-                            {reference.status === 'archived' ? 'Restore' : 'Archive'}
+                            {reference.status === 'archived' ? '恢复' : '归档'}
                           </button>
                         </div>
                       </article>
@@ -661,42 +704,42 @@ export default function ProjectContextModal() {
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                   <form onSubmit={handleRecipeSubmit} className="space-y-3 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingRecipeId ? 'Edit Prompt Recipe' : 'New Prompt Recipe'}</div>
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingRecipeId ? '编辑 Prompt 配方' : '新建 Prompt 配方'}</div>
                       {editingRecipeId && (
                         <button type="button" onClick={() => { setEditingRecipeId(null); setRecipeDraft(EMPTY_RECIPE_DRAFT) }} className="text-[11px] text-gray-500 hover:text-blue-600">
-                          Cancel
+                          取消
                         </button>
                       )}
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Field label="id"><input value={recipeDraft.id} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, id: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="name"><input value={recipeDraft.name} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="status">
+                      <Field label="名称"><input value={recipeDraft.name} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="状态">
                         <select value={recipeDraft.status} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, status: event.target.value }))} className={inputClass}>
-                          <option value="active">active</option>
-                          <option value="archived">archived</option>
+                          <option value="active">启用</option>
+                          <option value="archived">归档</option>
                         </select>
                       </Field>
-                      <Field label="aspect"><input value={recipeDraft.defaultAspectRatio} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultAspectRatio: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="format"><input value={recipeDraft.defaultOutputFormat} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultOutputFormat: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="画幅"><input value={recipeDraft.defaultAspectRatio} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultAspectRatio: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="格式"><input value={recipeDraft.defaultOutputFormat} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultOutputFormat: event.target.value }))} className={inputClass} /></Field>
                       <Field label="provider"><input value={recipeDraft.defaultProvider} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultProvider: event.target.value }))} className={inputClass} /></Field>
                       <Field label="model"><input value={recipeDraft.defaultModel} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultModel: event.target.value }))} className={inputClass} /></Field>
                     </div>
-                    <Field label="character block"><textarea value={recipeDraft.characterBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, characterBlock: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="style block"><textarea value={recipeDraft.styleBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, styleBlock: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="camera block"><textarea value={recipeDraft.cameraBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, cameraBlock: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="channel block"><textarea value={recipeDraft.channelBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, channelBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="角色描述块"><textarea value={recipeDraft.characterBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, characterBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="风格描述块"><textarea value={recipeDraft.styleBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, styleBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="镜头描述块"><textarea value={recipeDraft.cameraBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, cameraBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="渠道要求块"><textarea value={recipeDraft.channelBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, channelBlock: event.target.value }))} className={textareaClass} /></Field>
                     <Field label="negative prompt"><textarea value={recipeDraft.negativePrompt} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, negativePrompt: event.target.value }))} className={textareaClass} /></Field>
                     <Field label="generation_config"><textarea value={recipeDraft.generationConfigText} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, generationConfigText: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
-                      Save Recipe
+                      保存配方
                     </button>
                   </form>
 
                   <div className="space-y-3">
                     {normalizedContext.prompt_recipes.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">暂无 Prompt Recipe。</div>
+                      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">暂无 Prompt 配方。</div>
                     ) : normalizedContext.prompt_recipes.map((recipe) => (
                       <article key={recipe.id} className={`rounded-lg border p-3 ${recipe.status === 'archived' ? 'border-gray-200/70 bg-gray-50/60 opacity-70 dark:border-white/[0.08] dark:bg-white/[0.03]' : 'border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40'}`}>
                         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -704,22 +747,22 @@ export default function ProjectContextModal() {
                             <div className="break-words text-sm font-semibold text-gray-800 dark:text-gray-100">{recipe.name || recipe.id}</div>
                             <div className="mt-1 break-all text-[11px] text-gray-500 dark:text-gray-400">{recipe.id}</div>
                           </div>
-                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{recipe.status || 'active'}</span>
+                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{recipe.status === 'archived' ? '归档' : '启用'}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="break-words"><span className="text-gray-400">defaults:</span> {[recipe.default_aspect_ratio, recipe.default_output_format, recipe.default_provider, recipe.default_model].filter(Boolean).join(' / ') || '-'}</div>
-                          <div className="break-words"><span className="text-gray-400">negative:</span> {compactText(recipe.negative_prompt)}</div>
+                          <div className="break-words"><span className="text-gray-400">默认参数：</span> {[recipe.default_aspect_ratio, recipe.default_output_format, recipe.default_provider, recipe.default_model].filter(Boolean).join(' / ') || '-'}</div>
+                          <div className="break-words"><span className="text-gray-400">负面词：</span> {compactText(recipe.negative_prompt)}</div>
                           {(recipe.prompt_blocks ?? []).map((block, index) => (
                             <div key={`${recipe.id}-${index}`} className="break-words">
-                              <span className="text-gray-400">{block.role || 'block'}:</span> {compactText(block.text)}
+                              <span className="text-gray-400">{block.role || '描述块'}：</span> {compactText(block.text)}
                             </div>
                           ))}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => { setEditingRecipeId(recipe.id); setRecipeDraft(recipeToDraft(recipe)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">Edit</button>
+                          <button type="button" onClick={() => { setEditingRecipeId(recipe.id); setRecipeDraft(recipeToDraft(recipe)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑</button>
                           <button type="button" onClick={() => archiveRecipe(recipe)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                             <ArchiveIcon className="h-3.5 w-3.5" />
-                            {recipe.status === 'archived' ? 'Restore' : 'Archive'}
+                            {recipe.status === 'archived' ? '恢复' : '归档'}
                           </button>
                         </div>
                       </article>

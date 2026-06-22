@@ -23,11 +23,28 @@ type Options struct {
 	AdminPassword                string
 	AdminSessionSecret           string
 	AdminSessionTTL              time.Duration
+	Runtime                      RuntimeStatusOptions
 	AuditSink                    HTTPAuditSink
 	RateLimiter                  RateLimiter
 	RateLimitWindow              time.Duration
 	RateLimitInstanceMaxRequests int
 	RateLimitProjectMaxRequests  int
+}
+
+type RuntimeStatusOptions struct {
+	PublicBaseURL                  string
+	DefaultProvider                string
+	OpenAICompatibleModel          string
+	OpenAICompatibleConfigured     bool
+	OpenAICompatibleMaxConcurrency int
+	FalModel                       string
+	FalConfigured                  bool
+	FalMaxConcurrency              int
+	ProviderTimeoutSeconds         int
+	WorkerConcurrency              int
+	RateLimitWindowSeconds         int
+	RateLimitInstanceMaxRequests   int
+	RateLimitProjectMaxRequests    int
 }
 
 type Server struct {
@@ -163,6 +180,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleListAssets(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "admin", "assets", "recent"):
 		s.handleListRecentAssets(w, r)
+	case isRead && match(parts, "api", "admin", "runtime-status"):
+		s.handleRuntimeStatus(w, r)
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
 		s.handleGetBatchProgress(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-summary"):
@@ -203,7 +222,7 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 			}
 		}
 	}
-	if !s.authorizeBasicAuth(w, r) {
+	if !s.authorizeBasicAuth(w, r, shouldSendBasicChallenge(parts, r.Method)) {
 		return false, requestAuthScope{}, actor, nil
 	}
 	scope, ok, err := s.resolveRequestAuthScope(r, parts)
@@ -281,21 +300,35 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 	return true, scope, actor, nil
 }
 
-func (s *Server) authorizeBasicAuth(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) authorizeBasicAuth(w http.ResponseWriter, r *http.Request, basicChallenge bool) bool {
 	if !s.basicAuthConfigured() {
 		return true
 	}
 	username, password, ok := r.BasicAuth()
 	if !ok {
-		writeUnauthorized(w, "basic_auth_required", "basic auth is required", true)
+		writeUnauthorized(w, "basic_auth_required", "basic auth is required", basicChallenge)
 		return false
 	}
 	if subtle.ConstantTimeCompare([]byte(username), []byte(s.options.BasicAuthUsername)) != 1 ||
 		subtle.ConstantTimeCompare([]byte(password), []byte(s.options.BasicAuthPassword)) != 1 {
-		writeUnauthorized(w, "basic_auth_invalid", "basic auth is invalid", true)
+		writeUnauthorized(w, "basic_auth_invalid", "basic auth is invalid", basicChallenge)
 		return false
 	}
 	return true
+}
+
+func shouldSendBasicChallenge(parts []string, method string) bool {
+	if isAssetDeliveryRoute(parts, method) {
+		return false
+	}
+	return true
+}
+
+func isAssetDeliveryRoute(parts []string, method string) bool {
+	isRead := method == http.MethodGet || method == http.MethodHead
+	return isRead && (match(parts, "api", "assets", "*", "thumbnail") ||
+		match(parts, "api", "assets", "*", "original") ||
+		match(parts, "api", "assets", "*", "metadata"))
 }
 
 func (s *Server) basicAuthConfigured() bool {
@@ -404,6 +437,8 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		match(parts, "api", "projects", "*", "campaigns", "*", "scene-regenerations"):
 		return requestAuthScope{ProjectID: parts[2], CampaignID: parts[4], AllowAdmin: true}, true, nil
 	case match(parts, "api", "admin", "assets", "recent"):
+		return requestAuthScope{AllowAdmin: true, RequireAdmin: true}, true, nil
+	case match(parts, "api", "admin", "runtime-status"):
 		return requestAuthScope{AllowAdmin: true, RequireAdmin: true}, true, nil
 	case match(parts, "api", "assets", "*"),
 		match(parts, "api", "assets", "*", "metadata"),
@@ -837,6 +872,44 @@ func (s *Server) handleListRecentAssets(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleRuntimeStatus(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.adminSessionUsername(r)
+	if !ok {
+		writeUnauthorized(w, "admin_session_required", "admin session is required", false)
+		return
+	}
+	runtime := s.options.Runtime
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authenticated":            true,
+		"username":                 username,
+		"admin_configured":         s.adminConfigured(),
+		"basic_auth_configured":    s.basicAuthConfigured(),
+		"public_base_url":          strings.TrimSpace(runtime.PublicBaseURL),
+		"default_provider":         strings.TrimSpace(runtime.DefaultProvider),
+		"provider_timeout_seconds": runtime.ProviderTimeoutSeconds,
+		"worker": map[string]any{
+			"concurrency": runtime.WorkerConcurrency,
+		},
+		"rate_limits": map[string]any{
+			"window_seconds":        runtime.RateLimitWindowSeconds,
+			"instance_max_requests": runtime.RateLimitInstanceMaxRequests,
+			"project_max_requests":  runtime.RateLimitProjectMaxRequests,
+		},
+		"providers": map[string]any{
+			"openai_compatible": map[string]any{
+				"configured":      runtime.OpenAICompatibleConfigured,
+				"model":           strings.TrimSpace(runtime.OpenAICompatibleModel),
+				"max_concurrency": runtime.OpenAICompatibleMaxConcurrency,
+			},
+			"fal": map[string]any{
+				"configured":      runtime.FalConfigured,
+				"model":           strings.TrimSpace(runtime.FalModel),
+				"max_concurrency": runtime.FalMaxConcurrency,
+			},
+		},
+	})
 }
 
 func (s *Server) handleGetBatchProgress(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {

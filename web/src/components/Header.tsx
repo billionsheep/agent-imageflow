@@ -4,6 +4,7 @@ import { useVersionCheck } from '../hooks/useVersionCheck'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { preloadAgentWorkspace, preloadProductionViewModal, preloadProjectContextModal, preloadScopeManagerModal, preloadSettingsModal } from '../lib/lazyModules'
+import type { AgentImageflowAdminSessionResponse } from '../lib/agentImageflowApi'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
@@ -20,7 +21,12 @@ function isInstalledPwa() {
   return window.matchMedia('(display-mode: standalone)').matches || nav.standalone === true
 }
 
-export default function Header() {
+interface HeaderProps {
+  adminSession?: AgentImageflowAdminSessionResponse | null
+  onLogout?: () => void
+}
+
+export default function Header({ adminSession, onLogout }: HeaderProps) {
   const appMode = useStore((s) => s.appMode)
   const setAppMode = useStore((s) => s.setAppMode)
   const setShowSettings = useStore((s) => s.setShowSettings)
@@ -258,7 +264,7 @@ export default function Header() {
               onPointerDown={preloadAgentWorkspace}
               className={`px-4 py-1.5 rounded-lg text-sm transition-colors ${appMode === 'agent' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
-              Agent
+              Agent 工作台
             </button>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -313,12 +319,12 @@ export default function Header() {
                   setShowProductionView(true)
                 }}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-                aria-label="Production View"
+                aria-label="批次生产视图"
               >
                 <HistoryIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
               <ViewportTooltip visible={productionTooltip.visible} className="whitespace-nowrap">
-                Production View
+                批次生产视图
               </ViewportTooltip>
             </div>
             <div
@@ -334,12 +340,12 @@ export default function Header() {
                   setShowProjectContext(true)
                 }}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-                aria-label="Project Context"
+                aria-label="项目视觉上下文"
               >
                 <CodeIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
               <ViewportTooltip visible={projectContextTooltip.visible} className="whitespace-nowrap">
-                Project Context
+                项目视觉上下文
               </ViewportTooltip>
             </div>
             <div
@@ -355,14 +361,24 @@ export default function Header() {
                   setShowScopeManager(true)
                 }}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-                aria-label="Scope 管理"
+                aria-label="业务空间管理"
               >
                 <CollectionManageIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               </button>
               <ViewportTooltip visible={scopeTooltip.visible} className="whitespace-nowrap">
-                Scope 管理
+                业务空间管理
               </ViewportTooltip>
             </div>
+            {adminSession?.authenticated && onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-500 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+                title={`当前登录：${adminSession.username ?? 'admin'}`}
+              >
+                退出
+              </button>
+            )}
             <div
               className="relative"
               onPointerEnter={preloadSettingsModal}
