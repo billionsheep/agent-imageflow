@@ -2,7 +2,19 @@
 
 本文档定义 MVP 之后第二批需求。目标是把 Agent ImageFlow 从“已经能生成并登记资产的服务端能力”推进到“公共图片资产能力平台的可见、可查、可治理、可集成”。
 
-Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Dashboard、Storage Governance、Provider Profile、Project Production Context 和 Batch Story Export Foundation 主线已在后续 CSV 中完成或吸收。Batch / Story / Scene View、JSON manifest、ZIP 后置边界和 NAS/Docker 文件访问的详细场景与收口记录见 `docs/project/stories/slice-040-batch-story-export-scenarios.md` 到 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`；后续新需求需要重新确认范围并生成独立 CSV。
+Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Dashboard、Storage Governance、Provider Profile、Project Production Context、Batch Story Export Foundation、Web Operator Review Console 和 Deployment Release Pipeline 主线已在后续 CSV 中完成或吸收。Batch / Story / Scene View、JSON manifest、ZIP 后置边界和 NAS/Docker 文件访问的详细场景与收口记录见 `docs/project/stories/slice-040-batch-story-export-scenarios.md` 到 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`；V1 baseline、剩余任务和未来方向见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。后续新需求需要重新确认范围并生成独立 CSV。
+
+## V1 Follow-up Priorities
+
+本文件以下 P0/P1/P2 章节保留为历史需求记录。V1 之后优先级已调整为：
+
+1. Server Deployment Rehearsal：真实服务器/NAS 拉取 GHCR 镜像、配置 HTTPS 反代、跑 mock smoke、演练备份和回滚。
+2. Pet Account Real Workflow Trial：低并发真实 provider 小批量跑萌宠账号业务流，观察 agent 调用和 Web 审图摩擦。
+3. Usage Tracking and Edit Lineage：记录资产被哪些内容使用，以及 regenerate/edit lineage。
+4. Export Pack ZIP and Multi Select：在 JSON manifest 稳定后补小批量 selected assets ZIP。
+5. Deployment and Secret Hardening：补登录失败限流、Secure cookie/HTTPS 检查、服务端配置状态和 non-exposure regression。
+
+继续后置：账号运营系统、小红书自动发布、通用 DAM、模板市场、多人协作、SaaS 注册计费、每用户 provider key 和视觉质检 AI。
 
 ## Scope
 

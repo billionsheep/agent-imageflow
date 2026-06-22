@@ -2,9 +2,23 @@
 
 本文档记录 MVP 试用过程中发现的后续需求、问题和真实业务场景。它不改变第一版 MVP 的冻结边界，而是作为下一阶段拆分 CSV / vertical slice 的输入。
 
+## V1 Baseline Update - 2026-06-22
+
+本文档早期记录的多项缺口已经在 V1 baseline 中完成或被后续 CSV 吸收：
+
+- Web 已能显示 MCP / REST / CLI / Web 创建的服务端资产，Recent Assets 和服务端资产库均可用。
+- Project Production Context 已完成第一版：角色卡、reference binding、prompt recipe、CreateTask 展开、任务/资产快照和 Web Project Context 面板均已接入。
+- Batch Story Export Foundation 已完成第一版：batch/story/scene summary、Production View、scene asset actions、scene regenerate、JSON manifest 和 NAS/Docker 文件访问边界均已落地。
+- Web Operator Review Console 已完成第一版：Web 默认体验已从工程调试列表收敛为审图控制台，长 ID 和工程字段默认折叠。
+- Deployment Release Pipeline 已完成：GitHub Actions 构建 GHCR 私有 API/Web 镜像，服务器使用生产 compose 拉取镜像运行。
+
+V1 之后的剩余任务和未来方向以 `docs/project/V1_BASELINE_AND_ROADMAP.md` 为准。本文保留早期场景记录用于溯源。
+
 ## Current Test Findings
 
 ### MCP 生成资产不会自动出现在 Web 画廊
+
+状态：已解决。该问题已被 P0 visibility、Asset Production Readiness、Admin Recent Assets 和 Web Operator Review Console 吸收并完成。
 
 已验证：
 
@@ -26,6 +40,8 @@
 
 ### Web 托管模式仍受 legacy API 配置守卫影响
 
+状态：已解决。服务端托管模式下创建任务已不再依赖前端 provider API key；Settings 已明确 server-first provider/auth 语义。
+
 已验证：
 
 - 开启服务端托管模式后，主按钮一开始仍显示“请先配置 API”。
@@ -37,6 +53,8 @@
 这是前端 UX / 状态守卫问题。托管模式开启且服务端 API / scope / provider 已配置时，不应要求 legacy provider API key。
 
 ### Provider base URL 需要明确 OpenAI-compatible 路径规则
+
+状态：保留为配置注意事项。OpenAI-compatible base URL 仍应包含 provider 所需 API version path，例如 `/v1`；真实 provider key 继续只放服务器环境变量。
 
 已验证：
 
@@ -403,7 +421,9 @@ Campaign:
 
 ## Proposed Next Planning Slices
 
-建议后续不要零散改，先按以下 slice 拆分：
+以下早期 slice 多数已完成或被吸收。V1 之后的新 slice 建议见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。
+
+历史建议：
 
 1. Web server asset sync
    - Web 能同步当前 scope 下所有服务端 assets。

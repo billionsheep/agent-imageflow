@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-22: 当前 main 作为 V1 baseline，后续只按独立 CSV 继续推进
+
+- Decision: 当前 `main` 可暂定为 Agent ImageFlow V1 baseline。V1 已包含核心资产生产、Project Visual Context、Batch/Story/Scene Production View、Web Operator Review Console、JSON manifest、NAS/Docker 文件访问边界和 GHCR 发布流水线。后续不再复开已完成的 P1/P2 CSV，而是按 `docs/project/V1_BASELINE_AND_ROADMAP.md` 重新拆独立 CSV。
+- Reason: 项目已经从“能跑通”进入“可部署、可试用、可运营维护”的阶段。继续在旧 CSV 上追加会增加回归风险和范围混乱；按部署演练、真实试用、usage/edit lineage、export pack、deployment secret hardening 分开推进更容易验收。
+- Impact: 服务器/NAS 部署演练、真实萌宠账号试用和后续 P2 能力必须单独确认范围、成本、provider 调用和验收标准。小红书发布、内容日历、通用 DAM、SaaS 注册计费、每用户 provider key、视觉质检 AI 和无目标 benchmark 继续后置。
+
 ## 2026-06-22: 生产发布采用 GHCR 私有镜像 + 服务器拉取运行
 
 - Decision: Agent ImageFlow 的正式自托管发布流采用 GitHub Actions 构建并推送 GHCR 私有镜像，服务器只通过 `docker compose -f docker-compose.prod.yml --env-file .env.prod pull/up` 拉取和运行镜像，不在服务器构建 Go 或 Web。后端镜像名为 `ghcr.io/billionsheep/agent-imageflow-api`，Web 镜像名为 `ghcr.io/billionsheep/agent-imageflow-web`；版本使用 `main`、`vX.Y.Z` 和 `sha-<short_sha>`。

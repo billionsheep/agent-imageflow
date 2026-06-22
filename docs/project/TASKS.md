@@ -2,15 +2,15 @@
 
 ## Todo
 
-- [ ] 旧 P1 拆分 CSV 保留为历史参考，不再作为下一轮主入口：`issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv`。
-- [ ] 用 production preview 路径继续试用 Web，观察是否仍出现 Chrome `High memory usage`；若仍复现，再单独做浏览器 heap/virtualized list 专项。
-- [ ] 评估 Batch Story Export Foundation 之后的 P2：ZIP、多选下载、CLI/MCP regenerate、Usage Tracking 或 edit lineage 需要重新拆独立 CSV。
-- [ ] Usage Tracking、edit lineage、真实视觉一致性质检继续后置，暂不进入 Batch Story Export Foundation 第一轮。
-- [ ] 澄清嵌入式架构图场景：若需要 Mermaid/D2/SVG 可编辑源，需要补 Diagram source track；若只作为图片资产，可沿用当前资产闭环。
+- [ ] V1 服务器/NAS 部署演练：按 `docs/project/SERVER_DEPLOYMENT_GUIDE.md` 准备 `.env.prod`、GHCR read token、HTTPS 反代、Postgres/storage 备份，跑 health/Web/Admin/mock task/MCP tools-list smoke，并演练 `IMAGE_TAG` 回滚。
+- [ ] V1 真实试用观察：用低并发真实 provider 小批量跑萌宠账号工作流，记录 Web 审图、Project Context、Production View、manifest/NAS 交付中的具体摩擦；默认不做 benchmark。
+- [ ] 版本 tag 决策：当前先把 `main` 作为 V1 baseline 推送；是否创建 `v0.1.0` tag 触发正式 tag 镜像，需要单独确认。
+- [ ] 生成后续独立 CSV：优先考虑 `next-phase-p1-server-deployment-rehearsal.csv`、`next-phase-p1-pet-account-real-workflow-trial.csv`、`next-phase-p2-usage-lineage.csv`、`next-phase-p2-export-pack-zip.csv`、`next-phase-p2-deployment-secret-hardening.csv`。
+- [ ] 嵌入式架构图只按图片资产流继续试用；若需要 Mermaid/D2/SVG 可编辑源，再单独确认 Diagram source track。
 
 ## Doing
 
-- [ ] 暂无正在执行的部署切片；P1 Deployment Release Pipeline 已完成，下一步应进行真实服务器/NAS 部署演练或继续 Web 试用体验问题收集。
+- [ ] 暂无正在执行的产品切片；当前阶段为 V1 baseline 归档、服务器部署演练准备和真实试用观察。
 
 ## Done
 
@@ -103,6 +103,7 @@
 - [x] 完成真实 provider 萌宠故事最小闭环 smoke：clean batch `prj_real_pet_story_1782108549 / cmp_real_pet_story_1782108549 / real_pet_story_batch_1782108549` 使用 `openai-compatible / gpt-image-2` 完成 2 个 scene task、2 张 selected assets；Web Recent Assets 可见，资产卡 `Batch` 可打开 Production View，Query 后显示 `selected coverage=2/2`；metadata 保留 visual context snapshot 且不暴露 local path。本轮未读取或打印任何 provider key / API key / secret / cookie / session。
 - [x] 完成 P2 Web 审图追补与 MCP 真实 provider 1 图 canary：`Project Context` 默认改为紧凑折叠摘要，Recent Assets 卡片标题改为剧情/画面优先，默认动作收敛为 Select/Reject/Original/Batch，低频操作进入 `Technical details`；MCP `create_image_task` 使用真实 `openai-compatible / gpt-image-2` 生成 1 张 selected asset `asset_7c706c1a1cea00490a40`，batch progress 为 `succeeded_count=1`、`failed_count=0`、`asset_count=1`，thumbnail/original/metadata 均可访问。本轮不做 benchmark 或并发压测，未读取或打印任何 provider key / API key / secret / cookie / session。
 - [x] 完成 P1 Deployment Release Pipeline：新增 GHCR 私有镜像发布流、独立 Web 镜像、`docker-compose.prod.yml`、`.env.example.prod`、部署契约静态检查、上线/更新/回滚/备份文档、`docs/project/SERVER_DEPLOYMENT_GUIDE.md` 服务器交接文档和项目管理记录；服务器生产部署改为拉取 `ghcr.io/billionsheep/agent-imageflow-api` / `agent-imageflow-web` 镜像运行，不在服务器构建 Go/Web。验证包括 deployment static check、compose config、Web tests/build、容器化 Go tests、API/Web Docker image build、Web image HTTP smoke、API health 和 MCP stdio `tools/list` smoke；本轮未读取或打印 provider key / API key / secret / cookie / session，未运行真实 provider。
+- [x] 形成 V1 baseline：核心资产生产、Project Visual Context、Batch/Story/Scene 生产视图、Web 审图控制台、JSON manifest、NAS/Docker 文件访问边界、真实 provider 低频 canary 和 GHCR 发布流水线均已收口；剩余任务与未来方向已记录到 `docs/project/V1_BASELINE_AND_ROADMAP.md`。
 
 ## Acceptance Criteria For Next Step
 
@@ -114,6 +115,7 @@
 - P1 Web UX Smoothness 已完成，日常试用时若仍复现整屏闪烁，应记录具体按钮、URL host、Admin 登录状态、当前 mode/filter/scope 和是否正在刷新资产，再另起针对性 follow-up；不要把已关闭的 P1-UX-001 到 P1-UX-009 重复排期。
 - P1 Project Production Context P1-PCTX-001 到 P1-PCTX-009 已完成；Batch Story Export Foundation P1-BSE-001 到 P1-BSE-011 已完成。下一步若继续推进，应先重新确认 P2 范围并生成独立 CSV。
 - P2 Web Operator Review Console 已完成并关闭；真实 provider 萌宠最小闭环也已通过。后续涉及 provider key、公网暴露策略、真实 secret 存储、每用户 provider 凭据或账号体系的任务仍需先确认，不应作为 Web 审图体验的自然延伸直接实现。
-- P1 Deployment Release Pipeline 已完成并关闭；后续真实服务器上线前应准备 `.env.prod`、GHCR read token、反向代理 HTTPS、Postgres dump 和 storage root/NAS 快照。包含数据库 schema 变化的版本必须另开 migration/backup 计划。
+- 当前 `main` 可作为 V1 baseline 继续推进服务器部署演练；后续真实服务器上线前应准备 `.env.prod`、GHCR read token、反向代理 HTTPS、Postgres dump 和 storage root/NAS 快照。包含数据库 schema 变化的版本必须另开 migration/backup 计划。
+- 后续不得把 V1 后的 Usage Tracking、edit lineage、ZIP、多选下载、部署 secret hardening、视觉质检或 Diagram source track 混进已有关闭 CSV；必须重新确认范围并创建独立 CSV。
 - 若当前已有线程在执行某个 P1 CSV，不要并行改同一 CSV；Web CPU 偏高问题已作为独立 P1 performance CSV 纳入下一次推进。
 - 旧 P1 拆分 CSV 保留用于溯源，不再作为下一轮主入口；项目全局状态优先查看 `docs/project/PROJECT_STATUS_MAP.md`。

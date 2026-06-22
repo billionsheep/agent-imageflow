@@ -6,6 +6,8 @@
 
 Agent ImageFlow 当前已经可以作为本地/自托管的图片资产生产平台使用：外部 agent、脚本、Web、CLI 或 REST 可以创建图片任务，服务端负责生成、落盘、登记、选优、交付和基础治理。
 
+当前状态可作为 V1 baseline 暂时归档：核心图片资产生产、project visual context、batch/story/scene 生产视图、Web 审图控制台、JSON manifest、NAS/Docker 文件访问边界和 GHCR 镜像发布路径均已完成。V1 的正式能力边界、剩余任务和未来方向见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。
+
 P1 Asset Production Readiness、P1 Web Performance / Startup、并发性能专项、P1 Provider Throughput & Reliability 和 P1 Web Console Auth & Asset Visibility 均已完成：资产可查可筛、source/session 可追踪、project 默认 provider 可复用，Web 服务端资产库首屏有限加载，启动初始化、缩略图补建、恢复轮询、Scope 统计和重模块加载都有边界；Worker/provider 并发可控，真实 provider 默认 cap 更保守，task attempts 阶段指标、benchmark 和 batch progress 可用于定位真实 provider 慢点；Web 控制台可用轻量 Admin session 查看跨 scope Recent Assets，外部 project API key 继续服务 MCP/CLI/REST。
 
 `issues/next-phase-p1-project-production-context.csv` 的产品化收口已完成。P1-PCTX-001 到 P1-PCTX-009 已完成：服务端核心、MCP/REST/CLI examples、Web Project Context 面板、资产卡 Reference 动作、Web managed task context selector 和 clean 萌宠故事 mock 回归都已落地。Web UX Smoothness 已完成 P1-UX-001 到 P1-UX-009：settings 订阅收窄、刷新保留旧资产、文本筛选 debounce、旧请求忽略，Settings/ScopeManager 不再把不完整 workspace/project/campaign 写进全局 settings，Scope 统计不再绑定层级首屏交互，首次打开大 modal 不再使用 `null` fallback，Task/Asset 卡片已做局部重绘收口，并完成 production preview / browser 回归记录。
@@ -109,16 +111,20 @@ mindmap
         Host Mismatch Guidance
         Non Exposure Regression
     下一步
-      试用验收
-        Mock Business Flow
+      服务器部署演练
+        GHCR Pull
+        HTTPS Reverse Proxy
+        Admin Mock Smoke
+        Backup Rollback
+      真实试用观察
+        Pet Account Workflow
         Web Review Comfort
-        Provider Cost Controlled Benchmark
-      试用观察
-        production preview
-        高内存复现记录
+        Low Frequency Provider Canary
     后续再确认
       Usage Tracking
       Edit Lineage
+      Export Pack ZIP
+      Deployment Secret Hardening
       Visual Quality Evaluation
     暂不做
       自媒体运营系统
@@ -173,16 +179,20 @@ mindmap
 | P2 专项 | `issues/next-phase-p2-web-operator-review-console.csv` | 把 Web 默认体验从工程调试列表转为人工审图控制台，收束 provider/auth 语义，并补最小 non-exposure regression；追补 Project Context 紧凑化、剧情摘要标题和 MCP 真实 provider 1 图 canary | P2-ORC-001 到 P2-ORC-011 已完成 |
 | P1 专项 | `issues/next-phase-p1-deployment-release-pipeline.csv` | 把项目从本地源码构建运行升级为 GitHub Actions 构建 GHCR 私有镜像、服务器拉取镜像上线，并补首次部署、更新、回滚、备份和 smoke 文档 | P1-DEPLOY-001 到 P1-DEPLOY-008 已完成 |
 | P1 历史拆分 | `issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv` | 已被合并主线吸收，保留作参考 | 不直接执行 |
-| 后续 | Usage Tracking、edit lineage、真实视觉质检 | 使用记录、编辑谱系和视觉一致性质量判断 | 等 Batch Story Export Foundation 完成后再评估 |
+| 后续 P1 | Server Deployment Rehearsal | 真实服务器/NAS 拉取 GHCR 镜像、配置 HTTPS 反代、跑 mock smoke、验证备份和回滚 | 推荐马上做 |
+| 后续 P1 | Pet Account Real Workflow Trial | 用低并发真实 provider 小批量跑萌宠故事图，观察 Web 审图和 agent 调用摩擦 | 服务器部署或本地稳定后做 |
+| 后续 P2 | Usage Tracking、edit lineage、Export Pack ZIP、Deployment Secret Hardening | 使用记录、编辑谱系、小批量交付包、部署安全状态和 non-exposure regression | 需要重新拆独立 CSV |
+| 后续 P3 | 真实视觉质检 | 视觉一致性质量判断，先做人工辅助再评估 AI 自动质检 | 后置 |
 | 暂不做 | 自媒体运营、自动发布、模板市场、通用 DAM、SaaS 注册计费 | 会把项目拖离资产生产平台 | 不做 |
 
 ## 推荐下一步
 
-当前不要再次执行 P1 Asset Production Readiness CSV、P1 Web Performance / Startup CSV、P1 Provider Throughput & Reliability CSV、P1 Web Console Auth & Asset Visibility CSV、P1 Web UX Smoothness CSV、P1 Project Production Context CSV、P1 Batch Story Export Foundation CSV、P2 Web Operator Review Console CSV 或 P1 Deployment Release Pipeline CSV。下一步建议进入真实服务器/NAS 部署演练：确认 GHCR private package 可被服务器 `docker login ghcr.io` 拉取，准备不入仓库的 `.env.prod`，用 `IMAGE_TAG` 部署一个版本，跑 health/Web/Admin/mock smoke，再演练一次改 tag 回滚。业务侧继续用低并发真实 provider 小批量跑“agent 写故事 -> agent 调 MCP/REST 批量生图 -> Web Recent Assets 审图 -> Production View 按 scene select/reject -> JSON manifest/NAS 交付”闭环；若发现新问题，再另开独立 CSV。
+当前不要再次执行 P1 Asset Production Readiness CSV、P1 Web Performance / Startup CSV、P1 Provider Throughput & Reliability CSV、P1 Web Console Auth & Asset Visibility CSV、P1 Web UX Smoothness CSV、P1 Project Production Context CSV、P1 Batch Story Export Foundation CSV、P2 Web Operator Review Console CSV 或 P1 Deployment Release Pipeline CSV。下一步建议进入 V1 之后的独立推进：第一优先是 `Server Deployment Rehearsal`，确认 GHCR private package 可被服务器 `docker login ghcr.io` 拉取，准备不入仓库的 `.env.prod`，用 `IMAGE_TAG` 部署一个版本，跑 health/Web/Admin/mock smoke，再演练一次改 tag 回滚。第二优先是 `Pet Account Real Workflow Trial`，继续用低并发真实 provider 小批量跑“agent 写故事 -> agent 调 MCP/REST 批量生图 -> Web Recent Assets 审图 -> Production View 按 scene select/reject -> JSON manifest/NAS 交付”闭环；若发现新问题，再另开独立 CSV。
 
 ```text
 Completed P2 CSV: issues/next-phase-p2-web-operator-review-console.csv
 Completed P1 deploy CSV: issues/next-phase-p1-deployment-release-pipeline.csv
+V1 roadmap: docs/project/V1_BASELINE_AND_ROADMAP.md
 ```
 
 Web UX Smoothness 已完成 P1-UX-001 到 P1-UX-009：资产库刷新、筛选输入、Settings/ScopeManager scope 切换、Scope 统计加载、首次打开大 modal 和 Task/Asset 卡片交互不应再因为旧逻辑直接闪空、请求风暴、空 scope 中间态、统计扫描抢占、`null` fallback 或每卡新 handler 而抖动；最终 production preview / browser 回归证据已写回。Project Production Context 已完成 P1-PCTX-001 到 P1-PCTX-009，当前确认第一版可复用 `project.metadata_json.visual_context`，未触发新增数据库表、迁移或破坏性公共接口；服务端角色卡、参考图库、Prompt Recipe、任务输入展开、MCP/REST/CLI examples、Web Project Context 面板、资产卡 Reference 动作和 Web managed task context selector 已可验证；clean 萌宠故事回归已证明 project context 到 task/asset metadata、batch progress、asset list 和 Admin Recent Assets 不断链。Batch Story Export Foundation 第一轮已完成，当前可按 scene 聚合、审看、重试和交付 JSON manifest，并有 NAS/Docker 文件访问边界。P2 Web Operator Review Console 已完成：默认审图视图、技术字段折叠、免长 ID batch 入口、manifest 反馈、host mismatch 提示和 provider/auth 语义收敛均已落地。

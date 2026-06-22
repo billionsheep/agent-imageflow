@@ -4,6 +4,8 @@
 
 当前仓库已经能把 `Web / MCP / REST / CLI` 收敛到同一套 Go 服务端核心，围绕 `Workspace -> Project -> Campaign -> ImageTask -> Asset` 跑通图片任务、候选资产、选优状态、文件落盘和交付 URL。
 
+当前状态可视为 V1 baseline：核心资产生产、项目视觉上下文、批量故事审图、JSON manifest、自托管发布流水线均已具备。剩余任务和未来方向见 [V1 Baseline and Roadmap](docs/project/V1_BASELINE_AND_ROADMAP.md)。
+
 ## 当前已可验证的能力
 
 - Go API、Worker、CLI、MCP 共用同一套 application core。
@@ -259,5 +261,6 @@ imageflow.example.com {
 - [技术规格](docs/project/TECH_SPEC.md)
 - [输入输出规格](docs/project/INPUT_OUTPUT_SPEC.md)
 - [运行手册](docs/project/RUNBOOK.md)
+- [V1 基线与路线图](docs/project/V1_BASELINE_AND_ROADMAP.md)
 - [服务器部署指导](docs/project/SERVER_DEPLOYMENT_GUIDE.md)
 - [检查点](docs/project/CHECKPOINTS.md)
