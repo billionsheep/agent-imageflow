@@ -2,18 +2,48 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/billionsheep/agent-imageflow/internal/domain"
 )
 
 type taskStructuredProviderInput struct {
-	ReferenceImages    []domain.ReferenceImage       `json:"reference_images"`
-	MaskImage          *domain.MaskImage             `json:"mask_image"`
-	ResolvedInputFiles *resolvedTaskInputFiles       `json:"resolved_input_files"`
-	GenerationConfig   json.RawMessage               `json:"generation_config"`
-	ProviderProfile    domain.ProjectProviderProfile `json:"provider_profile"`
-	VisualContext      *domain.VisualContextSnapshot `json:"visual_context_snapshot"`
+	ReferenceImages                []domain.ReferenceImage       `json:"reference_images"`
+	MaskImage                      *domain.MaskImage             `json:"mask_image"`
+	ResolvedInputFiles             *resolvedTaskInputFiles       `json:"resolved_input_files"`
+	GenerationConfig               json.RawMessage               `json:"generation_config"`
+	ProviderProfile                domain.ProjectProviderProfile `json:"provider_profile"`
+	VisualContext                  *domain.VisualContextSnapshot `json:"visual_context_snapshot"`
+	ReferenceAssetCount            int                           `json:"reference_asset_count"`
+	ReferenceInputFileCount        int                           `json:"reference_input_file_count"`
+	ProviderReferenceParticipation string                        `json:"provider_reference_participation"`
+	ProviderReferenceSources       []string                      `json:"provider_reference_sources"`
+	ProviderReferenceMIMETypes     []string                      `json:"provider_reference_mime_types"`
+}
+
+func referenceParticipationError(item resolvedTaskInputFile, err error) error {
+	if err == nil {
+		return nil
+	}
+	source := "asset_or_file"
+	if strings.TrimSpace(item.InputFileID) != "" {
+		source = "input_file"
+	}
+	parts := []string{
+		"参考图未参与生成",
+		"source=" + source,
+	}
+	if id := strings.TrimSpace(item.InputFileID); id != "" {
+		parts = append(parts, "input_file_id="+id)
+	}
+	if mimeType := strings.TrimSpace(item.MimeType); mimeType != "" {
+		parts = append(parts, "mime_type="+mimeType)
+	}
+	if role := strings.TrimSpace(item.Role); role != "" {
+		parts = append(parts, "role="+role)
+	}
+	return fmt.Errorf("%s: %w", strings.Join(parts, " "), err)
 }
 
 type resolvedTaskInputFiles struct {
@@ -67,6 +97,21 @@ func taskProviderParameters(task domain.Task, base map[string]any) []byte {
 	}
 	if input.VisualContext != nil {
 		parameters["visual_context_snapshot"] = input.VisualContext
+	}
+	if input.ReferenceAssetCount > 0 {
+		parameters["reference_asset_count"] = input.ReferenceAssetCount
+	}
+	if input.ReferenceInputFileCount > 0 {
+		parameters["reference_input_file_count"] = input.ReferenceInputFileCount
+	}
+	if strings.TrimSpace(input.ProviderReferenceParticipation) != "" {
+		parameters["provider_reference_participation"] = input.ProviderReferenceParticipation
+	}
+	if len(input.ProviderReferenceSources) > 0 {
+		parameters["provider_reference_sources"] = input.ProviderReferenceSources
+	}
+	if len(input.ProviderReferenceMIMETypes) > 0 {
+		parameters["provider_reference_mime_types"] = input.ProviderReferenceMIMETypes
 	}
 
 	raw, err := json.Marshal(parameters)

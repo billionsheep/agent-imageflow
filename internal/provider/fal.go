@@ -202,7 +202,7 @@ func (p FalProvider) createRequestInput(ctx context.Context, task domain.Task, e
 func (p FalProvider) uploadInputFile(ctx context.Context, item resolvedTaskInputFile, forcePNG bool) (string, error) {
 	fileBytes, mimeType, err := readTaskInputFile(item.FilePath, item.MimeType, forcePNG)
 	if err != nil {
-		return "", err
+		return "", referenceParticipationError(item, err)
 	}
 
 	initiateURL := p.restBaseURL + "/storage/upload/initiate?storage_type=fal-cdn-v3"

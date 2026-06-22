@@ -146,6 +146,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleDeleteCampaign(w, r, parts[2], parts[4], parts[6])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files"):
 		s.handleUploadTaskInputFile(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "promote-asset"):
+		s.handlePromoteTaskInputFileAsset(w, r, parts[2], parts[4], parts[6], parts[8])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*"):
 		s.handleGetTaskInputFile(w, r, parts[2], parts[4], parts[6], parts[8])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "content"):
@@ -390,6 +392,7 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4], CampaignID: parts[6]}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files"),
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "promote-asset"),
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "content"):
 		return requestAuthScope{
 			WorkspaceID: parts[2],
@@ -664,6 +667,26 @@ func (s *Server) handleGetTaskInputFile(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handlePromoteTaskInputFileAsset(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID, inputFileID string) {
+	defer r.Body.Close()
+	var req domain.PromoteInputFileToAssetRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	response, err := s.service.PromoteInputFileToAsset(r.Context(), domain.Scope{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		CampaignID:  campaignID,
+	}, inputFileID, req)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (s *Server) handleTaskInputFileContent(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID, inputFileID string) {

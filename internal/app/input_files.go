@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/billionsheep/agent-imageflow/internal/domain"
+	"github.com/billionsheep/agent-imageflow/internal/provider"
 	"github.com/billionsheep/agent-imageflow/internal/storage"
 	"github.com/billionsheep/agent-imageflow/internal/store"
 )
@@ -23,6 +27,7 @@ const (
 	taskInputSourceUpload     = "agent-imageflow-upload"
 	taskInputSourceRemoteURL  = "agent-imageflow-remote-url"
 	taskInputSourceAssetReuse = "agent-imageflow-asset-reuse"
+	inputFileAssetProvider    = "input-file"
 )
 
 type resolvedTaskInputFiles struct {
@@ -83,6 +88,148 @@ func (s *Service) GetTaskInputFileContent(ctx context.Context, scope domain.Scop
 		return "", "", err
 	}
 	return stored.FilePath, stored.MimeType, nil
+}
+
+func (s *Service) PromoteInputFileToAsset(ctx context.Context, scope domain.Scope, inputFileID string, req domain.PromoteInputFileToAssetRequest) (domain.AssetResponse, error) {
+	if err := s.store.CheckScope(ctx, scope); err != nil {
+		return domain.AssetResponse{}, err
+	}
+	normalized, err := normalizePromoteInputFileToAssetRequest(req)
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	stored, err := s.storage.GetTaskInputFile(scope, strings.TrimSpace(inputFileID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return domain.AssetResponse{}, fmt.Errorf("%w: input file %s", store.ErrNotFound, strings.TrimSpace(inputFileID))
+		}
+		return domain.AssetResponse{}, err
+	}
+	raw, err := os.ReadFile(stored.FilePath)
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+
+	task, inputHash, err := promotedInputFileTask(scope, stored, normalized)
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	if err := s.store.InsertTask(ctx, task, inputHash, false); err != nil {
+		return domain.AssetResponse{}, err
+	}
+
+	assetID := domain.NewID("asset")
+	versionID := domain.NewID("ver")
+	parameters, err := promotedInputFileAssetParameters(stored, normalized)
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	generated := provider.GeneratedFile{
+		Slot:          0,
+		Bytes:         raw,
+		MimeType:      stored.MimeType,
+		Width:         stored.Width,
+		Height:        stored.Height,
+		Model:         "input-file",
+		ParametersRaw: parameters,
+		CostRaw:       []byte(`{"provider":"input-file","estimated_cost":0}`),
+	}
+	assetFile, err := s.storage.StoreGeneratedFile(ctx, task, assetID, versionID, generated)
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	item, err := s.store.InsertAssetWithVersion(ctx, task, generated, assetFile)
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	return s.assetResponse(item), nil
+}
+
+func normalizePromoteInputFileToAssetRequest(req domain.PromoteInputFileToAssetRequest) (domain.PromoteInputFileToAssetRequest, error) {
+	req.Purpose = normalizeReferencePurpose(req.Purpose)
+	if req.Purpose == "" {
+		return domain.PromoteInputFileToAssetRequest{}, fmt.Errorf("purpose must be character, style, scene or prop")
+	}
+	req.CharacterID = strings.TrimSpace(req.CharacterID)
+	return req, nil
+}
+
+func promotedInputFileTask(scope domain.Scope, stored storage.StoredTaskInputFile, req domain.PromoteInputFileToAssetRequest) (domain.Task, string, error) {
+	metadata := map[string]any{
+		"source":        "input_file",
+		"input_file_id": stored.InputFileID,
+		"purpose":       req.Purpose,
+	}
+	if req.CharacterID != "" {
+		metadata["character_id"] = req.CharacterID
+	}
+	structured := map[string]any{
+		"workspace_id":                     scope.WorkspaceID,
+		"project_id":                       scope.ProjectID,
+		"campaign_id":                      scope.CampaignID,
+		"title":                            "Promote input file " + stored.InputFileID,
+		"purpose":                          "project_reference_asset",
+		"prompt":                           "Promoted input file as project reference asset",
+		"reference_images":                 []domain.ReferenceImage{},
+		"reference_asset_count":            0,
+		"reference_input_file_count":       1,
+		"provider_reference_participation": "not_applicable_promoted_input_file",
+		"provider_reference_sources":       []string{"input_file"},
+		"provider_reference_mime_types":    []string{stored.MimeType},
+		"generation_config":                map[string]any{},
+		"requested_count":                  1,
+		"provider":                         inputFileAssetProvider,
+		"selection_mode":                   domain.SelectionManualOptional,
+		"review_required":                  false,
+		"metadata_json":                    metadata,
+	}
+	raw, err := json.Marshal(structured)
+	if err != nil {
+		return domain.Task{}, "", err
+	}
+	hash := sha256.Sum256(raw)
+	now := time.Now().UTC()
+	return domain.Task{
+		ID:                  domain.NewID("task"),
+		WorkspaceID:         scope.WorkspaceID,
+		ProjectID:           scope.ProjectID,
+		CampaignID:          scope.CampaignID,
+		Title:               "Promote input file " + stored.InputFileID,
+		Purpose:             "project_reference_asset",
+		Prompt:              "Promoted input file as project reference asset",
+		AspectRatio:         "1:1",
+		OutputFormat:        "png",
+		StructuredInputJSON: raw,
+		Provider:            inputFileAssetProvider,
+		SelectionMode:       domain.SelectionManualOptional,
+		Status:              domain.TaskCompleted,
+		RequestedCount:      1,
+		CreatedBy:           "local-user",
+		TraceID:             domain.NewID("trace"),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}, hex.EncodeToString(hash[:]), nil
+}
+
+func promotedInputFileAssetParameters(stored storage.StoredTaskInputFile, req domain.PromoteInputFileToAssetRequest) ([]byte, error) {
+	parameters := map[string]any{
+		"source":                           "input_file",
+		"input_file_id":                    stored.InputFileID,
+		"purpose":                          req.Purpose,
+		"original_filename":                stored.OriginalFilename,
+		"mime_type":                        stored.MimeType,
+		"width":                            stored.Width,
+		"height":                           stored.Height,
+		"reference_input_file_count":       1,
+		"reference_asset_count":            0,
+		"provider_reference_participation": "not_applicable_promoted_input_file",
+		"provider_reference_sources":       []string{"input_file"},
+		"provider_reference_mime_types":    []string{stored.MimeType},
+	}
+	if req.CharacterID != "" {
+		parameters["character_id"] = req.CharacterID
+	}
+	return json.Marshal(parameters)
 }
 
 func (s *Service) taskInputFileResponse(scope domain.Scope, stored storage.StoredTaskInputFile) domain.InputFileResponse {

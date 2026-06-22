@@ -49,6 +49,31 @@ func TestNormalizeProjectVisualContextAssignsDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeProjectVisualContextKeepsCharacterReferencePolicyAndLockNotes(t *testing.T) {
+	now := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
+	visualContext, err := normalizeProjectVisualContext(domain.ProjectVisualContext{
+		Characters: []domain.CharacterProfile{
+			{
+				ID:                  "dog_milo",
+				Name:                "Milo",
+				Status:              "active",
+				ReferencePolicy:     " primary_plus_references ",
+				AppearanceLockNotes: " keep white muzzle and red scarf ",
+			},
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("normalizeProjectVisualContext returned error: %v", err)
+	}
+	character := visualContext.Characters[0]
+	if character.ReferencePolicy != "primary_plus_references" {
+		t.Fatalf("reference_policy was not normalized: %#v", character)
+	}
+	if character.AppearanceLockNotes != "keep white muzzle and red scarf" {
+		t.Fatalf("appearance_lock_notes was not normalized: %#v", character)
+	}
+}
+
 func TestValidateProjectVisualContextAssetScopesRejectsCrossProjectAsset(t *testing.T) {
 	scope := domain.Scope{WorkspaceID: "ws_a", ProjectID: "prj_a"}
 	err := validateProjectVisualContextAssetScopes(context.Background(), scope, domain.ProjectVisualContext{
@@ -58,6 +83,35 @@ func TestValidateProjectVisualContextAssetScopesRejectsCrossProjectAsset(t *test
 	})
 	if err == nil || !strings.Contains(err.Error(), "not ws_a/prj_a") {
 		t.Fatalf("expected cross project asset rejection, got %v", err)
+	}
+}
+
+func TestBuildReferenceParticipationDiagnosticsCountsAssetsAndInputFiles(t *testing.T) {
+	diagnostics := buildReferenceParticipationDiagnostics(domain.CreateTaskRequest{
+		ReferenceImages: []domain.ReferenceImage{
+			{AssetID: "asset_primary", Source: "project_visual_context", MimeType: "image/png"},
+			{InputFileID: "inp_manual", Source: "agent-imageflow-upload", MimeType: "image/webp"},
+			{URL: "https://example.test/ref.png", Source: "agent-imageflow-remote-url", MimeType: "image/png"},
+		},
+	}, &resolvedTaskInputFiles{
+		ReferenceImages: []resolvedTaskInputFile{
+			{Kind: domain.InputFileKindReference, FilePath: "/tmp/asset_primary.png", MimeType: "image/png"},
+			{InputFileID: "inp_manual", Kind: domain.InputFileKindReference, FilePath: "/tmp/manual.webp", MimeType: "image/webp"},
+			{InputFileID: "inp_remote", Kind: domain.InputFileKindReference, FilePath: "/tmp/remote.png", MimeType: "image/png"},
+		},
+	})
+	if diagnostics.ReferenceAssetCount != 1 {
+		t.Fatalf("expected 1 asset reference, got %#v", diagnostics)
+	}
+	if diagnostics.ReferenceInputFileCount != 2 {
+		t.Fatalf("expected 2 input-file references, got %#v", diagnostics)
+	}
+	if diagnostics.ProviderReferenceParticipation != "resolved_input_files" {
+		t.Fatalf("expected resolved input participation, got %#v", diagnostics)
+	}
+	if !containsString(diagnostics.ProviderReferenceSources, "agent-imageflow-upload") ||
+		!containsString(diagnostics.ProviderReferenceMIMETypes, "image/webp") {
+		t.Fatalf("source/mime diagnostics missing: %#v", diagnostics)
 	}
 }
 

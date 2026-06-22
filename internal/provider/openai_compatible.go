@@ -357,10 +357,10 @@ func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.
 	for index, item := range input.ReferenceImages {
 		fileBytes, mimeType, err := p.readEditInputFile(item.FilePath, item.MimeType, input.MaskImage != nil && index == 0)
 		if err != nil {
-			return Result{}, err
+			return Result{}, referenceParticipationError(item, err)
 		}
 		if err := writeMultipartImageFile(writer, "image[]", fileBytes, fmt.Sprintf("input-%d%s", index+1, fileExtensionForMultipartMime(mimeType))); err != nil {
-			return Result{}, err
+			return Result{}, referenceParticipationError(item, err)
 		}
 	}
 	if input.MaskImage != nil {

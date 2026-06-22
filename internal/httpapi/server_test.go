@@ -108,6 +108,27 @@ func TestAuthorizeRequestAllowsAdminSessionForRecentAssets(t *testing.T) {
 	}
 }
 
+func TestPromoteInputFileAssetRouteAllowsAdminAndAuditsAction(t *testing.T) {
+	parts := []string{"api", "workspaces", "ws_demo", "projects", "prj_demo", "campaigns", "cmp_demo", "input-files", "inp_demo", "promote-asset"}
+	if !routeAllowsAdminSession(parts, http.MethodPost) {
+		t.Fatal("expected promote input-file asset route to allow admin session")
+	}
+	route, action := inferAuditRoute(parts, http.MethodPost)
+	if route != "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/input-files/{input_file_id}/promote-asset" ||
+		action != "promote_input_file_asset" {
+		t.Fatalf("unexpected audit route/action: %s %s", route, action)
+	}
+	server := &Server{}
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws_demo/projects/prj_demo/campaigns/cmp_demo/input-files/inp_demo/promote-asset", nil)
+	scope, ok, err := server.resolveRequestAuthScope(request, parts)
+	if err != nil {
+		t.Fatalf("resolveRequestAuthScope returned error: %v", err)
+	}
+	if !ok || scope.WorkspaceID != "ws_demo" || scope.ProjectID != "prj_demo" || scope.CampaignID != "cmp_demo" || scope.InputFileID != "inp_demo" {
+		t.Fatalf("unexpected auth scope: ok=%v scope=%#v", ok, scope)
+	}
+}
+
 func TestAuthorizeRequestRejectsAnonymousRecentAssets(t *testing.T) {
 	server := &Server{}
 	recorder := httptest.NewRecorder()

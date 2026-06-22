@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -529,6 +530,25 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	}
 	if params["request_mode"] != OpenAICompatibleRequestModeImagesStream || params["operation"] != "edit" || params["endpoint"] != openAICompatibleEndpointEdits {
 		t.Fatalf("expected edit URL request shape, got %#v", params)
+	}
+}
+
+func TestReferenceParticipationErrorIncludesUserReadableSourceAndMIME(t *testing.T) {
+	err := referenceParticipationError(resolvedTaskInputFile{
+		InputFileID: "inp_missing",
+		Kind:        "reference",
+		FilePath:    "/tmp/does-not-exist.png",
+		MimeType:    "image/webp",
+		Role:        "character_primary",
+	}, errors.New("open /tmp/does-not-exist.png: no such file or directory"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	message := err.Error()
+	for _, want := range []string{"参考图未参与生成", "input_file_id=inp_missing", "mime_type=image/webp", "source=input_file"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, message)
+		}
 	}
 }
 

@@ -664,8 +664,14 @@ type CleanupDryRunOptions struct {
 	Scope                Scope
 	IncludeRejected      bool
 	IncludeGenerated     bool
+	IncludeDeprecated    bool
 	IncludeFailedTaskTmp bool
 	IncludeOrphans       bool
+	AssetID              string
+	TaskID               string
+	SessionID            string
+	BatchID              string
+	StoryID              string
 	Limit                int
 }
 
@@ -712,8 +718,14 @@ type CleanupExecuteOptions struct {
 	Scope                Scope
 	IncludeRejected      bool
 	IncludeGenerated     bool
+	IncludeDeprecated    bool
 	IncludeFailedTaskTmp bool
 	IncludeOrphans       bool
+	AssetID              string
+	TaskID               string
+	SessionID            string
+	BatchID              string
+	StoryID              string
 	Limit                int
 	DryRunToken          string
 	Execute              bool
@@ -806,16 +818,18 @@ type BestOfConfig struct {
 }
 
 type CharacterProfile struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Status            string    `json:"status"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	Role              string    `json:"role,omitempty"`
-	Appearance        string    `json:"appearance,omitempty"`
-	Personality       string    `json:"personality,omitempty"`
-	Forbidden         []string  `json:"forbidden,omitempty"`
-	PrimaryAssetID    string    `json:"primary_asset_id,omitempty"`
-	ReferenceAssetIDs []string  `json:"reference_asset_ids,omitempty"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Status              string    `json:"status"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Role                string    `json:"role,omitempty"`
+	Appearance          string    `json:"appearance,omitempty"`
+	Personality         string    `json:"personality,omitempty"`
+	Forbidden           []string  `json:"forbidden,omitempty"`
+	PrimaryAssetID      string    `json:"primary_asset_id,omitempty"`
+	ReferenceAssetIDs   []string  `json:"reference_asset_ids,omitempty"`
+	ReferencePolicy     string    `json:"reference_policy,omitempty"`
+	AppearanceLockNotes string    `json:"appearance_lock_notes,omitempty"`
 }
 
 type ProjectReferenceBinding struct {
@@ -985,6 +999,19 @@ type InputFileResponse struct {
 	SizeBytes        int64  `json:"size_bytes"`
 	DownloadURL      string `json:"download_url"`
 	MetadataURL      string `json:"metadata_url"`
+}
+
+type PromoteInputFileToAssetRequest struct {
+	Purpose     string `json:"purpose"`
+	CharacterID string `json:"character_id,omitempty"`
+}
+
+type ReferenceParticipationDiagnostics struct {
+	ReferenceAssetCount            int      `json:"reference_asset_count"`
+	ReferenceInputFileCount        int      `json:"reference_input_file_count"`
+	ProviderReferenceParticipation string   `json:"provider_reference_participation"`
+	ProviderReferenceSources       []string `json:"provider_reference_sources,omitempty"`
+	ProviderReferenceMIMETypes     []string `json:"provider_reference_mime_types,omitempty"`
 }
 
 type ProjectAccessConfig struct {
