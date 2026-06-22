@@ -69,7 +69,7 @@ func (s *Service) CleanupDryRun(ctx context.Context, opts domain.CleanupDryRunOp
 		PublishedAssetCount: counts.Campaign.PublishedAssetCount,
 	}
 
-	assetCandidates, err := s.store.ListCleanupAssetCandidates(ctx, opts.Scope, opts.IncludeRejected, opts.IncludeGenerated, opts.Limit)
+	assetCandidates, err := s.store.ListCleanupAssetCandidates(ctx, opts)
 	if err != nil {
 		return domain.CleanupDryRunReport{}, err
 	}
@@ -168,12 +168,18 @@ func normalizeCleanupDryRunOptions(opts domain.CleanupDryRunOptions) domain.Clea
 	if opts.Limit < 1 {
 		opts.Limit = defaultCleanupDryRunLimit
 	}
-	if !opts.IncludeRejected && !opts.IncludeGenerated && !opts.IncludeFailedTaskTmp && !opts.IncludeOrphans {
+	if !opts.IncludeRejected && !opts.IncludeGenerated && !opts.IncludeDeprecated && !opts.IncludeFailedTaskTmp && !opts.IncludeOrphans {
 		opts.IncludeRejected = true
 		opts.IncludeGenerated = true
+		opts.IncludeDeprecated = true
 		opts.IncludeFailedTaskTmp = true
 		opts.IncludeOrphans = true
 	}
+	opts.AssetID = strings.TrimSpace(opts.AssetID)
+	opts.TaskID = strings.TrimSpace(opts.TaskID)
+	opts.SessionID = strings.TrimSpace(opts.SessionID)
+	opts.BatchID = strings.TrimSpace(opts.BatchID)
+	opts.StoryID = strings.TrimSpace(opts.StoryID)
 	return opts
 }
 
@@ -182,8 +188,14 @@ func cleanupDryRunOptionsFromExecuteOptions(opts domain.CleanupExecuteOptions) d
 		Scope:                opts.Scope,
 		IncludeRejected:      opts.IncludeRejected,
 		IncludeGenerated:     opts.IncludeGenerated,
+		IncludeDeprecated:    opts.IncludeDeprecated,
 		IncludeFailedTaskTmp: opts.IncludeFailedTaskTmp,
 		IncludeOrphans:       opts.IncludeOrphans,
+		AssetID:              opts.AssetID,
+		TaskID:               opts.TaskID,
+		SessionID:            opts.SessionID,
+		BatchID:              opts.BatchID,
+		StoryID:              opts.StoryID,
 		Limit:                opts.Limit,
 	})
 }
@@ -211,13 +223,15 @@ func cleanupDryRunReasonForAssetStatus(status string) (string, bool) {
 		return "rejected_asset", true
 	case domain.AssetDraft:
 		return "generated_unselected_asset", true
+	case domain.AssetDeprecated:
+		return "deprecated_asset", true
 	default:
 		return "", false
 	}
 }
 
 func cleanupAllowedAssetStatuses() []string {
-	return []string{domain.AssetRejected, domain.AssetDraft}
+	return []string{domain.AssetRejected, domain.AssetDraft, domain.AssetDeprecated}
 }
 
 func addCleanupCandidate(r *domain.CleanupDryRunReport, candidate domain.CleanupCandidate) {

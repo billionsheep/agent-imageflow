@@ -189,10 +189,10 @@ mindmap
 | P1 历史拆分 | `issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv` | 已被合并主线吸收，保留作参考 | 不直接执行 |
 | 后续 P1 | Server Deployment Rehearsal | 真实服务器/NAS 拉取 GHCR 镜像、配置 HTTPS 反代、跑 mock smoke、验证备份和回滚 | 推荐马上做 |
 | 后续 P1 | Pet Account Real Workflow Trial | 用低并发真实 provider 小批量跑萌宠故事图，观察 Web 审图和 agent 调用摩擦 | 服务器部署或本地稳定后做 |
-| 后续 P1 | MCP Service Pack | 给新 agent 一份最小 MCP 接入包，说明怎么连、怎么鉴权、怎么 mock 生图、怎么查 task/asset/delivery，避免每个新线程都重新理解项目 | 推荐在 Settings 信息架构之前或并行 |
-| 后续 P1 | Character Reference Intake and Consistency | 补角色图像入库、input-file 提升为 asset、角色主图/参考图绑定、Web 角色卡缩略图、MCP 自动带参考和 provider 参考图诊断 | 推荐作为萌宠固定角色账号的下一核心补强 |
-| 后续 P1 | Web Review Feedback and Stability | 修复 Select/Reject 状态反馈不明显、Production View 局部状态不清晰、下拉切换整页闪烁和审图请求风暴 | 推荐与角色参考闭环并行或紧随其后 |
-| 后续 P1 | Safe Delete and Trial Reset | 补受控删除、归档和试用重置能力，解决废图、失败任务、测试 batch/session/campaign 持续累积；Admin Web/REST/CLI 优先，MCP 不开放 workspace/project/campaign 硬删除 | 推荐在真实试用后或与 MCP Service Pack 并行 |
+| P1 专项 | `issues/next-phase-p1-mcp-service-pack.csv` | 给新 agent 一份最小 MCP 接入包，说明怎么连、怎么鉴权、怎么 mock 生图、怎么查 task/asset/delivery，避免每个新线程都重新理解项目 | 文档和示例已落地；实际 MCP mock smoke evidence 待回填 |
+| P1 专项 | `issues/next-phase-p1-character-reference-intake-consistency.csv` | 补角色图像入库、input-file 提升为 asset、角色主图/参考图绑定、Web 角色卡缩略图、MCP 自动带参考和 provider 参考图诊断 | 后端 foundation 与角色卡缩略图已完成；绑定快捷动作、mock pet consistency smoke 和人工真实参考 canary 待完成 |
+| P1 专项 | `issues/next-phase-p1-web-review-feedback-stability.csv` | 修复 Select/Reject 状态反馈不明显、Production View 局部状态不清晰、下拉切换整页闪烁和审图请求风暴 | Web 前端与 tests 范围已完成；仍建议补一次 browser smoke evidence |
+| P1 专项 | `issues/next-phase-p1-safe-delete-and-trial-reset.csv` | 补受控删除、归档和试用重置能力，解决废图、失败任务、测试 batch/session/campaign 持续累积；Admin Web/REST/CLI 优先，MCP 不开放 workspace/project/campaign 硬删除 | CLI + Admin-only REST foundation 已完成；Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练待完成 |
 | 后续 P1 | Settings Information Architecture | 重新整理控制台状态、业务空间、服务端能力、高级/旧模式、数据管理、关于，避免凭据和旧 provider 配置混杂 | 需要先设计再实现 |
 | 后续 P2 | Usage Tracking、edit lineage、Export Pack ZIP、Deployment Secret Hardening | 使用记录、编辑谱系、小批量交付包、部署安全状态和 non-exposure regression | 需要重新拆独立 CSV |
 | 后续 P3 | 真实视觉质检 | 视觉一致性质量判断，先做人工辅助再评估 AI 自动质检 | 后置 |
@@ -200,7 +200,7 @@ mindmap
 
 ## 推荐下一步
 
-当前不要再次执行 P1 Asset Production Readiness CSV、P1 Web Performance / Startup CSV、P1 Provider Throughput & Reliability CSV、P1 Web Console Auth & Asset Visibility CSV、P1 Web UX Smoothness CSV、P1 Project Production Context CSV、P1 Batch Story Export Foundation CSV、P2 Web Operator Review Console CSV、P1 Deployment Release Pipeline CSV 或 P1 Web Console Auth Gate / Localization / Product Fit CSV。下一步建议进入 V1 之后的独立推进：第一优先是 `Server Deployment Rehearsal`，确认 GHCR private package 可被服务器 `docker login ghcr.io` 拉取，准备不入仓库的 `.env.prod`，用 `IMAGE_TAG` 部署一个版本，跑 health/Web/Admin/mock smoke，再演练一次改 tag 回滚。第二优先是 `Pet Account Real Workflow Trial`，继续用低并发真实 provider 小批量跑“agent 写故事 -> agent 调 MCP/REST 批量生图 -> Web Recent Assets 审图 -> Production View 按 scene select/reject -> JSON manifest/NAS 交付”闭环；为了降低后续新 agent / 新线程接入成本，`MCP Service Pack` 可放在 Pet Trial 前后快速完成。真实试用已经暴露“角色参考图没有沉淀为角色视觉资产”和“审图交互反馈/下拉切换仍不顺”的问题，因此新增 `Character Reference Intake and Consistency` 与 `Web Review Feedback and Stability` 两个 P1 follow-up；前者解决固定萌宠角色一致性，后者解决 Web 日常审图可用性。如果真实试用继续产生大量废图和测试批次，执行 `Safe Delete and Trial Reset`；如果继续优化 Web 设置页，优先新开 `Settings Information Architecture`，先确认结构设计再实现。
+当前不要再次执行 P1 Asset Production Readiness CSV、P1 Web Performance / Startup CSV、P1 Provider Throughput & Reliability CSV、P1 Web Console Auth & Asset Visibility CSV、P1 Web UX Smoothness CSV、P1 Project Production Context CSV、P1 Batch Story Export Foundation CSV、P2 Web Operator Review Console CSV、P1 Deployment Release Pipeline CSV 或 P1 Web Console Auth Gate / Localization / Product Fit CSV。下一步建议进入 V1 之后的独立推进：第一优先是 `Server Deployment Rehearsal`，确认 GHCR private package 可被服务器 `docker login ghcr.io` 拉取，准备不入仓库的 `.env.prod`，用 `IMAGE_TAG` 部署一个版本，跑 health/Web/Admin/mock smoke，再演练一次改 tag 回滚。第二优先是 `Pet Account Real Workflow Trial`，继续用低并发真实 provider 小批量跑“agent 写故事 -> agent 调 MCP/REST 批量生图 -> Web Recent Assets 审图 -> Production View 按 scene select/reject -> JSON manifest/NAS 交付”闭环；当前 MCP Service Pack、Character Reference Intake、Web Review Feedback、Safe Delete foundation 已推进，后续重点是补 browser/MCP smoke evidence、角色参考绑定快捷动作、Web 数据管理入口和真实参考图 1 图人工 canary。如果继续优化 Web 设置页，优先新开 `Settings Information Architecture`，先确认结构设计再实现。
 
 ```text
 Completed P2 CSV: issues/next-phase-p2-web-operator-review-console.csv

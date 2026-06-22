@@ -55,15 +55,16 @@ type Server struct {
 const maxTaskInputUploadBytes int64 = 50 << 20
 
 type requestAuthScope struct {
-	WorkspaceID    string
-	ProjectID      string
-	CampaignID     string
-	TaskID         string
-	AssetID        string
-	InputFileID    string
-	AllowBasicOnly bool
-	AllowAdmin     bool
-	RequireAdmin   bool
+	WorkspaceID         string
+	ProjectID           string
+	CampaignID          string
+	TaskID              string
+	AssetID             string
+	InputFileID         string
+	AllowBasicOnly      bool
+	AllowAdmin          bool
+	RequireAdmin        bool
+	RequireAdminSession bool
 }
 
 func New(service *app.Service, options Options) *Server {
@@ -156,6 +157,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleGetStorageGovernance(w, r, parts[2], parts[4], parts[6])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"):
 		s.handleGetStorageIntegrity(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview"):
+		s.handleStorageCleanupPreview(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
+		s.handleStorageCleanupExecute(w, r, parts[2], parts[4], parts[6])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "tasks"):
 		s.handleCreateTask(w, r, parts[2], parts[4], parts[6])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
@@ -223,6 +228,17 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 				return true, scope, actor, nil
 			}
 		}
+	}
+	if routeRequiresAdminSession(parts, r.Method) {
+		preScope, preOK, preErr := s.resolveRequestAuthScope(r, parts)
+		if preErr != nil {
+			return false, requestAuthScope{}, actor, preErr
+		}
+		if !preOK {
+			preScope = requestAuthScope{RequireAdminSession: true}
+		}
+		writeUnauthorized(w, "admin_session_required", "admin session is required", false)
+		return false, preScope, actor, nil
 	}
 	if !s.authorizeBasicAuth(w, r, shouldSendBasicChallenge(parts, r.Method)) {
 		return false, requestAuthScope{}, actor, nil
@@ -326,6 +342,11 @@ func shouldSendBasicChallenge(parts []string, method string) bool {
 	return true
 }
 
+func routeRequiresAdminSession(parts []string, method string) bool {
+	return method == http.MethodPost && (match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"))
+}
+
 func isAssetDeliveryRoute(parts []string, method string) bool {
 	isRead := method == http.MethodGet || method == http.MethodHead
 	return isRead && (match(parts, "api", "assets", "*", "thumbnail") ||
@@ -406,11 +427,18 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			ProjectID:   parts[4],
 			CampaignID:  parts[6],
 		}, true, nil
-	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"):
+	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
 		return requestAuthScope{
 			WorkspaceID: parts[2],
 			ProjectID:   parts[4],
 			CampaignID:  parts[6],
+			AllowAdmin:  true,
+			RequireAdmin: match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
+			RequireAdminSession: match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
@@ -721,6 +749,90 @@ func (s *Server) handleGetStorageIntegrity(w http.ResponseWriter, r *http.Reques
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 		CampaignID:  campaignID,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type storageCleanupRequest struct {
+	IncludeRejected      bool   `json:"include_rejected"`
+	IncludeGenerated     bool   `json:"include_generated"`
+	IncludeDeprecated    bool   `json:"include_deprecated"`
+	IncludeFailedTaskTmp bool   `json:"include_failed_task_tmp"`
+	IncludeOrphans       bool   `json:"include_orphans"`
+	AssetID              string `json:"asset_id"`
+	TaskID               string `json:"task_id"`
+	SessionID            string `json:"session_id"`
+	BatchID              string `json:"batch_id"`
+	StoryID              string `json:"story_id"`
+	Limit                int    `json:"limit"`
+	DryRunToken          string `json:"dry_run_token"`
+	Execute              bool   `json:"execute"`
+	Confirm              bool   `json:"confirm"`
+}
+
+func decodeStorageCleanupRequest(w http.ResponseWriter, r *http.Request) (storageCleanupRequest, bool) {
+	defer r.Body.Close()
+	var req storageCleanupRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return storageCleanupRequest{}, false
+	}
+	return req, true
+}
+
+func (s *Server) handleStorageCleanupPreview(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID string) {
+	req, ok := decodeStorageCleanupRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.service.CleanupDryRun(r.Context(), domain.CleanupDryRunOptions{
+		Scope:                domain.Scope{WorkspaceID: workspaceID, ProjectID: projectID, CampaignID: campaignID},
+		IncludeRejected:      req.IncludeRejected,
+		IncludeGenerated:     req.IncludeGenerated,
+		IncludeDeprecated:    req.IncludeDeprecated,
+		IncludeFailedTaskTmp: req.IncludeFailedTaskTmp,
+		IncludeOrphans:       req.IncludeOrphans,
+		AssetID:              req.AssetID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		BatchID:              req.BatchID,
+		StoryID:              req.StoryID,
+		Limit:                req.Limit,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleStorageCleanupExecute(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID string) {
+	req, ok := decodeStorageCleanupRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.service.CleanupExecute(r.Context(), domain.CleanupExecuteOptions{
+		Scope:                domain.Scope{WorkspaceID: workspaceID, ProjectID: projectID, CampaignID: campaignID},
+		IncludeRejected:      req.IncludeRejected,
+		IncludeGenerated:     req.IncludeGenerated,
+		IncludeDeprecated:    req.IncludeDeprecated,
+		IncludeFailedTaskTmp: req.IncludeFailedTaskTmp,
+		IncludeOrphans:       req.IncludeOrphans,
+		AssetID:              req.AssetID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		BatchID:              req.BatchID,
+		StoryID:              req.StoryID,
+		Limit:                req.Limit,
+		DryRunToken:          req.DryRunToken,
+		Execute:              req.Execute,
+		Confirm:              req.Confirm,
+		Actor:                "admin_api",
 	})
 	if err != nil {
 		writeServiceError(w, err)

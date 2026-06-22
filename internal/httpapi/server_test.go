@@ -129,6 +129,82 @@ func TestPromoteInputFileAssetRouteAllowsAdminAndAuditsAction(t *testing.T) {
 	}
 }
 
+func TestStorageCleanupRoutesUseProjectScopeAuthAndAudit(t *testing.T) {
+	server := &Server{}
+	tests := []struct {
+		name       string
+		leaf       string
+		method     string
+		wantAction string
+	}{
+		{name: "preview", leaf: "storage-cleanup-preview", method: http.MethodPost, wantAction: "preview_storage_cleanup"},
+		{name: "execute", leaf: "storage-cleanup-execute", method: http.MethodPost, wantAction: "execute_storage_cleanup"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			parts := []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "campaigns", "cmp_demo", tc.leaf}
+			if !routeAllowsAdminSession(parts, tc.method) {
+				t.Fatalf("%s should allow admin session", tc.leaf)
+			}
+			scope, ok, err := server.resolveRequestAuthScope(
+				httptest.NewRequest(tc.method, "/api/workspaces/ws_default/projects/prj_demo/campaigns/cmp_demo/"+tc.leaf, nil),
+				parts,
+			)
+			if err != nil {
+				t.Fatalf("resolveRequestAuthScope returned error: %v", err)
+			}
+			if !ok || scope.WorkspaceID != "ws_default" || scope.ProjectID != "prj_demo" || scope.CampaignID != "cmp_demo" {
+				t.Fatalf("unexpected scope: ok=%v scope=%#v", ok, scope)
+			}
+			if !scope.AllowAdmin || !scope.RequireAdmin {
+				t.Fatalf("%s should require admin session: %#v", tc.leaf, scope)
+			}
+			route, action := inferAuditRoute(parts, tc.method)
+			wantRoute := "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/" + tc.leaf
+			if route != wantRoute || action != tc.wantAction {
+				t.Fatalf("unexpected audit route/action: %s %s", route, action)
+			}
+		})
+	}
+}
+
+func TestStorageCleanupRequiresAdminSessionNotBasicAuth(t *testing.T) {
+	server := &Server{
+		options: Options{
+			BasicAuthUsername: "basic",
+			BasicAuthPassword: "secret",
+			AdminUsername:     "admin",
+			AdminPassword:     "admin-secret",
+			AdminSessionTTL:   time.Hour,
+		},
+	}
+	parts := []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "campaigns", "cmp_demo", "storage-cleanup-execute"}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws_default/projects/prj_demo/campaigns/cmp_demo/storage-cleanup-execute", nil)
+	request.SetBasicAuth("basic", "secret")
+
+	authorized, scope, actor, err := server.authorizeRequest(recorder, request, parts)
+	if err != nil {
+		t.Fatalf("authorizeRequest returned error: %v", err)
+	}
+	if authorized {
+		t.Fatal("expected cleanup execute to require admin session")
+	}
+	if !scope.RequireAdminSession {
+		t.Fatalf("expected admin-session-only scope, got %#v", scope)
+	}
+	if actor.AuthMode != "basic_auth" || actor.Actor != "basic" {
+		t.Fatalf("expected audit actor to retain attempted basic auth, got %#v", actor)
+	}
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("WWW-Authenticate"); got != "" {
+		t.Fatalf("admin-session-only cleanup should not trigger browser Basic challenge, got %q", got)
+	}
+}
+
 func TestAuthorizeRequestRejectsAnonymousRecentAssets(t *testing.T) {
 	server := &Server{}
 	recorder := httptest.NewRecorder()

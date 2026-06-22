@@ -12,10 +12,10 @@
 - Web Operator Review Console 已完成第一版：Web 默认体验已从工程调试列表收敛为审图控制台，长 ID 和工程字段默认折叠。
 - Deployment Release Pipeline 已完成：GitHub Actions 构建 GHCR 私有 API/Web 镜像，服务器使用生产 compose 拉取镜像运行。
 - Web Console Auth Gate / Localization / Product Fit 已完成：Web 未登录时只显示 Admin 登录页，登录后进入服务器托管控制台；Help/About 和主路径 UI 已收敛为 Agent ImageFlow 中文控制台。设置页信息架构仍建议后续独立设计。
-- MCP Service Pack 已追加为后续 P1 小切片：目标是让新 agent 只看接入说明和配置示例即可完成 MCP tools/list、mock 创建任务、查询 task 和获取 delivery info，不需要理解完整项目。
-- Character Reference Intake and Consistency 已追加为后续 P1 小切片：真实试用暴露当前 Project Visual Context 仍偏文字配置，input-files 不能自然沉淀为角色参考 asset，MCP 成功纯文生图不等于角色参考图参与成功。
-- Web Review Feedback and Stability 已追加为后续 P1 小切片：真实试用暴露 Select/Reject 只靠 toast 不足以让用户确认状态，下拉切换仍可能造成整页闪烁，需要补局部状态更新和浏览器回归。
-- Safe Delete and Trial Reset 已追加为后续 P1 小切片：目标是补受控删除、归档和试用重置能力，解决废图、失败任务、测试 batch/session/campaign 持续累积；第一轮优先 Admin Web/REST/CLI，MCP 不开放 workspace/project/campaign 硬删除。
+- MCP Service Pack 已部分完成：接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地；实际 MCP mock smoke evidence 仍需回填。
+- Character Reference Intake and Consistency 已完成 foundation：后端支持 input-file 提升为 reference asset、角色主图/参考图字段、任务自动带参考和 provider 参考参与诊断；Web 角色卡已显示缩略图和缺图警告。剩余是绑定快捷动作、mock pet consistency smoke 和人工真实参考 canary。
+- Web Review Feedback and Stability 已完成 Web 前端与 tests 范围：Select/Reject 现在有 pending、optimistic status/style、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃和 429 友好提示；仍建议补一次 browser smoke evidence。
+- Safe Delete and Trial Reset 已完成 CLI + Admin-only REST foundation：支持 cleanup preview/execute 按 asset/task/session/batch/story/campaign 定位候选，继续保护 selected/published/approved 并写 audit；剩余 Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练。MCP 不开放 workspace/project/campaign 硬删除。
 
 V1 之后的剩余任务和未来方向以 `docs/project/V1_BASELINE_AND_ROADMAP.md` 为准。本文保留早期场景记录用于溯源。
 

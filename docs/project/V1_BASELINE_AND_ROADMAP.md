@@ -67,26 +67,26 @@ V1 不做：
    - 观察 Web 审图是否仍有闪烁、卡顿、字段噪音或操作路径太长。
    - 记录具体 URL host、Admin 登录态、scope、filter、batch/session/story/scene 和复现步骤。
 
-3. MCP Service Pack
-   - 让新 agent 不需要理解完整项目，只看一份接入说明和一份配置示例即可开始用 MCP。
-   - 明确 Project API Key、Basic Auth、Admin Login 和 provider key 的边界。
-   - 默认只做 mock smoke，不运行真实 provider。
+3. MCP Service Pack smoke
+   - 接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地。
+   - 下一步只需回填 `tools/list`、mock create task、get task 和 delivery info 的实际 evidence。
+   - 继续明确 Project API Key、Basic Auth、Admin Login 和 provider key 的边界。
 
 4. Character Reference Intake and Consistency
-   - 把用户上传/裁切的角色图从 campaign input-files 沉淀为正式 project reference asset。
-   - 支持角色主图/参考图绑定，并在 Web 角色卡中显示缩略图和缺图警告。
-   - MCP 创建任务使用 `character_ids` 时能明确带入参考资产；任务和资产 metadata 标明参考图是否参与。
-   - provider 参考图失败时给出用户可读诊断，不把绕过参考图的纯文生图成功误判为角色一致性成功。
+   - 后端已支持把 campaign input-files 提升为正式 project reference asset。
+   - 已支持角色主图/参考图字段、任务自动带参考资产、provider 参考参与 metadata 和参考图失败诊断。
+   - Web 角色卡已显示主图/参考图缩略图和缺图警告。
+   - 下一步补“从当前资产设为角色主图/参考图”的快捷动作、mock pet consistency smoke 和人工确认后的 1 图真实参考 canary。
 
 5. Web Review Feedback and Stability
-   - Select / Reject 后卡片、scene header、coverage count 和按钮状态必须立刻可见变化。
-   - 下拉切换 workspace/project/campaign/filter/recipe 时保留旧内容，用局部 loading 替代整页闪白。
-   - 审图相关请求做去重、节流和 429 友好提示。
+   - Web 前端和 tests 范围已完成：Select / Reject 后卡片、scene header、coverage count 和按钮状态会局部变化。
+   - 下拉和筛选刷新保留旧内容，审图请求已有去重、旧响应丢弃和 429 友好提示。
+   - 下一步只建议补一次 browser smoke evidence。
 
 6. Safe Delete and Trial Reset
-   - 给 Admin Web/REST/CLI 增加受控删除、归档和试用重置能力。
-   - 优先解决废图、失败任务、测试 batch/session/campaign 持续累积的问题。
-   - 删除必须先 dry-run、显示 protected counts、二次确认并写 audit；MCP 第一轮不删除 workspace/project/campaign。
+   - CLI + Admin-only REST foundation 已完成：cleanup preview/execute 可按 asset/task/session/batch/story/campaign 定位候选。
+   - 继续要求 dry-run token 或显式确认，保护 selected/published/approved 并写 audit。
+   - 下一步补 Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign。
 
 7. 发布版本策略确认
    - 当前 `main` 和 `sha-<commit>` 镜像可用。
@@ -151,13 +151,16 @@ issues/next-phase-p1-pet-account-real-workflow-trial.csv
 issues/next-phase-p1-mcp-service-pack.csv
 ```
 
-目标：
+当前状态：
 
-- 新增 `docs/project/MCP_SERVICE_GUIDE.md`，让新 agent 明确怎么连 MCP、怎么鉴权、怎么生成、怎么查资产、怎么拿交付链接。
-- 新增可复制配置示例 `examples/mcp/agent-imageflow.local.json`，不得包含真实 secret。
-- 新增萌宠场景调用示例 `examples/mcp/create-pet-scene.json`。
-- 新增 smoke 调用说明或脚本 `examples/mcp/smoke.md` 或 `examples/mcp/smoke.sh`。
-- 明确 agent 需要 Project API Key；如果 Basic Auth 开启，还需要 Basic Auth；不需要 Admin 登录 cookie；不需要 provider key；不允许把 provider key 写进配置文件。
+- 已新增 `docs/project/MCP_SERVICE_GUIDE.md`、`examples/mcp/agent-imageflow.local.json`、`examples/mcp/create-pet-scene.json` 和 `examples/mcp/smoke.md`。
+- 已明确 Project API Key、Basic Auth、Admin Login 和 provider key 的边界；MCP 配置示例不写真实 secret，也不需要 Admin cookie 或 provider key。
+- 已补删除边界：MCP 继续负责 create/get/list/select/reject/delivery，删除和试用重置走 Admin Web/REST/CLI。
+
+剩余目标：
+
+- 跑 `tools/list`、mock create task、get task、list assets 和 delivery info smoke。
+- 把 smoke evidence 回填到 CSV / CHECKPOINTS。
 - 暂不做远程 HTTP MCP、新账号系统、多用户权限、provider key 下发、新工具 schema 大改或真实 provider 默认 smoke。
 
 ### P1 Visual Consistency: Character Reference Intake
@@ -168,13 +171,18 @@ issues/next-phase-p1-mcp-service-pack.csv
 issues/next-phase-p1-character-reference-intake-consistency.csv
 ```
 
-目标：
+当前状态：
 
-- 新增“上传/裁切角色图 -> 提升为 project reference asset -> 绑定角色主图/参考图 -> MCP/Web 生图自动使用”的最小闭环。
-- Web Project Context 角色卡展示主图缩略图、参考图 gallery、缺图警告和绑定动作，避免只显示长 ID。
-- 服务端校验 reference asset 必须属于同 workspace/project，绑定或归档 reference 不删除原 asset。
-- 任务和资产快照记录 selected characters、reference asset count、provider reference participation 和 fallback-to-text-only 状态。
-- 真实 provider 参考图路径补 MIME/content-type 诊断和 1 图人工 canary；失败时明确告诉用户参考图没有参与生成。
+- 后端已支持 input-file promote 为正式 reference asset，并写入 asset/version/thumbnail/metadata。
+- Character Profile 已支持 `primary_asset_id`、`reference_asset_ids`、`reference_policy` 和 `appearance_lock_notes`。
+- CreateTask 使用 `character_ids` 与 `use_project_visual_context=true` 时可自动展开角色参考资产，并在 task/asset metadata 中记录参考参与诊断。
+- Web Project Context 角色卡已展示主图/参考图缩略图和缺图警告。
+
+剩余目标：
+
+- 补“从当前资产设为角色主图/参考图”的快捷动作，减少手填 asset_id。
+- 跑完整 mock pet character consistency smoke。
+- 在人工确认费用后跑 1 图真实参考 canary；失败时明确告诉用户参考图没有参与生成。
 - 验收分三层：平台链路成功、参考图参与成功、角色一致性人工判断通过。
 - 暂不做通用 DAM、模板市场、AI 自动视觉质检、provider key 下发或大规模真实 provider benchmark。
 
@@ -186,12 +194,12 @@ issues/next-phase-p1-character-reference-intake-consistency.csv
 issues/next-phase-p1-web-review-feedback-stability.csv
 ```
 
-目标：
+当前状态：
 
-- Select / Reject 不再只靠 toast；卡片 badge、按钮状态、scene selected coverage 和 summary counts 必须局部更新。
-- 失败时回滚 optimistic 状态并显示明确错误。
-- 下拉切换 workspace/project/campaign/filter/recipe/quality 时不整页闪白；保留旧内容并只在相关区域显示 loading。
-- 审图相关请求做去重、旧响应丢弃、刷新节流和 429 友好提示。
+- Web 前端与 tests 范围已完成：`ServerAssetLibrary` 与 `ProductionViewModal` 已有 per-asset pending、optimistic status/style、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃和 429 友好提示。
+
+剩余目标：
+
 - 增加 browser smoke，把点击选择/拒绝、切换下拉和 Production View 状态变化纳入回归证据。
 - 这是 P1 Web UX Smoothness 之后的真实试用 follow-up，不复开旧 CSV，不大改 Settings 信息架构。
 
@@ -203,13 +211,16 @@ issues/next-phase-p1-web-review-feedback-stability.csv
 issues/next-phase-p1-safe-delete-and-trial-reset.csv
 ```
 
-目标：
+当前状态：
 
-- 为 Web/Admin/CLI/REST 增加受控删除和试用重置流程，避免资料库只能无限增长。
-- 支持 asset/task/batch/session/campaign 级 dry-run，显示将删除的 task/asset/file 数量和 protected 数量。
-- 默认保护 selected / published / approved 资产；hard purge 需要二次确认、dry-run token 和 audit。
+- CLI `vag storage cleanup-preview/execute` 已支持 `--asset-id`、`--task-id`、`--session-id`、`--batch-id`、`--story-id` 和 `--deprecated`。
+- Admin-only REST `storage-cleanup-preview/execute` 已接入，必须使用 Admin session；Project API Key 和 Basic Auth 不授予清理权限。
+- 清理继续复用 dry-run token / confirm、selected/published/approved 保护和 audit；MCP 不开放 destructive tools。
+
+剩余目标：
+
 - Web 提供当前 scope 的数据管理入口；CLI 提供可复制的本地/服务器运维命令。
-- MCP Service Pack 明确删除边界：agent 可以 reject/select/query/delivery，真正删除和重置交给 Admin Web/REST/CLI；第一轮不开放 workspace/project/campaign 硬删除。
+- 补单 asset restore/soft delete、task/input-file 级 reset 和生产备份演练。
 - 不做通用 DAM、回收站复杂权限、多用户审批流、MCP 大范围 destructive tool 或绕过备份的生产清库。
 
 ### P1 Product: Settings Information Architecture

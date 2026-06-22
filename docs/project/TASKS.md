@@ -6,10 +6,10 @@
 - [ ] V1 真实试用观察：用低并发真实 provider 小批量跑萌宠账号工作流，记录 Web 审图、Project Context、Production View、manifest/NAS 交付中的具体摩擦；默认不做 benchmark。
 - [ ] 版本 tag 决策：当前先把 `main` 作为 V1 baseline 推送；是否创建 `v0.1.0` tag 触发正式 tag 镜像，需要单独确认。
 - [ ] 生成后续独立 CSV：优先考虑 `next-phase-p1-server-deployment-rehearsal.csv`、`next-phase-p1-pet-account-real-workflow-trial.csv`、`next-phase-p1-mcp-service-pack.csv`、`next-phase-p1-character-reference-intake-consistency.csv`、`next-phase-p1-web-review-feedback-stability.csv`、`next-phase-p1-safe-delete-and-trial-reset.csv`、`next-phase-p1-settings-information-architecture.csv`、`next-phase-p2-usage-lineage.csv`、`next-phase-p2-export-pack-zip.csv`、`next-phase-p2-deployment-secret-hardening.csv`。
-- [ ] P1 MCP Service Pack：按 `issues/next-phase-p1-mcp-service-pack.csv` 为新 agent 接入 MCP 生图准备服务包，包含 `docs/project/MCP_SERVICE_GUIDE.md`、`examples/mcp/agent-imageflow.local.json`、`examples/mcp/create-pet-scene.json`、`examples/mcp/smoke.md`；文档和示例已落地，已完成 JSON parse 与静态检查，人工 mock smoke 仍待执行后再标 done；只做 mock smoke，不写入真实 provider key，不需要 Admin cookie。
-- [ ] P1 Character Reference Intake and Consistency：按 `issues/next-phase-p1-character-reference-intake-consistency.csv` 继续补 Web 角色卡缩略图、Web 可视化确认和端到端 mock smoke；子代理 B 已完成后端 input-file promote、character primary/reference asset binding、CreateTask 自动参考展开和 provider reference participation diagnostics，不把纯文生图成功误判为角色一致性成功。
+- [ ] P1 MCP Service Pack：按 `issues/next-phase-p1-mcp-service-pack.csv` 为新 agent 接入 MCP 生图准备服务包；文档和示例已落地，已完成 JSON parse 与静态检查，并已补删除边界说明；人工 MCP mock smoke 仍待执行后再标 done；只做 mock smoke，不写入真实 provider key，不需要 Admin cookie。
+- [ ] P1 Character Reference Intake and Consistency 剩余验收：后端 input-file promote、character primary/reference asset binding、CreateTask 自动参考展开、provider reference participation diagnostics 和 Web 角色卡缩略图/缺图提示已完成；仍需跑完整 mock pet character consistency smoke，并在人工确认费用后再考虑 1 图真实参考图 canary。
 - [x] P1 Web Review Feedback and Stability：已完成 Web 前端与测试范围内的 follow-up；`ServerAssetLibrary` 与 `ProductionViewModal` 已补 per-asset pending、optimistic status update、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃与 429 友好提示；同步补 `reviewFeedback` tests，不改 Go 后端，也不触碰未完成的角色图片绑定切片。
-- [ ] P1 Safe Delete and Trial Reset：按 `issues/next-phase-p1-safe-delete-and-trial-reset.csv` 补受控数据生命周期能力，解决试用数据、废图、失败任务和批次/campaign 重置只能无限累积的问题；第一轮优先 Admin Web/REST/CLI 的 dry-run、二次确认、审计和 selected/published 保护，MCP 不开放 workspace/project/campaign 硬删除。
+- [ ] P1 Safe Delete and Trial Reset 剩余产品化：CLI/REST cleanup preview/execute 基础已完成，支持按 asset/task/session/batch/story/campaign 过滤、dry-run token、审计和 selected/published/approved 保护；仍需 Web 数据管理入口、单 asset restore/soft delete 体验、task/input-file 级 reset 与浏览器 smoke。
 - [ ] 嵌入式架构图只按图片资产流继续试用；若需要 Mermaid/D2/SVG 可编辑源，再单独确认 Diagram source track。
 
 ## Doing

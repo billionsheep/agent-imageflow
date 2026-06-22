@@ -7,6 +7,7 @@ import {
   getAgentImageflowProjectVisualContext,
   isAgentImageflowUnauthorizedError,
   normalizeAgentImageflowApiBaseUrl,
+  resolveAgentImageflowDeliveryUrl,
   updateAgentImageflowProjectVisualContext,
   type AgentImageflowAuth,
   type AgentImageflowCharacterProfile,
@@ -30,6 +31,8 @@ interface CharacterDraft {
   forbiddenText: string
   primaryAssetId: string
   referenceAssetIdsText: string
+  referencePolicy: string
+  appearanceLockNotes: string
 }
 
 interface ReferenceDraft {
@@ -73,6 +76,8 @@ const EMPTY_CHARACTER_DRAFT: CharacterDraft = {
   forbiddenText: '',
   primaryAssetId: '',
   referenceAssetIdsText: '',
+  referencePolicy: 'primary_plus_references',
+  appearanceLockNotes: '',
 }
 
 const EMPTY_REFERENCE_DRAFT: ReferenceDraft = {
@@ -187,6 +192,8 @@ function characterToDraft(character: AgentImageflowCharacterProfile): CharacterD
     forbiddenText: joinList(character.forbidden),
     primaryAssetId: character.primary_asset_id ?? '',
     referenceAssetIdsText: joinList(character.reference_asset_ids),
+    referencePolicy: character.reference_policy ?? 'primary_plus_references',
+    appearanceLockNotes: character.appearance_lock_notes ?? '',
   }
 }
 
@@ -236,6 +243,32 @@ function SummaryPill({ label, value }: { label: string; value: number | string }
     <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[11px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
       {label}: {value}
     </span>
+  )
+}
+
+function AssetThumb({ assetId, baseUrl, label }: { assetId?: string; baseUrl: string; label: string }) {
+  const id = assetId?.trim()
+  if (!id) {
+    return (
+      <div className="flex aspect-square min-w-0 items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 px-2 text-center text-[10px] text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+        缺少{label}
+      </div>
+    )
+  }
+  return (
+    <div className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04]">
+      <div className="aspect-square bg-gray-100 dark:bg-white/[0.04]">
+        <img
+          src={resolveAgentImageflowDeliveryUrl(baseUrl, `/api/assets/${encodeURIComponent(id)}/thumbnail`)}
+          alt={`${label} ${id}`}
+          loading="lazy"
+          className="h-full w-full object-cover"
+        />
+      </div>
+      <div className="truncate px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400" title={id}>
+        {label}: {id}
+      </div>
+    </div>
   )
 }
 
@@ -376,6 +409,8 @@ export default function ProjectContextModal() {
       forbidden: splitList(characterDraft.forbiddenText),
       primary_asset_id: characterDraft.primaryAssetId.trim() || undefined,
       reference_asset_ids: splitList(characterDraft.referenceAssetIdsText),
+      reference_policy: characterDraft.referencePolicy.trim() || undefined,
+      appearance_lock_notes: characterDraft.appearanceLockNotes.trim() || undefined,
     }
     const nextCharacters = editingCharacterId
       ? normalizedContext.characters.map((item) => item.id === editingCharacterId ? nextCharacter : item)
@@ -599,6 +634,16 @@ export default function ProjectContextModal() {
                       <Field label="主参考资产"><input value={characterDraft.primaryAssetId} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, primaryAssetId: event.target.value }))} className={inputClass} /></Field>
                       <Field label="其他参考资产"><textarea value={characterDraft.referenceAssetIdsText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referenceAssetIdsText: event.target.value }))} className={textareaClass} /></Field>
                     </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Field label="参考策略">
+                        <select value={characterDraft.referencePolicy} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referencePolicy: event.target.value }))} className={inputClass}>
+                          <option value="primary_plus_references">主图 + 参考图</option>
+                          <option value="primary_only">仅主图</option>
+                          <option value="references_only">仅参考图</option>
+                        </select>
+                      </Field>
+                      <Field label="形象锁定"><textarea value={characterDraft.appearanceLockNotes} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, appearanceLockNotes: event.target.value }))} className={textareaClass} /></Field>
+                    </div>
                     <Field label="禁止项"><textarea value={characterDraft.forbiddenText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, forbiddenText: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
@@ -621,8 +666,21 @@ export default function ProjectContextModal() {
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
                           <div className="break-words"><span className="text-gray-400">定位：</span> {compactText(character.role)}</div>
                           <div className="break-words"><span className="text-gray-400">外观：</span> {compactText(character.appearance)}</div>
+                          <div className="break-words"><span className="text-gray-400">形象锁定：</span> {compactText(character.appearance_lock_notes)}</div>
+                          <div className="break-words"><span className="text-gray-400">参考策略：</span> {compactText(character.reference_policy)}</div>
                           <div className="break-words"><span className="text-gray-400">禁止项：</span> {(character.forbidden ?? []).join(', ') || '-'}</div>
                           <div className="break-words"><span className="text-gray-400">参考资产：</span> {[character.primary_asset_id, ...(character.reference_asset_ids ?? [])].filter(Boolean).join(', ') || '-'}</div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <AssetThumb assetId={character.primary_asset_id} baseUrl={baseUrl} label="主图" />
+                          {(character.reference_asset_ids ?? []).slice(0, 3).map((assetId, index) => (
+                            <AssetThumb key={`${character.id}-${assetId}-${index}`} assetId={assetId} baseUrl={baseUrl} label={`参考 ${index + 1}`} />
+                          ))}
+                          {!character.primary_asset_id && (character.reference_asset_ids ?? []).length === 0 && (
+                            <div className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100 sm:col-span-3">
+                              这个角色还没有绑定主图或参考图，生成时只能依赖文字描述。
+                            </div>
+                          )}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" onClick={() => { setEditingCharacterId(character.id); setCharacterDraft(characterToDraft(character)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑</button>
@@ -686,6 +744,9 @@ export default function ProjectContextModal() {
                           <div className="break-words"><span className="text-gray-400">绑定角色：</span> {compactText(reference.character_id)}</div>
                           <div className="break-words"><span className="text-gray-400">权重：</span> {reference.weight ?? 1}</div>
                           <div className="break-words"><span className="text-gray-400">备注：</span> {compactText(reference.notes)}</div>
+                        </div>
+                        <div className="mt-3 max-w-36">
+                          <AssetThumb assetId={reference.asset_id} baseUrl={baseUrl} label="参考图" />
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" onClick={() => setReferenceDraft({ assetId: reference.asset_id, purpose: reference.purpose, label: reference.label ?? '', characterId: reference.character_id ?? '', weight: String(reference.weight ?? 1), notes: reference.notes ?? '' })} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑绑定</button>

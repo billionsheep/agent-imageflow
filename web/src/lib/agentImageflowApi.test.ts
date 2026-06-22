@@ -14,6 +14,7 @@ import {
   buildAgentImageflowCampaignUrl,
   buildAgentImageflowBatchStorySummaryUrl,
   buildAgentImageflowInputFilesUrl,
+  buildAgentImageflowInputFilePromoteUrl,
   buildAgentImageflowProjectUrl,
   buildAgentImageflowProjectsUrl,
   buildAgentImageflowProviderProfileUrl,
@@ -23,6 +24,8 @@ import {
   buildAgentImageflowRecentAssetsUrl,
   buildAgentImageflowStorageGovernanceUrl,
   buildAgentImageflowStorageIntegrityUrl,
+  buildAgentImageflowStorageCleanupExecuteUrl,
+  buildAgentImageflowStorageCleanupPreviewUrl,
   buildAgentImageflowTaskAttemptsUrl,
   buildAgentImageflowTaskStatusUrl,
   buildAgentImageflowTaskUrl,
@@ -132,6 +135,11 @@ describe('agentImageflowApi', () => {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
     })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/input-files')
+    expect(buildAgentImageflowInputFilePromoteUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, 'inp_1')).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/input-files/inp_1/promote-asset')
     expect(buildAgentImageflowAssetsUrl('http://localhost:8081/', {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
@@ -215,6 +223,16 @@ describe('agentImageflowApi', () => {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
     })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-integrity')
+    expect(buildAgentImageflowStorageCleanupPreviewUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-preview')
+    expect(buildAgentImageflowStorageCleanupExecuteUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-execute')
   })
 
   it('maps compatible asset statuses to product language', () => {

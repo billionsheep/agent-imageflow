@@ -392,15 +392,18 @@ docker compose exec api /app/vag storage cleanup-preview \
   --workspace ws_default \
   --project prj_xhs_anime \
   --campaign cmp_7day_cover \
+  --batch-id <optional_batch_id> \
+  --session-id <optional_session_id> \
   --limit 20
 ```
 
 说明：
 
 - `cleanup-preview` 是只读 dry-run，不删除文件，不更新数据库。
-- 默认候选包括 `rejected` 资产、`generated/draft` 未选中资产、临时文件和 orphan final files。
+- 默认候选包括 `rejected` 资产、`generated/draft` 未选中资产、`deprecated` 资产、临时文件和 orphan final files。
 - `selected/approved` 与 `published` 默认 protected，不进入清理候选；响应只返回 protected 计数。
 - 文件明细使用 storage root 下的相对 `storage_key`，不暴露宿主机绝对路径。
+- 可选过滤：`--asset-id`、`--task-id`、`--session-id`、`--batch-id`、`--story-id`。这些过滤只限制当前 scope 内候选，不允许跨 workspace/project/campaign 清理。
 
 受控本地执行：
 
@@ -409,6 +412,8 @@ docker compose exec api /app/vag storage cleanup-execute \
   --workspace ws_default \
   --project prj_xhs_anime \
   --campaign cmp_7day_cover \
+  --batch-id <optional_batch_id> \
+  --session-id <optional_session_id> \
   --limit 20 \
   --execute \
   --dry-run-token <token_from_cleanup_preview> \
@@ -420,10 +425,36 @@ docker compose exec api /app/vag storage cleanup-execute \
 - 没有 `--execute` 时禁止删除。
 - 带 `--dry-run-token` 时必须匹配当前 dry-run 候选集；token 不匹配即使带 `--confirm` 也拒绝。
 - 无 token 的本地执行必须同时传 `--execute --confirm`，用于明确人工确认；建议常规操作仍先使用 dry-run token。
-- 第一版只提供 CLI 执行入口，不暴露匿名远程清理 REST。
-- 默认只清理 `rejected`、`generated/draft` 未选中资产、`tmp` 和明确 orphan files；`selected/approved`、`published`、`deprecated` 默认 protected。
+- 第一版提供 CLI 和 Admin-only REST 执行入口，不暴露匿名远程清理 REST，也不向 MCP 暴露 hard delete。
+- 默认只清理 `rejected`、`generated/draft` 未选中资产、`deprecated`、`tmp` 和明确 orphan files；`selected/approved` 与 `published` 默认 protected。
 - 资产清理会先在数据库事务内删除 `review_event` / `delivery_event` / `asset_version` / `asset` 行，再删除对应 storage files；若文件删除失败，执行报告会标记失败，数据库不会继续引用已清理资产。
 - 每次执行或拒绝执行都会写入本地 audit，`source=cli`、`action=storage_cleanup_execute`。
+
+Admin REST dry-run 预览：
+
+```bash
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -b '<admin_session_cookie>' \
+  http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-preview \
+  -d '{"batch_id":"<optional_batch_id>","limit":20}'
+```
+
+Admin REST 受控执行：
+
+```bash
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -b '<admin_session_cookie>' \
+  http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-execute \
+  -d '{"batch_id":"<same_batch_id>","limit":20,"execute":true,"dry_run_token":"<token_from_preview>"}'
+```
+
+REST 边界：
+
+- 需要 Admin session；不要把 Admin cookie、cleanup token 或任何 key 写进项目文档、MCP 配置或聊天记录。
+- Project API Key 继续服务外部 MCP/REST/CLI 正常生图和查资产，不作为 cleanup 执行凭据。
+- REST cleanup 与 CLI 使用同一候选和保护规则；执行前仍建议先做 Postgres dump 与 storage root 快照。
 
 查看清理审计：
 

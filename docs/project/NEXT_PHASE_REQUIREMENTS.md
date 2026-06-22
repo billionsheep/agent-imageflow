@@ -2,7 +2,7 @@
 
 本文档定义 MVP 之后第二批需求。目标是把 Agent ImageFlow 从“已经能生成并登记资产的服务端能力”推进到“公共图片资产能力平台的可见、可查、可治理、可集成”。
 
-Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Dashboard、Storage Governance、Provider Profile、Project Production Context、Batch Story Export Foundation、Web Operator Review Console、Deployment Release Pipeline 和 Web Console Auth Gate / Localization / Product Fit 主线已在后续 CSV 中完成或吸收。Batch / Story / Scene View、JSON manifest、ZIP 后置边界和 NAS/Docker 文件访问的详细场景与收口记录见 `docs/project/stories/slice-040-batch-story-export-scenarios.md` 到 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`；V1 baseline、剩余任务和未来方向见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。后续新需求需要重新确认范围并生成独立 CSV。
+Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Dashboard、Storage Governance、Provider Profile、Project Production Context、Batch Story Export Foundation、Web Operator Review Console、Deployment Release Pipeline 和 Web Console Auth Gate / Localization / Product Fit 主线已在后续 CSV 中完成或吸收。MCP Service Pack、Character Reference Intake、Web Review Feedback 和 Safe Delete foundation 已在独立 CSV 中推进，剩余项见 `TASKS.md`、`PROJECT_PLAN.md` 和 `PROJECT_STATUS_MAP.md`。Batch / Story / Scene View、JSON manifest、ZIP 后置边界和 NAS/Docker 文件访问的详细场景与收口记录见 `docs/project/stories/slice-040-batch-story-export-scenarios.md` 到 `docs/project/stories/slice-050-nas-docker-access-guide-and-regression.md`；V1 baseline、剩余任务和未来方向见 `docs/project/V1_BASELINE_AND_ROADMAP.md`。后续新需求需要重新确认范围并生成独立 CSV。
 
 ## V1 Follow-up Priorities
 
@@ -10,14 +10,13 @@ Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Da
 
 1. Server Deployment Rehearsal：真实服务器/NAS 拉取 GHCR 镜像、配置 HTTPS 反代、跑 mock smoke、演练备份和回滚。
 2. Pet Account Real Workflow Trial：低并发真实 provider 小批量跑萌宠账号业务流，观察 agent 调用和 Web 审图摩擦。
-3. Usage Tracking and Edit Lineage：记录资产被哪些内容使用，以及 regenerate/edit lineage。
-4. Export Pack ZIP and Multi Select：在 JSON manifest 稳定后补小批量 selected assets ZIP。
-5. Deployment and Secret Hardening：补登录失败限流、Secure cookie/HTTPS 检查、服务端配置状态和 non-exposure regression。
-6. MCP Service Pack：为新 agent 准备 MCP 接入说明、配置示例、萌宠调用示例和 mock smoke，明确 Project API Key / Basic Auth / Admin Login / provider key 边界。
-7. Character Reference Intake and Consistency：补角色图像入库、input-file 提升为 asset、角色主图/参考图绑定、MCP 创建任务自动带参考和 provider 参考图诊断，避免把纯文生图成功误判为角色一致性成功。
-8. Web Review Feedback and Stability：修复 Select/Reject 只有 toast 没有明显状态变化、Production View 局部状态不清晰、下拉菜单切换整页闪烁和请求风暴。
-9. Safe Delete and Trial Reset：补受控数据生命周期能力，支持废图/失败任务/测试 batch/campaign 的 dry-run、保护、审计和重置；MCP 第一轮不开放 workspace/project/campaign 硬删除。
-10. Settings Information Architecture：重新设计设置页分组和凭据语义展示，先出方案再实现。
+3. MCP Service Pack smoke：文档和示例已落地，下一步只需回填 tools/list、mock create task、get task、delivery info evidence。
+4. Character Reference Intake 剩余项：补“从当前资产设为角色主图/参考图”的快捷动作、mock pet consistency smoke 和人工确认后的 1 图真实参考 canary。
+5. Safe Delete 产品化：在 CLI + Admin-only REST foundation 上补 Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练。
+6. Settings Information Architecture：重新设计设置页分组和凭据语义展示，先出方案再实现。
+7. Usage Tracking and Edit Lineage：记录资产被哪些内容使用，以及 regenerate/edit lineage。
+8. Export Pack ZIP and Multi Select：在 JSON manifest 稳定后补小批量 selected assets ZIP。
+9. Deployment and Secret Hardening：补登录失败限流、Secure cookie/HTTPS 检查、服务端配置状态和 non-exposure regression。
 
 继续后置：账号运营系统、小红书自动发布、通用 DAM、模板市场、多人协作、SaaS 注册计费、每用户 provider key 和视觉质检 AI。
 

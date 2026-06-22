@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-22: Cleanup REST 采用 Admin session only
+
+- Decision: `storage-cleanup-preview` 和 `storage-cleanup-execute` 第一版只允许 Admin session 访问；即使实例开启 Basic Auth，或请求带有 Project API Key，也不能把它们当作清理/重置权限使用。CLI 仍作为本机/服务器运维入口，MCP 不新增 destructive tools。
+- Reason: Project API Key 的语义是让 agent / 自动化系统创建任务、查资产和拿交付链接，不应天然拥有删除数据、重置试用环境或释放存储文件的权限。Basic Auth 只是实例级入口保护，也不等于已进入 Admin 控制台。把清理能力收束到 Admin session 可以降低误删和远程 agent 误操作风险。
+- Impact: Web/REST 数据生命周期能力必须走 Admin 登录态；未登录或只带 Basic Auth 的浏览器/脚本会得到 `admin_session_required`，且不会触发浏览器原生 Basic Auth 弹窗。文档、MCP Service Pack 和 RUNBOOK 都必须继续说明：删除和试用重置走 Admin Web/REST/CLI，不把 Admin cookie、cleanup token、provider key 或真实 project key 写入 MCP 示例。
+
 ## 2026-06-22: Character Reference Intake 成为 P1 角色一致性补强切片
 
 - Decision: 追加 `issues/next-phase-p1-character-reference-intake-consistency.csv`，把“角色卡图像入库、绑定、参与生成和可视化验收”作为独立 P1 切片，而不是继续把它归入已经完成的 Project Visual Context 第一版。

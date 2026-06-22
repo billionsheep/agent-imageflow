@@ -203,6 +203,11 @@ export interface AgentImageflowUploadInputFileOptions {
   mimeType?: string
 }
 
+export interface AgentImageflowPromoteInputFileToAssetInput {
+  purpose?: AgentImageflowReferencePurpose
+  character_id?: string
+}
+
 export interface AgentImageflowQualityProfile {
   prompt_template?: string
   negative_prompt?: string
@@ -255,6 +260,8 @@ export interface AgentImageflowCharacterProfile {
   forbidden?: string[]
   primary_asset_id?: string
   reference_asset_ids?: string[]
+  reference_policy?: string
+  appearance_lock_notes?: string
 }
 
 export interface AgentImageflowProjectReferenceBinding {
@@ -400,6 +407,92 @@ export interface AgentImageflowStorageIntegrityResponse {
   ok: boolean
   summary: AgentImageflowStorageIntegritySummary
   issues: AgentImageflowStorageIntegrityIssue[]
+}
+
+export interface AgentImageflowCleanupRequest {
+  include_rejected?: boolean
+  include_generated?: boolean
+  include_deprecated?: boolean
+  include_failed_task_tmp?: boolean
+  include_orphans?: boolean
+  asset_id?: string
+  task_id?: string
+  session_id?: string
+  batch_id?: string
+  story_id?: string
+  limit?: number
+  dry_run_token?: string
+  execute?: boolean
+  confirm?: boolean
+}
+
+export interface AgentImageflowCleanupCandidateFile {
+  kind: string
+  storage_key?: string
+  bytes: number
+}
+
+export interface AgentImageflowCleanupCandidate {
+  kind: string
+  reason: string
+  asset_id?: string
+  task_id?: string
+  status?: string
+  file_count: number
+  bytes: number
+  files?: AgentImageflowCleanupCandidateFile[]
+}
+
+export interface AgentImageflowCleanupDryRunReport {
+  generated_at: string
+  dry_run: boolean
+  dry_run_token: string
+  scope: Record<string, unknown>
+  summary: {
+    candidate_count: number
+    file_count: number
+    bytes: number
+    by_reason: Record<string, number>
+  }
+  candidates: AgentImageflowCleanupCandidate[]
+  protected: {
+    selected_asset_count: number
+    published_asset_count: number
+  }
+}
+
+export interface AgentImageflowCleanupExecutionReport {
+  generated_at: string
+  dry_run: boolean
+  executed: boolean
+  scope: Record<string, unknown>
+  dry_run_token: string
+  summary: {
+    candidate_count: number
+    deleted_candidate_count: number
+    skipped_candidate_count: number
+    failed_candidate_count: number
+    file_count: number
+    deleted_file_count: number
+    bytes: number
+    deleted_bytes: number
+    by_reason: Record<string, number>
+  }
+  results: Array<{
+    kind: string
+    reason: string
+    asset_id?: string
+    task_id?: string
+    status?: string
+    action: string
+    error?: string
+    files?: Array<AgentImageflowCleanupCandidateFile & { action: string; error?: string }>
+  }>
+  protected: {
+    selected_asset_count: number
+    published_asset_count: number
+  }
+  audit_event_id?: string
 }
 
 export interface AgentImageflowTaskResponse {
@@ -867,8 +960,20 @@ export function buildAgentImageflowStorageIntegrityUrl(baseUrl: string, scope: A
   return `${buildAgentImageflowCampaignUrl(baseUrl, scope)}/storage-integrity`
 }
 
+export function buildAgentImageflowStorageCleanupPreviewUrl(baseUrl: string, scope: AgentImageflowScope): string {
+  return `${buildAgentImageflowCampaignUrl(baseUrl, scope)}/storage-cleanup-preview`
+}
+
+export function buildAgentImageflowStorageCleanupExecuteUrl(baseUrl: string, scope: AgentImageflowScope): string {
+  return `${buildAgentImageflowCampaignUrl(baseUrl, scope)}/storage-cleanup-execute`
+}
+
 export function buildAgentImageflowInputFilesUrl(baseUrl: string, scope: AgentImageflowScope): string {
   return `${buildAgentImageflowCampaignsUrl(baseUrl, scope)}/${encodeURIComponent(scope.campaignId)}/input-files`
+}
+
+export function buildAgentImageflowInputFilePromoteUrl(baseUrl: string, scope: AgentImageflowScope, inputFileId: string): string {
+  return `${buildAgentImageflowInputFilesUrl(baseUrl, scope)}/${encodeURIComponent(inputFileId)}/promote-asset`
 }
 
 export function buildAgentImageflowAssetsUrl(
@@ -1347,6 +1452,21 @@ export async function uploadAgentImageflowInputFile(
   })
 }
 
+export async function promoteAgentImageflowInputFileToAsset(
+  baseUrl: string,
+  scope: AgentImageflowScope,
+  inputFileId: string,
+  input: AgentImageflowPromoteInputFileToAssetInput,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowAssetResponse> {
+  const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowInputFilePromoteUrl(baseUrl, scope, inputFileId), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
+  })
+  return normalizeAgentImageflowAssetResponse(response)
+}
+
 export async function getAgentImageflowTask(baseUrl: string, taskId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowTaskResponse> {
   const response = await requestJson<AgentImageflowTaskResponse>(buildAgentImageflowTaskStatusUrl(baseUrl, taskId), {
     headers: buildAgentImageflowHeaders(auth),
@@ -1459,6 +1579,32 @@ export async function getAgentImageflowStorageIntegrity(
 ): Promise<AgentImageflowStorageIntegrityResponse> {
   return requestJson<AgentImageflowStorageIntegrityResponse>(buildAgentImageflowStorageIntegrityUrl(baseUrl, scope), {
     headers: buildAgentImageflowHeaders(auth),
+  })
+}
+
+export async function previewAgentImageflowStorageCleanup(
+  baseUrl: string,
+  scope: AgentImageflowScope,
+  input: AgentImageflowCleanupRequest,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowCleanupDryRunReport> {
+  return requestJson<AgentImageflowCleanupDryRunReport>(buildAgentImageflowStorageCleanupPreviewUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
+  })
+}
+
+export async function executeAgentImageflowStorageCleanup(
+  baseUrl: string,
+  scope: AgentImageflowScope,
+  input: AgentImageflowCleanupRequest,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowCleanupExecutionReport> {
+  return requestJson<AgentImageflowCleanupExecutionReport>(buildAgentImageflowStorageCleanupExecuteUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
   })
 }
 

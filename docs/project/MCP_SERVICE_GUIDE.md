@@ -212,6 +212,12 @@ docker compose ps
 
 不要这么做。provider key 只能留在本地环境变量、`.env` 或部署系统里。
 
+### 想删除错图、批次或重新开始试用
+
+MCP 第一轮不提供删除 workspace / project / campaign / asset 的工具。新 agent 只能通过 `reject_image_asset` 标记错图、通过 `select_image_asset` 确认好图、通过查询和 delivery 工具拿交付结果。
+
+真正的数据清理或试用重置走 Admin Web / REST / CLI 的受控 cleanup 流程：先 dry-run 预览候选，再用 dry-run token 或明确确认执行。不要把 Admin cookie、cleanup token、provider key 或真实 project key 写进 MCP 配置示例。
+
 ## 配置示例
 
 复制本地配置文件：
