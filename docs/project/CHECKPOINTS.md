@@ -65,6 +65,7 @@
 - [x] P1-BSE-009 Minimal export manifest 已完成：REST/CLI/Web 可导出 batch JSON manifest，支持 selected-only、all-assets 和 include-rejected 模式；manifest 复用 `batch-summary` grouping，包含 delivery/metadata URLs、target_path、task/scene/story/visual context 摘要，不返回 `local_path` 或 secret。
 - [x] P1-BSE-010 Export pack ZIP boundary 已完成：P1 第一轮不实现服务端 ZIP，保留 JSON manifest + NAS/filesystem 访问为交付路径；未来 ZIP 必须另开切片并限制小批量 selected assets，加入数量、大小、路径和 secret 保护。
 - [x] P1-BSE-011 NAS Docker access guide and regression docs 已完成：RUNBOOK 说明 Docker storage root / NAS bind mount / WebDAV / SMB / Finder 的只读访问边界；文件系统负责浏览、复制和备份，DB / metadata / manifest 负责状态、追踪、审核、visual context、manifest 和审计；不要手动移动、重命名或删除 selected / approved / published 资产；备份/恢复需要 Postgres dump 与 storage root 一致快照；应用内不实现 WebDAV/SMB server，也不扩成通用 DAM。
+- [ ] P1 MCP Service Pack 当前仅完成文档与示例落地：`docs/project/MCP_SERVICE_GUIDE.md`、`examples/mcp/agent-imageflow.local.json`、`examples/mcp/create-pet-scene.json`、`examples/mcp/smoke.md` 已新增；已完成 JSON parse 与静态检查；人工 mock smoke evidence 尚未回填，所以暂不标 done。
 
 ## Remaining Product Gaps
 

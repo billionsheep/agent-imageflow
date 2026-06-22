@@ -1702,6 +1702,15 @@ get_asset_delivery_info
 
 `select_image_asset` 在底层调用当前兼容的 approve 状态迁移，但 MCP 输出会把 `approved` 映射为产品语义 `selected`，把 `draft` 映射为 `generated`。
 
+MCP 新 agent 接入优先参考：
+
+- `docs/project/MCP_SERVICE_GUIDE.md`
+- `examples/mcp/agent-imageflow.local.json`
+- `examples/mcp/create-pet-scene.json`
+- `examples/mcp/smoke.md`
+
+当前 MCP Service Pack 已完成文档和示例落地，并通过 JSON parse 与静态检查；人工 mock smoke evidence 尚未回填，因此项目管理文档里暂不标 done。
+
 ## Debug Notes
 
 - 如果接云端 provider，必须避免提交 API key。
