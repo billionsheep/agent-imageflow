@@ -9,10 +9,12 @@ import {
   buildAgentImageflowAdminLoginUrl,
   buildAgentImageflowAdminLogoutUrl,
   buildAgentImageflowAdminMeUrl,
+  buildAgentImageflowRuntimeStatusUrl,
   buildAgentImageflowCampaignsUrl,
   buildAgentImageflowCampaignUrl,
   buildAgentImageflowBatchStorySummaryUrl,
   buildAgentImageflowInputFilesUrl,
+  buildAgentImageflowInputFilePromoteUrl,
   buildAgentImageflowProjectUrl,
   buildAgentImageflowProjectsUrl,
   buildAgentImageflowProviderProfileUrl,
@@ -22,6 +24,8 @@ import {
   buildAgentImageflowRecentAssetsUrl,
   buildAgentImageflowStorageGovernanceUrl,
   buildAgentImageflowStorageIntegrityUrl,
+  buildAgentImageflowStorageCleanupExecuteUrl,
+  buildAgentImageflowStorageCleanupPreviewUrl,
   buildAgentImageflowTaskAttemptsUrl,
   buildAgentImageflowTaskStatusUrl,
   buildAgentImageflowTaskUrl,
@@ -33,7 +37,10 @@ import {
   normalizeAgentImageflowBatchStorySummaryResponse,
   normalizeAgentImageflowTaskResponse,
   normalizeAgentImageflowApiBaseUrl,
+  resolveAgentImageflowDeliveryUrl,
   getAgentImageflowBatchManifest,
+  executeAgentImageflowStorageCleanup,
+  previewAgentImageflowStorageCleanup,
   regenerateAgentImageflowSceneTask,
 } from './agentImageflowApi'
 
@@ -45,6 +52,50 @@ describe('agentImageflowApi', () => {
   it('normalizes the service base URL', () => {
     expect(normalizeAgentImageflowApiBaseUrl('http://localhost:8081///')).toBe('http://localhost:8081')
     expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://localhost:8081')
+  })
+
+  it('uses the browser origin as the empty service base URL when available', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { location: { origin: 'https://imageflow.example.com' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('')).toBe('https://imageflow.example.com')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('falls back to a host-matched local API for Vite dev and preview origins', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:4173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://127.0.0.1:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:5173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('')).toBe('http://localhost:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('keeps saved local API settings on the same host as the current local page', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:4173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('http://localhost:8081')).toBe('http://127.0.0.1:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
+
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:4173' } })
+    try {
+      expect(normalizeAgentImageflowApiBaseUrl('http://127.0.0.1:8081')).toBe('http://localhost:8081')
+    } finally {
+      vi.stubGlobal('window', originalWindow)
+    }
   })
 
   it('builds the server-side ImageTask URL from scope ids', () => {
@@ -64,6 +115,7 @@ describe('agentImageflowApi', () => {
     expect(buildAgentImageflowAdminLoginUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/login')
     expect(buildAgentImageflowAdminMeUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/me')
     expect(buildAgentImageflowAdminLogoutUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/logout')
+    expect(buildAgentImageflowRuntimeStatusUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/runtime-status')
     expect(buildAgentImageflowWorkspacesUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/workspaces')
     expect(buildAgentImageflowWorkspaceUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default')
     expect(buildAgentImageflowProjectsUrl('http://localhost:8081/', 'ws_default')).toBe('http://localhost:8081/api/workspaces/ws_default/projects')
@@ -85,6 +137,11 @@ describe('agentImageflowApi', () => {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
     })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/input-files')
+    expect(buildAgentImageflowInputFilePromoteUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, 'inp_1')).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/input-files/inp_1/promote-asset')
     expect(buildAgentImageflowAssetsUrl('http://localhost:8081/', {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
@@ -168,6 +225,16 @@ describe('agentImageflowApi', () => {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
     })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-integrity')
+    expect(buildAgentImageflowStorageCleanupPreviewUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-preview')
+    expect(buildAgentImageflowStorageCleanupExecuteUrl('http://localhost:8081/', {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    })).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-execute')
   })
 
   it('maps compatible asset statuses to product language', () => {
@@ -186,6 +253,12 @@ describe('agentImageflowApi', () => {
       'X-API-Key': 'project-secret',
       Authorization: 'Basic YWRtaW46c2VjcmV0',
     })
+  })
+
+  it('rewrites asset delivery URLs to the active same-origin API base', () => {
+    expect(resolveAgentImageflowDeliveryUrl('https://imageflow.example.com', '/api/assets/asset_1/thumbnail')).toBe('https://imageflow.example.com/api/assets/asset_1/thumbnail')
+    expect(resolveAgentImageflowDeliveryUrl('https://imageflow.example.com', 'http://163.7.5.68:18081/api/assets/asset_1/thumbnail')).toBe('https://imageflow.example.com/api/assets/asset_1/thumbnail')
+    expect(resolveAgentImageflowDeliveryUrl('https://imageflow.example.com', 'https://cdn.example.com/public/asset_1.webp')).toBe('https://cdn.example.com/public/asset_1.webp')
   })
 
   it('normalizes task and asset response statuses', () => {
@@ -391,6 +464,117 @@ describe('agentImageflowApi', () => {
       headers: {
         'X-API-Key': 'project-secret',
       },
+    })
+  })
+
+  it('posts cleanup preview and execute payloads to the admin-only cleanup endpoints', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        generated_at: '2026-06-23T00:00:00Z',
+        dry_run: true,
+        dry_run_token: 'cleanup_1234567890abcdef',
+        scope: {},
+        summary: {
+          candidate_count: 2,
+          file_count: 6,
+          bytes: 4096,
+          by_reason: {
+            rejected_asset: 1,
+            orphan_file: 1,
+          },
+        },
+        candidates: [],
+        protected: {
+          selected_asset_count: 1,
+          published_asset_count: 1,
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        generated_at: '2026-06-23T00:00:01Z',
+        dry_run: false,
+        executed: true,
+        dry_run_token: 'cleanup_1234567890abcdef',
+        scope: {},
+        summary: {
+          candidate_count: 2,
+          deleted_candidate_count: 2,
+          skipped_candidate_count: 0,
+          failed_candidate_count: 0,
+          file_count: 6,
+          deleted_file_count: 6,
+          bytes: 4096,
+          deleted_bytes: 4096,
+          by_reason: {
+            rejected_asset: 1,
+            orphan_file: 1,
+          },
+        },
+        results: [],
+        protected: {
+          selected_asset_count: 1,
+          published_asset_count: 1,
+        },
+      }), { status: 200 }))
+
+    const scope = {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }
+
+    await previewAgentImageflowStorageCleanup('http://localhost:8081/', scope, {
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+    })
+
+    await executeAgentImageflowStorageCleanup('http://localhost:8081/', scope, {
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+      dry_run_token: 'cleanup_1234567890abcdef',
+      execute: true,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [previewUrl, previewInit] = fetchMock.mock.calls[0]
+    expect(previewUrl).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-preview')
+    expect(previewInit).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    expect(JSON.parse(String(previewInit?.body))).toEqual({
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+    })
+
+    const [executeUrl, executeInit] = fetchMock.mock.calls[1]
+    expect(executeUrl).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-execute')
+    expect(executeInit).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    expect(JSON.parse(String(executeInit?.body))).toEqual({
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+      dry_run_token: 'cleanup_1234567890abcdef',
+      execute: true,
     })
   })
 })

@@ -25,6 +25,11 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 			ReferenceAssetIDs: []string{"asset_milo_primary"},
 			PromptRecipeID:    "pet_story",
 		},
+		"reference_asset_count":            1,
+		"reference_input_file_count":       1,
+		"provider_reference_participation": "resolved_input_files",
+		"provider_reference_sources":       []string{"project_visual_context"},
+		"provider_reference_mime_types":    []string{"image/png"},
 	})
 	if err != nil {
 		t.Fatalf("marshal structured input: %v", err)
@@ -52,5 +57,10 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 	visualContext := parameters["visual_context_snapshot"].(map[string]any)
 	if visualContext["prompt_recipe_id"] != "pet_story" {
 		t.Fatalf("visual_context_snapshot missing from parameters: %#v", parameters)
+	}
+	if parameters["reference_asset_count"] != float64(1) ||
+		parameters["reference_input_file_count"] != float64(1) ||
+		parameters["provider_reference_participation"] != "resolved_input_files" {
+		t.Fatalf("reference participation diagnostics missing from parameters: %#v", parameters)
 	}
 }

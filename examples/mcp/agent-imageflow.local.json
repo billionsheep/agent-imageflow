@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "agent-imageflow": {
+      "command": "docker",
+      "args": [
+        "compose",
+        "exec",
+        "-T",
+        "api",
+        "/app/mcp"
+      ],
+      "cwd": "/Users/moon/Workspace/tools/agent-imageflow",
+      "env": {
+        "AGENT_IMAGEFLOW_API_BASE_URL": "http://localhost:8081",
+        "AGENT_IMAGEFLOW_PROJECT_API_KEY": "proj_replace_me_if_project_api_key_is_enabled",
+        "AGENT_IMAGEFLOW_BASIC_AUTH": "admin:replace_me_if_basic_auth_is_enabled"
+      }
+    }
+  }
+}

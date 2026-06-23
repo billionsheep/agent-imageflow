@@ -220,6 +220,8 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}", "delete_campaign"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/input-files", "upload_input_file"
+	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "promote-asset"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/input-files/{input_file_id}/promote-asset", "promote_input_file_asset"
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/input-files/{input_file_id}", "get_input_file"
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "content"):
@@ -228,6 +230,10 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/storage-governance", "get_storage_governance"
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/storage-integrity", "get_storage_integrity"
+	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/storage-cleanup-preview", "preview_storage_cleanup"
+	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
+		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/storage-cleanup-execute", "execute_storage_cleanup"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "tasks"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/tasks", "create_task"
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
@@ -246,6 +252,8 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/access-config", "get_access_config"
 	case method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "access-config"):
 		return "/api/workspaces/{workspace_id}/projects/{project_id}/access-config", "update_access_config"
+	case isRead && match(parts, "api", "admin", "runtime-status"):
+		return "/api/admin/runtime-status", "get_runtime_status"
 	case isRead && match(parts, "api", "tasks", "*", "attempts"):
 		return "/api/tasks/{task_id}/attempts", "list_task_attempts"
 	case isRead && match(parts, "api", "tasks", "*"):

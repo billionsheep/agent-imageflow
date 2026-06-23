@@ -15,7 +15,7 @@ func TestCleanupDryRunReasonForAssetStatusProtectsSelectedAndPublished(t *testin
 		{status: domain.AssetDraft, wantOK: true},
 		{status: domain.AssetApproved, wantOK: false},
 		{status: domain.AssetPublished, wantOK: false},
-		{status: domain.AssetDeprecated, wantOK: false},
+		{status: domain.AssetDeprecated, wantOK: true},
 	}
 
 	for _, tc := range tests {
@@ -25,6 +25,22 @@ func TestCleanupDryRunReasonForAssetStatusProtectsSelectedAndPublished(t *testin
 				t.Fatalf("cleanupDryRunReasonForAssetStatus(%q) ok=%v, want %v", tc.status, ok, tc.wantOK)
 			}
 		})
+	}
+}
+
+func TestCleanupDryRunOptionsFromExecuteOptionsCarriesTargetFilters(t *testing.T) {
+	got := cleanupDryRunOptionsFromExecuteOptions(domain.CleanupExecuteOptions{
+		Scope:     domain.Scope{WorkspaceID: "ws_1", ProjectID: "prj_1", CampaignID: "cmp_1"},
+		AssetID:   "asset_1",
+		TaskID:    "task_1",
+		SessionID: "session_1",
+		BatchID:   "batch_1",
+		StoryID:   "story_1",
+		Limit:     25,
+	})
+
+	if got.AssetID != "asset_1" || got.TaskID != "task_1" || got.SessionID != "session_1" || got.BatchID != "batch_1" || got.StoryID != "story_1" {
+		t.Fatalf("target filters were not preserved: %#v", got)
 	}
 }
 

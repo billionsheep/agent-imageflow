@@ -7,6 +7,7 @@ import {
   getAgentImageflowProjectVisualContext,
   isAgentImageflowUnauthorizedError,
   normalizeAgentImageflowApiBaseUrl,
+  resolveAgentImageflowDeliveryUrl,
   updateAgentImageflowProjectVisualContext,
   type AgentImageflowAuth,
   type AgentImageflowCharacterProfile,
@@ -16,6 +17,12 @@ import {
   type AgentImageflowPromptRecipe,
   type AgentImageflowReferencePurpose,
 } from '../lib/agentImageflowApi'
+import {
+  addCharacterReferenceAsset,
+  setCharacterPrimaryAsset,
+  upsertCharacterProjectReference,
+  upsertProjectReferenceBinding,
+} from '../lib/projectContextQuickBinding'
 import { ArchiveIcon, CloseIcon, PlusIcon, RefreshIcon } from './icons'
 
 type ProjectContextTab = 'characters' | 'references' | 'recipes'
@@ -30,6 +37,8 @@ interface CharacterDraft {
   forbiddenText: string
   primaryAssetId: string
   referenceAssetIdsText: string
+  referencePolicy: string
+  appearanceLockNotes: string
 }
 
 interface ReferenceDraft {
@@ -73,6 +82,8 @@ const EMPTY_CHARACTER_DRAFT: CharacterDraft = {
   forbiddenText: '',
   primaryAssetId: '',
   referenceAssetIdsText: '',
+  referencePolicy: 'primary_plus_references',
+  appearanceLockNotes: '',
 }
 
 const EMPTY_REFERENCE_DRAFT: ReferenceDraft = {
@@ -150,6 +161,17 @@ function compactText(value?: string): string {
   return value?.trim() || '-'
 }
 
+function activeItems<T extends { status?: string }>(items: T[]): T[] {
+  return items.filter((item) => item.status !== 'archived')
+}
+
+function compactListPreview(values: string[]): string {
+  const cleaned = values.map((value) => value.trim()).filter(Boolean)
+  if (cleaned.length === 0) return '-'
+  const visible = cleaned.slice(0, 3).join(', ')
+  return cleaned.length > 3 ? `${visible} +${cleaned.length - 3}` : visible
+}
+
 function parseJsonObject(text: string, label: string): Record<string, unknown> | undefined {
   const trimmed = text.trim()
   if (!trimmed || trimmed === '{}') return undefined
@@ -176,6 +198,8 @@ function characterToDraft(character: AgentImageflowCharacterProfile): CharacterD
     forbiddenText: joinList(character.forbidden),
     primaryAssetId: character.primary_asset_id ?? '',
     referenceAssetIdsText: joinList(character.reference_asset_ids),
+    referencePolicy: character.reference_policy ?? 'primary_plus_references',
+    appearanceLockNotes: character.appearance_lock_notes ?? '',
   }
 }
 
@@ -228,6 +252,32 @@ function SummaryPill({ label, value }: { label: string; value: number | string }
   )
 }
 
+function AssetThumb({ assetId, baseUrl, label }: { assetId?: string; baseUrl: string; label: string }) {
+  const id = assetId?.trim()
+  if (!id) {
+    return (
+      <div className="flex aspect-square min-w-0 items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 px-2 text-center text-[10px] text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+        缺少{label}
+      </div>
+    )
+  }
+  return (
+    <div className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04]">
+      <div className="aspect-square bg-gray-100 dark:bg-white/[0.04]">
+        <img
+          src={resolveAgentImageflowDeliveryUrl(baseUrl, `/api/assets/${encodeURIComponent(id)}/thumbnail`)}
+          alt={`${label} ${id}`}
+          loading="lazy"
+          className="h-full w-full object-cover"
+        />
+      </div>
+      <div className="truncate px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400" title={id}>
+        {label}: {id}
+      </div>
+    </div>
+  )
+}
+
 export default function ProjectContextModal() {
   const open = useStore((state) => state.showProjectContext)
   const referenceAssetId = useStore((state) => state.projectContextReferenceAssetId)
@@ -254,8 +304,26 @@ export default function ProjectContextModal() {
   const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null)
   const [characterDraft, setCharacterDraft] = useState<CharacterDraft>(EMPTY_CHARACTER_DRAFT)
   const [referenceDraft, setReferenceDraft] = useState<ReferenceDraft>(EMPTY_REFERENCE_DRAFT)
+  const [quickBindingCharacterId, setQuickBindingCharacterId] = useState('')
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
   const [recipeDraft, setRecipeDraft] = useState<RecipeDraft>(EMPTY_RECIPE_DRAFT)
+  const activeCharacters = useMemo(() => activeItems(normalizedContext.characters), [normalizedContext.characters])
+  const activeReferences = useMemo(() => activeItems(normalizedContext.references), [normalizedContext.references])
+  const activeRecipes = useMemo(() => activeItems(normalizedContext.prompt_recipes), [normalizedContext.prompt_recipes])
+  const overviewRows = useMemo(() => [
+    {
+      label: '角色卡',
+      value: compactListPreview(activeCharacters.map((character) => character.name || character.id)),
+    },
+    {
+      label: '参考图',
+      value: compactListPreview(activeReferences.map((reference) => reference.label || `${reference.purpose}:${reference.asset_id}`)),
+    },
+    {
+      label: 'Prompt 配方',
+      value: compactListPreview(activeRecipes.map((recipe) => recipe.name || recipe.id)),
+    },
+  ], [activeCharacters, activeReferences, activeRecipes])
 
   const close = useCallback(() => setShowProjectContext(false), [setShowProjectContext])
   useCloseOnEscape(open, close)
@@ -301,9 +369,25 @@ export default function ProjectContextModal() {
     setReferenceDraft((current) => ({
       ...current,
       assetId: referenceAssetId,
-      label: current.label || referenceAssetId,
+      label: current.assetId === referenceAssetId ? (current.label || referenceAssetId) : referenceAssetId,
     }))
   }, [open, referenceAssetId])
+
+  useEffect(() => {
+    if (!referenceAssetId) {
+      setQuickBindingCharacterId('')
+      return
+    }
+    if (activeCharacters.length === 0) {
+      setQuickBindingCharacterId('')
+      return
+    }
+    setQuickBindingCharacterId((current) => (
+      current && activeCharacters.some((character) => character.id === current)
+        ? current
+        : activeCharacters[0]?.id ?? ''
+    ))
+  }, [activeCharacters, referenceAssetId])
 
   const saveContext = useCallback(async (nextContext: AgentImageflowProjectVisualContext, successMessage: string) => {
     if (!scopeReady) {
@@ -348,6 +432,8 @@ export default function ProjectContextModal() {
       forbidden: splitList(characterDraft.forbiddenText),
       primary_asset_id: characterDraft.primaryAssetId.trim() || undefined,
       reference_asset_ids: splitList(characterDraft.referenceAssetIdsText),
+      reference_policy: characterDraft.referencePolicy.trim() || undefined,
+      appearance_lock_notes: characterDraft.appearanceLockNotes.trim() || undefined,
     }
     const nextCharacters = editingCharacterId
       ? normalizedContext.characters.map((item) => item.id === editingCharacterId ? nextCharacter : item)
@@ -373,25 +459,15 @@ export default function ProjectContextModal() {
     }
     const weight = Number(referenceDraft.weight)
     const normalizedWeight = Number.isFinite(weight) ? Math.min(5, Math.max(0.1, weight)) : 1
-    const existing = normalizedContext.references.find((item) =>
-      item.asset_id === assetId &&
-      item.purpose === referenceDraft.purpose &&
-      (item.character_id ?? '') === referenceDraft.characterId.trim(),
-    )
-    const nextReference: AgentImageflowProjectReferenceBinding = {
-      id: existing?.id ?? createVisualContextId(`ref_${referenceDraft.purpose}`, assetId),
-      asset_id: assetId,
+    const nextContext = upsertProjectReferenceBinding(normalizedContext, {
+      assetId,
       purpose: referenceDraft.purpose,
-      label: referenceDraft.label.trim() || undefined,
-      character_id: referenceDraft.characterId.trim() || undefined,
+      label: referenceDraft.label,
+      characterId: referenceDraft.characterId,
       weight: normalizedWeight,
-      notes: referenceDraft.notes.trim() || undefined,
-      status: 'active',
-    }
-    const nextReferences = existing
-      ? normalizedContext.references.map((item) => item.id === existing.id ? nextReference : item)
-      : [...normalizedContext.references, nextReference]
-    void saveContext({ ...normalizedContext, references: nextReferences }, '参考图绑定已保存')
+      notes: referenceDraft.notes,
+    })
+    void saveContext(nextContext, '参考图绑定已保存')
     setReferenceDraft({ ...EMPTY_REFERENCE_DRAFT, assetId: referenceAssetId ?? '' })
   }
 
@@ -400,6 +476,59 @@ export default function ProjectContextModal() {
       item.id === reference.id ? { ...item, status: item.status === 'archived' ? 'active' : 'archived' } : item,
     )
     void saveContext({ ...normalizedContext, references: nextReferences }, reference.status === 'archived' ? '参考图绑定已恢复' : '参考图绑定已归档')
+  }
+
+  const selectedQuickBindingCharacter = activeCharacters.find((character) => character.id === quickBindingCharacterId)
+
+  const ensureQuickBindingReady = () => {
+    if (!referenceAssetId) {
+      showToast('当前没有待绑定资产', 'error')
+      return null
+    }
+    if (!quickBindingCharacterId) {
+      showToast('请先选择角色卡', 'error')
+      return null
+    }
+    return {
+      assetId: referenceAssetId,
+      characterId: quickBindingCharacterId,
+    }
+  }
+
+  const savePendingAssetAsCharacterPrimary = () => {
+    const payload = ensureQuickBindingReady()
+    if (!payload) return
+    void saveContext(
+      setCharacterPrimaryAsset(normalizedContext, payload.characterId, payload.assetId),
+      `已将 ${payload.assetId} 设为角色主图`,
+    )
+  }
+
+  const savePendingAssetAsCharacterReference = () => {
+    const payload = ensureQuickBindingReady()
+    if (!payload) return
+    void saveContext(
+      addCharacterReferenceAsset(normalizedContext, payload.characterId, payload.assetId),
+      `已将 ${payload.assetId} 加入角色参考图`,
+    )
+  }
+
+  const savePendingAssetAsProjectReference = () => {
+    const payload = ensureQuickBindingReady()
+    if (!payload) return
+    setReferenceDraft({
+      assetId: payload.assetId,
+      purpose: 'character',
+      label: referenceDraft.label || payload.assetId,
+      characterId: payload.characterId,
+      weight: referenceDraft.weight || '1',
+      notes: referenceDraft.notes,
+    })
+    setActiveTab('references')
+    void saveContext(
+      upsertCharacterProjectReference(normalizedContext, payload.characterId, payload.assetId),
+      `已将 ${payload.assetId} 保存为项目参考图`,
+    )
   }
 
   const handleRecipeSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -456,16 +585,31 @@ export default function ProjectContextModal() {
       >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200/70 px-4 py-3 dark:border-white/[0.08]">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">Project Context</div>
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">项目视觉上下文</div>
             <div className="mt-1 break-all text-xs text-gray-500 dark:text-gray-400">
               {scopeReady ? `${scope.workspaceId} / ${scope.projectId}` : '请选择 workspace / project'}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <SummaryPill label="characters" value={normalizedContext.characters.length} />
-              <SummaryPill label="references" value={normalizedContext.references.length} />
-              <SummaryPill label="recipes" value={normalizedContext.prompt_recipes.length} />
-              <SummaryPill label="updated" value={formatDate(context?.updated_at)} />
+              <SummaryPill label="角色" value={normalizedContext.characters.length} />
+              <SummaryPill label="参考图" value={normalizedContext.references.length} />
+              <SummaryPill label="配方" value={normalizedContext.prompt_recipes.length} />
+              <SummaryPill label="更新" value={formatDate(context?.updated_at)} />
             </div>
+            {scopeReady && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {overviewRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className="min-w-0 rounded-xl border border-gray-200/70 bg-gray-50/70 px-3 py-2 text-xs dark:border-white/[0.08] dark:bg-white/[0.04]"
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{row.label}</div>
+                    <div className="mt-1 truncate text-gray-700 dark:text-gray-200" title={row.value}>
+                      {row.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -490,9 +634,9 @@ export default function ProjectContextModal() {
 
         <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-gray-200/70 bg-gray-50/70 px-4 py-2 dark:border-white/[0.08] dark:bg-white/[0.03]">
           {([
-            ['characters', 'Characters'],
-            ['references', 'References'],
-            ['recipes', 'Prompt Recipes'],
+            ['characters', '角色卡'],
+            ['references', '参考图'],
+            ['recipes', 'Prompt 配方'],
           ] as const).map(([tab, label]) => (
             <button
               key={tab}
@@ -503,7 +647,7 @@ export default function ProjectContextModal() {
               {label}
             </button>
           ))}
-          {saving && <span className="ml-auto self-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">saving</span>}
+          {saving && <span className="ml-auto self-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">保存中</span>}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -513,7 +657,7 @@ export default function ProjectContextModal() {
             </div>
           ) : unauthorized ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
-              unauthorized / login required。请在同一 host 登录 Admin Console 后重试。
+              未授权 / 需要登录。请重新登录控制台后重试。
             </div>
           ) : (
             <>
@@ -527,39 +671,138 @@ export default function ProjectContextModal() {
                   正在刷新，当前内容会保留到新结果返回。
                 </div>
               )}
+              {referenceAssetId && (
+                <section className="mb-4 rounded-lg border border-blue-200/80 bg-blue-50/70 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-blue-900 dark:text-blue-100">待绑定资产</div>
+                      <div className="mt-1 text-[11px] text-blue-700 dark:text-blue-200">
+                        从资产库带入，无需手填 asset_id。
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-blue-200 bg-white/80 px-2 py-1 text-[10px] text-blue-700 dark:border-blue-400/20 dark:bg-blue-950/40 dark:text-blue-200">
+                      快捷绑定
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[120px_minmax(0,1fr)]">
+                    <div className="max-w-[120px]">
+                      <AssetThumb assetId={referenceAssetId} baseUrl={baseUrl} label="待绑定" />
+                    </div>
+                    <div className="min-w-0 space-y-3">
+                      <div className="rounded-lg border border-blue-200/70 bg-white/70 px-3 py-2 text-xs text-blue-900 dark:border-blue-400/20 dark:bg-blue-950/30 dark:text-blue-100">
+                        <div className="text-[10px] uppercase text-blue-500/80 dark:text-blue-300/80">asset_id</div>
+                        <div className="mt-1 break-all">{referenceAssetId}</div>
+                      </div>
+                      {activeCharacters.length === 0 ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                          还没有可绑定的角色卡。请先新建角色卡，再把这张图设为主图、角色参考图或项目参考图。
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('characters')}
+                              className="inline-flex h-8 items-center rounded-lg border border-amber-300 bg-white px-2.5 text-[11px] font-medium text-amber-800 transition hover:border-amber-400 dark:border-amber-400/30 dark:bg-amber-950/30 dark:text-amber-100"
+                            >
+                              去新建角色卡
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                            <Field label="绑定角色">
+                              <select
+                                value={quickBindingCharacterId}
+                                onChange={(event) => setQuickBindingCharacterId(event.target.value)}
+                                className={inputClass}
+                              >
+                                {activeCharacters.map((character) => (
+                                  <option key={character.id} value={character.id}>
+                                    {character.name || character.id}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                            <div className="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2 text-[11px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
+                              {selectedQuickBindingCharacter?.primary_asset_id
+                                ? `当前主图：${selectedQuickBindingCharacter.primary_asset_id}`
+                                : '当前主图：未设置'}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={savePendingAssetAsCharacterPrimary}
+                              disabled={saving}
+                              className="inline-flex h-9 items-center rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              设为主图
+                            </button>
+                            <button
+                              type="button"
+                              onClick={savePendingAssetAsCharacterReference}
+                              disabled={saving}
+                              className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
+                            >
+                              加入参考图
+                            </button>
+                            <button
+                              type="button"
+                              onClick={savePendingAssetAsProjectReference}
+                              disabled={saving}
+                              className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
+                            >
+                              保存为项目参考图
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
 
               {activeTab === 'characters' && (
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                   <form onSubmit={handleCharacterSubmit} className="space-y-3 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingCharacterId ? 'Edit Character' : 'New Character'}</div>
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingCharacterId ? '编辑角色卡' : '新建角色卡'}</div>
                       {editingCharacterId && (
                         <button type="button" onClick={() => { setEditingCharacterId(null); setCharacterDraft(EMPTY_CHARACTER_DRAFT) }} className="text-[11px] text-gray-500 hover:text-blue-600">
-                          Cancel
+                          取消
                         </button>
                       )}
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Field label="id"><input value={characterDraft.id} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, id: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="name"><input value={characterDraft.name} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="status">
+                      <Field label="名称"><input value={characterDraft.name} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="状态">
                         <select value={characterDraft.status} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, status: event.target.value }))} className={inputClass}>
-                          <option value="active">active</option>
-                          <option value="archived">archived</option>
+                          <option value="active">启用</option>
+                          <option value="archived">归档</option>
                         </select>
                       </Field>
-                      <Field label="role"><input value={characterDraft.role} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, role: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="角色定位"><input value={characterDraft.role} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, role: event.target.value }))} className={inputClass} /></Field>
                     </div>
-                    <Field label="appearance"><textarea value={characterDraft.appearance} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, appearance: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="personality"><textarea value={characterDraft.personality} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, personality: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="外观描述"><textarea value={characterDraft.appearance} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, appearance: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="性格描述"><textarea value={characterDraft.personality} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, personality: event.target.value }))} className={textareaClass} /></Field>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Field label="primary asset"><input value={characterDraft.primaryAssetId} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, primaryAssetId: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="reference assets"><textarea value={characterDraft.referenceAssetIdsText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referenceAssetIdsText: event.target.value }))} className={textareaClass} /></Field>
+                      <Field label="主参考资产"><input value={characterDraft.primaryAssetId} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, primaryAssetId: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="其他参考资产"><textarea value={characterDraft.referenceAssetIdsText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referenceAssetIdsText: event.target.value }))} className={textareaClass} /></Field>
                     </div>
-                    <Field label="forbidden"><textarea value={characterDraft.forbiddenText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, forbiddenText: event.target.value }))} className={textareaClass} /></Field>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Field label="参考策略">
+                        <select value={characterDraft.referencePolicy} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, referencePolicy: event.target.value }))} className={inputClass}>
+                          <option value="primary_plus_references">主图 + 参考图</option>
+                          <option value="primary_only">仅主图</option>
+                          <option value="references_only">仅参考图</option>
+                        </select>
+                      </Field>
+                      <Field label="形象锁定"><textarea value={characterDraft.appearanceLockNotes} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, appearanceLockNotes: event.target.value }))} className={textareaClass} /></Field>
+                    </div>
+                    <Field label="禁止项"><textarea value={characterDraft.forbiddenText} onChange={(event) => setCharacterDraft((draft) => ({ ...draft, forbiddenText: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
-                      Save Character
+                      保存角色卡
                     </button>
                   </form>
 
@@ -576,16 +819,29 @@ export default function ProjectContextModal() {
                           <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{character.status || 'active'}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="break-words"><span className="text-gray-400">role:</span> {compactText(character.role)}</div>
-                          <div className="break-words"><span className="text-gray-400">appearance:</span> {compactText(character.appearance)}</div>
-                          <div className="break-words"><span className="text-gray-400">forbidden:</span> {(character.forbidden ?? []).join(', ') || '-'}</div>
-                          <div className="break-words"><span className="text-gray-400">references:</span> {[character.primary_asset_id, ...(character.reference_asset_ids ?? [])].filter(Boolean).join(', ') || '-'}</div>
+                          <div className="break-words"><span className="text-gray-400">定位：</span> {compactText(character.role)}</div>
+                          <div className="break-words"><span className="text-gray-400">外观：</span> {compactText(character.appearance)}</div>
+                          <div className="break-words"><span className="text-gray-400">形象锁定：</span> {compactText(character.appearance_lock_notes)}</div>
+                          <div className="break-words"><span className="text-gray-400">参考策略：</span> {compactText(character.reference_policy)}</div>
+                          <div className="break-words"><span className="text-gray-400">禁止项：</span> {(character.forbidden ?? []).join(', ') || '-'}</div>
+                          <div className="break-words"><span className="text-gray-400">参考资产：</span> {[character.primary_asset_id, ...(character.reference_asset_ids ?? [])].filter(Boolean).join(', ') || '-'}</div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          <AssetThumb assetId={character.primary_asset_id} baseUrl={baseUrl} label="主图" />
+                          {(character.reference_asset_ids ?? []).slice(0, 3).map((assetId, index) => (
+                            <AssetThumb key={`${character.id}-${assetId}-${index}`} assetId={assetId} baseUrl={baseUrl} label={`参考 ${index + 1}`} />
+                          ))}
+                          {!character.primary_asset_id && (character.reference_asset_ids ?? []).length === 0 && (
+                            <div className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100 sm:col-span-3">
+                              这个角色还没有绑定主图或参考图，生成时只能依赖文字描述。
+                            </div>
+                          )}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => { setEditingCharacterId(character.id); setCharacterDraft(characterToDraft(character)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">Edit</button>
+                          <button type="button" onClick={() => { setEditingCharacterId(character.id); setCharacterDraft(characterToDraft(character)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑</button>
                           <button type="button" onClick={() => archiveCharacter(character)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                             <ArchiveIcon className="h-3.5 w-3.5" />
-                            {character.status === 'archived' ? 'Restore' : 'Archive'}
+                            {character.status === 'archived' ? '恢复' : '归档'}
                           </button>
                         </div>
                       </article>
@@ -597,32 +853,32 @@ export default function ProjectContextModal() {
               {activeTab === 'references' && (
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                   <form onSubmit={handleReferenceSubmit} className="space-y-3 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">Mark Asset As Reference</div>
+                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">标记资产为参考图</div>
                     <Field label="asset_id"><input value={referenceDraft.assetId} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, assetId: event.target.value }))} className={inputClass} /></Field>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Field label="purpose">
+                      <Field label="用途">
                         <select value={referenceDraft.purpose} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, purpose: event.target.value as AgentImageflowReferencePurpose }))} className={inputClass}>
-                          <option value="character">character</option>
-                          <option value="style">style</option>
-                          <option value="scene">scene</option>
-                          <option value="prop">prop</option>
+                          <option value="character">角色</option>
+                          <option value="style">风格</option>
+                          <option value="scene">场景</option>
+                          <option value="prop">道具</option>
                         </select>
                       </Field>
-                      <Field label="character">
+                      <Field label="绑定角色">
                         <select value={referenceDraft.characterId} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, characterId: event.target.value }))} className={inputClass}>
-                          <option value="">none</option>
+                          <option value="">无</option>
                           {normalizedContext.characters.map((character) => (
                             <option key={character.id} value={character.id}>{character.name || character.id}</option>
                           ))}
                         </select>
                       </Field>
-                      <Field label="label"><input value={referenceDraft.label} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, label: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="weight"><input type="number" min="0.1" max="5" step="0.1" value={referenceDraft.weight} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, weight: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="标签"><input value={referenceDraft.label} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, label: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="权重"><input type="number" min="0.1" max="5" step="0.1" value={referenceDraft.weight} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, weight: event.target.value }))} className={inputClass} /></Field>
                     </div>
-                    <Field label="notes"><textarea value={referenceDraft.notes} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, notes: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="备注"><textarea value={referenceDraft.notes} onChange={(event) => setReferenceDraft((draft) => ({ ...draft, notes: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
-                      Save Reference
+                      保存参考图
                     </button>
                   </form>
 
@@ -639,16 +895,19 @@ export default function ProjectContextModal() {
                           <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{reference.purpose}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="break-words"><span className="text-gray-400">status:</span> {reference.status || 'active'}</div>
-                          <div className="break-words"><span className="text-gray-400">character:</span> {compactText(reference.character_id)}</div>
-                          <div className="break-words"><span className="text-gray-400">weight:</span> {reference.weight ?? 1}</div>
-                          <div className="break-words"><span className="text-gray-400">notes:</span> {compactText(reference.notes)}</div>
+                          <div className="break-words"><span className="text-gray-400">状态：</span> {reference.status === 'archived' ? '归档' : '启用'}</div>
+                          <div className="break-words"><span className="text-gray-400">绑定角色：</span> {compactText(reference.character_id)}</div>
+                          <div className="break-words"><span className="text-gray-400">权重：</span> {reference.weight ?? 1}</div>
+                          <div className="break-words"><span className="text-gray-400">备注：</span> {compactText(reference.notes)}</div>
+                        </div>
+                        <div className="mt-3 max-w-36">
+                          <AssetThumb assetId={reference.asset_id} baseUrl={baseUrl} label="参考图" />
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => setReferenceDraft({ assetId: reference.asset_id, purpose: reference.purpose, label: reference.label ?? '', characterId: reference.character_id ?? '', weight: String(reference.weight ?? 1), notes: reference.notes ?? '' })} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">Edit Binding</button>
+                          <button type="button" onClick={() => setReferenceDraft({ assetId: reference.asset_id, purpose: reference.purpose, label: reference.label ?? '', characterId: reference.character_id ?? '', weight: String(reference.weight ?? 1), notes: reference.notes ?? '' })} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑绑定</button>
                           <button type="button" onClick={() => archiveReference(reference)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                             <ArchiveIcon className="h-3.5 w-3.5" />
-                            {reference.status === 'archived' ? 'Restore' : 'Archive'}
+                            {reference.status === 'archived' ? '恢复' : '归档'}
                           </button>
                         </div>
                       </article>
@@ -661,42 +920,42 @@ export default function ProjectContextModal() {
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                   <form onSubmit={handleRecipeSubmit} className="space-y-3 rounded-lg border border-gray-200/80 bg-gray-50/60 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingRecipeId ? 'Edit Prompt Recipe' : 'New Prompt Recipe'}</div>
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{editingRecipeId ? '编辑 Prompt 配方' : '新建 Prompt 配方'}</div>
                       {editingRecipeId && (
                         <button type="button" onClick={() => { setEditingRecipeId(null); setRecipeDraft(EMPTY_RECIPE_DRAFT) }} className="text-[11px] text-gray-500 hover:text-blue-600">
-                          Cancel
+                          取消
                         </button>
                       )}
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Field label="id"><input value={recipeDraft.id} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, id: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="name"><input value={recipeDraft.name} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="status">
+                      <Field label="名称"><input value={recipeDraft.name} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, name: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="状态">
                         <select value={recipeDraft.status} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, status: event.target.value }))} className={inputClass}>
-                          <option value="active">active</option>
-                          <option value="archived">archived</option>
+                          <option value="active">启用</option>
+                          <option value="archived">归档</option>
                         </select>
                       </Field>
-                      <Field label="aspect"><input value={recipeDraft.defaultAspectRatio} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultAspectRatio: event.target.value }))} className={inputClass} /></Field>
-                      <Field label="format"><input value={recipeDraft.defaultOutputFormat} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultOutputFormat: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="画幅"><input value={recipeDraft.defaultAspectRatio} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultAspectRatio: event.target.value }))} className={inputClass} /></Field>
+                      <Field label="格式"><input value={recipeDraft.defaultOutputFormat} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultOutputFormat: event.target.value }))} className={inputClass} /></Field>
                       <Field label="provider"><input value={recipeDraft.defaultProvider} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultProvider: event.target.value }))} className={inputClass} /></Field>
                       <Field label="model"><input value={recipeDraft.defaultModel} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, defaultModel: event.target.value }))} className={inputClass} /></Field>
                     </div>
-                    <Field label="character block"><textarea value={recipeDraft.characterBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, characterBlock: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="style block"><textarea value={recipeDraft.styleBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, styleBlock: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="camera block"><textarea value={recipeDraft.cameraBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, cameraBlock: event.target.value }))} className={textareaClass} /></Field>
-                    <Field label="channel block"><textarea value={recipeDraft.channelBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, channelBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="角色描述块"><textarea value={recipeDraft.characterBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, characterBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="风格描述块"><textarea value={recipeDraft.styleBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, styleBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="镜头描述块"><textarea value={recipeDraft.cameraBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, cameraBlock: event.target.value }))} className={textareaClass} /></Field>
+                    <Field label="渠道要求块"><textarea value={recipeDraft.channelBlock} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, channelBlock: event.target.value }))} className={textareaClass} /></Field>
                     <Field label="negative prompt"><textarea value={recipeDraft.negativePrompt} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, negativePrompt: event.target.value }))} className={textareaClass} /></Field>
                     <Field label="generation_config"><textarea value={recipeDraft.generationConfigText} onChange={(event) => setRecipeDraft((draft) => ({ ...draft, generationConfigText: event.target.value }))} className={textareaClass} /></Field>
                     <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
                       <PlusIcon className="h-4 w-4" />
-                      Save Recipe
+                      保存配方
                     </button>
                   </form>
 
                   <div className="space-y-3">
                     {normalizedContext.prompt_recipes.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">暂无 Prompt Recipe。</div>
+                      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">暂无 Prompt 配方。</div>
                     ) : normalizedContext.prompt_recipes.map((recipe) => (
                       <article key={recipe.id} className={`rounded-lg border p-3 ${recipe.status === 'archived' ? 'border-gray-200/70 bg-gray-50/60 opacity-70 dark:border-white/[0.08] dark:bg-white/[0.03]' : 'border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40'}`}>
                         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -704,22 +963,22 @@ export default function ProjectContextModal() {
                             <div className="break-words text-sm font-semibold text-gray-800 dark:text-gray-100">{recipe.name || recipe.id}</div>
                             <div className="mt-1 break-all text-[11px] text-gray-500 dark:text-gray-400">{recipe.id}</div>
                           </div>
-                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{recipe.status || 'active'}</span>
+                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">{recipe.status === 'archived' ? '归档' : '启用'}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-gray-600 dark:text-gray-300">
-                          <div className="break-words"><span className="text-gray-400">defaults:</span> {[recipe.default_aspect_ratio, recipe.default_output_format, recipe.default_provider, recipe.default_model].filter(Boolean).join(' / ') || '-'}</div>
-                          <div className="break-words"><span className="text-gray-400">negative:</span> {compactText(recipe.negative_prompt)}</div>
+                          <div className="break-words"><span className="text-gray-400">默认参数：</span> {[recipe.default_aspect_ratio, recipe.default_output_format, recipe.default_provider, recipe.default_model].filter(Boolean).join(' / ') || '-'}</div>
+                          <div className="break-words"><span className="text-gray-400">负面词：</span> {compactText(recipe.negative_prompt)}</div>
                           {(recipe.prompt_blocks ?? []).map((block, index) => (
                             <div key={`${recipe.id}-${index}`} className="break-words">
-                              <span className="text-gray-400">{block.role || 'block'}:</span> {compactText(block.text)}
+                              <span className="text-gray-400">{block.role || '描述块'}：</span> {compactText(block.text)}
                             </div>
                           ))}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => { setEditingRecipeId(recipe.id); setRecipeDraft(recipeToDraft(recipe)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">Edit</button>
+                          <button type="button" onClick={() => { setEditingRecipeId(recipe.id); setRecipeDraft(recipeToDraft(recipe)) }} className="h-8 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">编辑</button>
                           <button type="button" onClick={() => archiveRecipe(recipe)} disabled={saving} className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition hover:border-amber-300 hover:text-amber-700 disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
                             <ArchiveIcon className="h-3.5 w-3.5" />
-                            {recipe.status === 'archived' ? 'Restore' : 'Archive'}
+                            {recipe.status === 'archived' ? '恢复' : '归档'}
                           </button>
                         </div>
                       </article>

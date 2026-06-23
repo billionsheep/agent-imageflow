@@ -108,11 +108,22 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 
 Postgres 和 Redis 不暴露宿主机端口。
 
-## 反向代理
+## 反向代理与同源入口
 
-反向代理必须把 `/api/*` 和 `/healthz` 转发到 API，把其他路径转发到 Web。
+推荐生产入口只暴露 Web/HTTPS origin。Web 镜像内置 Nginx 会把 `/api/*` 和 `/healthz` 代理到 compose 内部 `api:8081`，因此外部反向代理可以简单转发到 Web 宿主机端口。
 
-Caddy 示例：
+简单 Caddy 示例：
+
+```caddyfile
+imageflow.example.com {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:8080
+}
+```
+
+如果希望外部反向代理直接分流 API 和 Web，也可以使用下面的高级模式：
+
+高级 Caddy 示例：
 
 ```caddyfile
 imageflow.example.com {
@@ -132,7 +143,9 @@ imageflow.example.com {
 }
 ```
 
-Web Settings 里的 Agent ImageFlow API URL 建议填写同一个公开 HTTPS 域名，例如 `https://imageflow.example.com`。不要在远程浏览器里保留 `http://localhost:8081`，否则浏览器会访问操作者本机的 localhost。
+`PUBLIC_BASE_URL` 应设置为用户浏览器打开的 Web/HTTPS origin，例如 `https://imageflow.example.com`。Web Settings 里的 Agent ImageFlow API URL 留空时会使用当前 Web origin；高级场景也应填写同一个公开 HTTPS 域名。不要在远程浏览器里保留 `http://localhost:8081`，否则浏览器会访问操作者本机的 localhost。
+
+API 独立端口只给同机反向代理、运维或受控内网使用，不建议直接暴露给浏览器用户。
 
 ## Smoke 验收
 
@@ -143,6 +156,12 @@ curl -fsS https://imageflow.example.com/healthz
 curl -fsSI https://imageflow.example.com/
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
+
+Admin 登录后重点检查：
+
+- Recent Assets 缩略图能显示，不弹出浏览器原生 Basic Auth 登录框。
+- asset original / thumbnail / metadata URL 使用 Web/HTTPS 同源入口。
+- Settings 中的 Agent ImageFlow API URL 可留空，且不是 provider base URL。
 
 MCP stdio 只读工具列表：
 
@@ -169,6 +188,44 @@ Web 验收：
 - 只生成 1 图。
 - 记录 task、asset、batch id。
 - 完成后恢复默认配置或保留低并发。
+
+## 部署演练证据模板
+
+正式把 V1 判定为“可长期自托管试用”前，建议按 `issues/next-phase-p1-server-deployment-rehearsal.csv` 记录一次服务器/NAS 演练证据。
+
+可以记录：
+
+- 服务器类型：NAS / Linux VM / 内网 Docker 主机。
+- 部署目录，例如 `/opt/agent-imageflow`。
+- `IMAGE_TAG`，例如 `main`、`v0.1.0` 或 `sha-xxxxxxx`。
+- `PUBLIC_BASE_URL` 的域名，不包含任何账号、密码或 token。
+- GHCR pull 结果：成功/失败和非敏感错误摘要。
+- `docker compose ... ps` 的服务状态摘要。
+- `curl -fsS https://<domain>/healthz` 结果。
+- Web Admin 登录是否成功，不记录 cookie/session。
+- Recent Assets 缩略图、original、metadata 是否走同源 HTTPS。
+- mock task 的 `task_id`、`asset_id`、project/campaign/session/batch id。
+- MCP `tools/list` 是否返回 6 个安全工具。
+- Postgres dump 文件名和 storage/NAS 快照时间点。
+- 恢复演练后的 asset original/thumbnail/metadata 是否可访问。
+- `IMAGE_TAG` 更新和回滚前后的 health/Web smoke 结果。
+
+禁止记录：
+
+- `.env.prod` 文件内容。
+- GHCR token、provider key、project API key、Basic Auth、Admin password、Admin cookie、session token、cleanup token。
+- 宿主机本地绝对资产路径。
+- 真实 provider 响应中的敏感 header。
+
+演练通过的最低标准：
+
+- GHCR 镜像可以拉取。
+- API、Worker、Web、Postgres、Redis 启动并保持 healthy 或有明确可修复错误。
+- HTTPS Web 入口和 `/healthz` 可访问。
+- Admin 登录后 mock task 能生成 asset，并能打开 thumbnail/original/metadata。
+- MCP `tools/list` 可在部署镜像中执行。
+- 至少完成一次 Postgres dump + storage root/NAS 快照流程。
+- 至少完成一次无 schema 变化版本的 `IMAGE_TAG` 回滚流程。
 
 ## 更新版本
 

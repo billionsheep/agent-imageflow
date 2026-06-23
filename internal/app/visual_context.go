@@ -138,6 +138,8 @@ func normalizeCharacterProfile(input domain.CharacterProfile, now time.Time) (do
 	input.Personality = strings.TrimSpace(input.Personality)
 	input.PrimaryAssetID = strings.TrimSpace(input.PrimaryAssetID)
 	input.ReferenceAssetIDs = normalizeStringList(input.ReferenceAssetIDs)
+	input.ReferencePolicy = strings.TrimSpace(input.ReferencePolicy)
+	input.AppearanceLockNotes = strings.TrimSpace(input.AppearanceLockNotes)
 	input.Forbidden = normalizeStringList(input.Forbidden)
 	if input.UpdatedAt.IsZero() {
 		input.UpdatedAt = now
@@ -596,4 +598,49 @@ func containsString(items []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func buildReferenceParticipationDiagnostics(req domain.CreateTaskRequest, resolved *resolvedTaskInputFiles) domain.ReferenceParticipationDiagnostics {
+	assetIDs := []string{}
+	inputFileIDs := []string{}
+	sources := []string{}
+	mimeTypes := []string{}
+	for _, ref := range req.ReferenceImages {
+		if strings.TrimSpace(ref.AssetID) != "" {
+			assetIDs = append(assetIDs, ref.AssetID)
+		}
+		if strings.TrimSpace(ref.InputFileID) != "" {
+			inputFileIDs = append(inputFileIDs, ref.InputFileID)
+		}
+		if strings.TrimSpace(ref.Source) != "" {
+			sources = append(sources, ref.Source)
+		}
+		if strings.TrimSpace(ref.MimeType) != "" {
+			mimeTypes = append(mimeTypes, ref.MimeType)
+		}
+	}
+	if resolved != nil {
+		for _, item := range resolved.ReferenceImages {
+			if strings.TrimSpace(item.InputFileID) != "" {
+				inputFileIDs = append(inputFileIDs, item.InputFileID)
+			}
+			if strings.TrimSpace(item.MimeType) != "" {
+				mimeTypes = append(mimeTypes, item.MimeType)
+			}
+		}
+	}
+	participation := "not_requested"
+	switch {
+	case resolved != nil && len(resolved.ReferenceImages) > 0:
+		participation = "resolved_input_files"
+	case len(req.ReferenceImages) > 0:
+		participation = "descriptor_only"
+	}
+	return domain.ReferenceParticipationDiagnostics{
+		ReferenceAssetCount:            len(normalizeStringList(assetIDs)),
+		ReferenceInputFileCount:        len(normalizeStringList(inputFileIDs)),
+		ProviderReferenceParticipation: participation,
+		ProviderReferenceSources:       normalizeStringList(sources),
+		ProviderReferenceMIMETypes:     normalizeStringList(mimeTypes),
+	}
 }

@@ -1657,8 +1657,14 @@ func storageCmd(args []string) error {
 		limit := fs.Int("limit", 100, "maximum candidates per category")
 		includeRejected := fs.Bool("rejected", true, "include rejected assets")
 		includeGenerated := fs.Bool("generated", true, "include generated but unselected assets")
+		includeDeprecated := fs.Bool("deprecated", true, "include deprecated archived assets")
 		includeTmp := fs.Bool("tmp", true, "include temporary files")
 		includeOrphans := fs.Bool("orphans", true, "include orphan final files")
+		assetID := fs.String("asset-id", "", "limit cleanup candidates to one asset")
+		taskID := fs.String("task-id", "", "limit cleanup candidates to one task")
+		sessionID := fs.String("session-id", "", "limit cleanup candidates to one session metadata value")
+		batchID := fs.String("batch-id", "", "limit cleanup candidates to one batch metadata value")
+		storyID := fs.String("story-id", "", "limit cleanup candidates to one story metadata value")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1676,8 +1682,14 @@ func storageCmd(args []string) error {
 			},
 			IncludeRejected:      *includeRejected,
 			IncludeGenerated:     *includeGenerated,
+			IncludeDeprecated:    *includeDeprecated,
 			IncludeFailedTaskTmp: *includeTmp,
 			IncludeOrphans:       *includeOrphans,
+			AssetID:              strings.TrimSpace(*assetID),
+			TaskID:               strings.TrimSpace(*taskID),
+			SessionID:            strings.TrimSpace(*sessionID),
+			BatchID:              strings.TrimSpace(*batchID),
+			StoryID:              strings.TrimSpace(*storyID),
 			Limit:                *limit,
 		})
 		if err != nil {
@@ -1692,8 +1704,14 @@ func storageCmd(args []string) error {
 		limit := fs.Int("limit", 100, "maximum candidates per category")
 		includeRejected := fs.Bool("rejected", true, "include rejected assets")
 		includeGenerated := fs.Bool("generated", true, "include generated but unselected assets")
+		includeDeprecated := fs.Bool("deprecated", true, "include deprecated archived assets")
 		includeTmp := fs.Bool("tmp", true, "include temporary files")
 		includeOrphans := fs.Bool("orphans", true, "include orphan final files")
+		assetID := fs.String("asset-id", "", "limit cleanup candidates to one asset")
+		taskID := fs.String("task-id", "", "limit cleanup candidates to one task")
+		sessionID := fs.String("session-id", "", "limit cleanup candidates to one session metadata value")
+		batchID := fs.String("batch-id", "", "limit cleanup candidates to one batch metadata value")
+		storyID := fs.String("story-id", "", "limit cleanup candidates to one story metadata value")
 		dryRunToken := fs.String("dry-run-token", "", "matching dry-run token from cleanup-preview")
 		execute := fs.Bool("execute", false, "allow cleanup execution")
 		confirm := fs.Bool("confirm", false, "explicitly confirm execution when no dry-run token is supplied")
@@ -1715,8 +1733,14 @@ func storageCmd(args []string) error {
 			},
 			IncludeRejected:      *includeRejected,
 			IncludeGenerated:     *includeGenerated,
+			IncludeDeprecated:    *includeDeprecated,
 			IncludeFailedTaskTmp: *includeTmp,
 			IncludeOrphans:       *includeOrphans,
+			AssetID:              strings.TrimSpace(*assetID),
+			TaskID:               strings.TrimSpace(*taskID),
+			SessionID:            strings.TrimSpace(*sessionID),
+			BatchID:              strings.TrimSpace(*batchID),
+			StoryID:              strings.TrimSpace(*storyID),
 			Limit:                *limit,
 			DryRunToken:          strings.TrimSpace(*dryRunToken),
 			Execute:              *execute,
@@ -1834,8 +1858,8 @@ func usage() {
   vag benchmark image-generation --provider mock --tasks 32 --requested-count 1 --concurrency-label worker-4
   vag batch progress --session-id <session_id> --batch-id <batch_id>
   vag batch manifest --session-id <session_id> --batch-id <batch_id> [--selected-only=false --include-rejected]
-  vag storage cleanup-preview [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx]
-  vag storage cleanup-execute --execute --dry-run-token <token> [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx]
+  vag storage cleanup-preview [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx] [--session-id s] [--batch-id b] [--asset-id asset_x]
+  vag storage cleanup-execute --execute --dry-run-token <token> [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx] [--session-id s] [--batch-id b] [--asset-id asset_x]
   vag project access get
   vag project access set --enabled=true --key <api_key>
   vag project access add-key --name automation --key <api_key>

@@ -22,6 +22,36 @@ export interface AgentImageflowAdminSessionResponse {
   configured: boolean
 }
 
+export interface AgentImageflowRuntimeStatusResponse {
+  authenticated: boolean
+  username?: string
+  admin_configured: boolean
+  basic_auth_configured: boolean
+  public_base_url?: string
+  default_provider?: string
+  provider_timeout_seconds?: number
+  worker?: {
+    concurrency?: number
+  }
+  rate_limits?: {
+    window_seconds?: number
+    instance_max_requests?: number
+    project_max_requests?: number
+  }
+  providers?: {
+    openai_compatible?: {
+      configured?: boolean
+      model?: string
+      max_concurrency?: number
+    }
+    fal?: {
+      configured?: boolean
+      model?: string
+      max_concurrency?: number
+    }
+  }
+}
+
 export interface AgentImageflowWorkspace {
   workspace_id: string
   name: string
@@ -173,6 +203,11 @@ export interface AgentImageflowUploadInputFileOptions {
   mimeType?: string
 }
 
+export interface AgentImageflowPromoteInputFileToAssetInput {
+  purpose?: AgentImageflowReferencePurpose
+  character_id?: string
+}
+
 export interface AgentImageflowQualityProfile {
   prompt_template?: string
   negative_prompt?: string
@@ -225,6 +260,8 @@ export interface AgentImageflowCharacterProfile {
   forbidden?: string[]
   primary_asset_id?: string
   reference_asset_ids?: string[]
+  reference_policy?: string
+  appearance_lock_notes?: string
 }
 
 export interface AgentImageflowProjectReferenceBinding {
@@ -370,6 +407,92 @@ export interface AgentImageflowStorageIntegrityResponse {
   ok: boolean
   summary: AgentImageflowStorageIntegritySummary
   issues: AgentImageflowStorageIntegrityIssue[]
+}
+
+export interface AgentImageflowCleanupRequest {
+  include_rejected?: boolean
+  include_generated?: boolean
+  include_deprecated?: boolean
+  include_failed_task_tmp?: boolean
+  include_orphans?: boolean
+  asset_id?: string
+  task_id?: string
+  session_id?: string
+  batch_id?: string
+  story_id?: string
+  limit?: number
+  dry_run_token?: string
+  execute?: boolean
+  confirm?: boolean
+}
+
+export interface AgentImageflowCleanupCandidateFile {
+  kind: string
+  storage_key?: string
+  bytes: number
+}
+
+export interface AgentImageflowCleanupCandidate {
+  kind: string
+  reason: string
+  asset_id?: string
+  task_id?: string
+  status?: string
+  file_count: number
+  bytes: number
+  files?: AgentImageflowCleanupCandidateFile[]
+}
+
+export interface AgentImageflowCleanupDryRunReport {
+  generated_at: string
+  dry_run: boolean
+  dry_run_token: string
+  scope: Record<string, unknown>
+  summary: {
+    candidate_count: number
+    file_count: number
+    bytes: number
+    by_reason: Record<string, number>
+  }
+  candidates: AgentImageflowCleanupCandidate[]
+  protected: {
+    selected_asset_count: number
+    published_asset_count: number
+  }
+}
+
+export interface AgentImageflowCleanupExecutionReport {
+  generated_at: string
+  dry_run: boolean
+  executed: boolean
+  scope: Record<string, unknown>
+  dry_run_token: string
+  summary: {
+    candidate_count: number
+    deleted_candidate_count: number
+    skipped_candidate_count: number
+    failed_candidate_count: number
+    file_count: number
+    deleted_file_count: number
+    bytes: number
+    deleted_bytes: number
+    by_reason: Record<string, number>
+  }
+  results: Array<{
+    kind: string
+    reason: string
+    asset_id?: string
+    task_id?: string
+    status?: string
+    action: string
+    error?: string
+    files?: Array<AgentImageflowCleanupCandidateFile & { action: string; error?: string }>
+  }>
+  protected: {
+    selected_asset_count: number
+    published_asset_count: number
+  }
+  audit_event_id?: string
 }
 
 export interface AgentImageflowTaskResponse {
@@ -698,12 +821,14 @@ export interface AgentImageflowAssetResponse {
 export class AgentImageflowApiError extends Error {
   status: number
   errorCode?: string
+  retryAfterSeconds?: number
 
-  constructor(message: string, status: number, errorCode?: string) {
+  constructor(message: string, status: number, errorCode?: string, retryAfterSeconds?: number) {
     super(message)
     this.name = 'AgentImageflowApiError'
     this.status = status
     this.errorCode = errorCode
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -711,8 +836,57 @@ export function isAgentImageflowUnauthorizedError(error: unknown): boolean {
   return error instanceof AgentImageflowApiError && (error.status === 401 || error.status === 403)
 }
 
+function getDefaultAgentImageflowApiBaseUrl(): string {
+  const browserOrigin = typeof window !== 'undefined' ? window.location?.origin?.trim() : ''
+  if (browserOrigin && !/^file:\/\//i.test(browserOrigin)) {
+    try {
+      const url = new URL(browserOrigin)
+      const isLocalHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1' || url.hostname === '[::1]'
+      if (isLocalHost && (url.port === '4173' || url.port === '5173')) {
+        const apiHost = url.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+        return `${url.protocol}//${apiHost}:8081`
+      }
+    } catch {
+      // Fall back to the raw origin below when the browser provides an unusual value.
+    }
+    return browserOrigin.replace(/\/+$/, '')
+  }
+  return 'http://localhost:8081'
+}
+
 export function normalizeAgentImageflowApiBaseUrl(baseUrl: string): string {
-  return (baseUrl || 'http://localhost:8081').trim().replace(/\/+$/, '')
+  const normalized = (baseUrl || getDefaultAgentImageflowApiBaseUrl()).trim().replace(/\/+$/, '')
+  const browserOrigin = typeof window !== 'undefined' ? window.location?.origin?.trim() : ''
+  if (!normalized || !browserOrigin) return normalized
+  try {
+    const base = new URL(normalized)
+    const origin = new URL(browserOrigin)
+    const isLocalPage = origin.hostname === 'localhost' || origin.hostname === '127.0.0.1' || origin.hostname === '::1' || origin.hostname === '[::1]'
+    const isLocalApi = base.hostname === 'localhost' || base.hostname === '127.0.0.1' || base.hostname === '::1' || base.hostname === '[::1]'
+    if (isLocalPage && isLocalApi && base.port === '8081' && origin.hostname !== base.hostname) {
+      const apiHost = origin.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+      return `${base.protocol}//${apiHost}:8081`
+    }
+  } catch {
+    return normalized
+  }
+  return normalized
+}
+
+export function resolveAgentImageflowDeliveryUrl(baseUrl: string, value?: string): string {
+  const text = value?.trim()
+  if (!text) return ''
+  const normalizedBase = normalizeAgentImageflowApiBaseUrl(baseUrl)
+  try {
+    const url = new URL(text, normalizedBase)
+    if (url.pathname.startsWith('/api/')) {
+      return `${normalizedBase}${url.pathname}${url.search}${url.hash}`
+    }
+    return text
+  } catch {
+    if (text.startsWith('/api/')) return `${normalizedBase}${text}`
+    return text
+  }
 }
 
 export function buildAgentImageflowTaskUrl(baseUrl: string, scope: AgentImageflowScope): string {
@@ -754,6 +928,10 @@ export function buildAgentImageflowAdminLogoutUrl(baseUrl: string): string {
   return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/logout`
 }
 
+export function buildAgentImageflowRuntimeStatusUrl(baseUrl: string): string {
+  return `${normalizeAgentImageflowApiBaseUrl(baseUrl)}/api/admin/runtime-status`
+}
+
 export function buildAgentImageflowProjectsUrl(baseUrl: string, workspaceId: string): string {
   return `${buildAgentImageflowWorkspacesUrl(baseUrl)}/${encodeURIComponent(workspaceId)}/projects`
 }
@@ -782,8 +960,20 @@ export function buildAgentImageflowStorageIntegrityUrl(baseUrl: string, scope: A
   return `${buildAgentImageflowCampaignUrl(baseUrl, scope)}/storage-integrity`
 }
 
+export function buildAgentImageflowStorageCleanupPreviewUrl(baseUrl: string, scope: AgentImageflowScope): string {
+  return `${buildAgentImageflowCampaignUrl(baseUrl, scope)}/storage-cleanup-preview`
+}
+
+export function buildAgentImageflowStorageCleanupExecuteUrl(baseUrl: string, scope: AgentImageflowScope): string {
+  return `${buildAgentImageflowCampaignUrl(baseUrl, scope)}/storage-cleanup-execute`
+}
+
 export function buildAgentImageflowInputFilesUrl(baseUrl: string, scope: AgentImageflowScope): string {
   return `${buildAgentImageflowCampaignsUrl(baseUrl, scope)}/${encodeURIComponent(scope.campaignId)}/input-files`
+}
+
+export function buildAgentImageflowInputFilePromoteUrl(baseUrl: string, scope: AgentImageflowScope, inputFileId: string): string {
+  return `${buildAgentImageflowInputFilesUrl(baseUrl, scope)}/${encodeURIComponent(inputFileId)}/promote-asset`
 }
 
 export function buildAgentImageflowAssetsUrl(
@@ -1095,6 +1285,10 @@ export async function getAgentImageflowAdminMe(baseUrl: string): Promise<AgentIm
   return requestJson<AgentImageflowAdminSessionResponse>(buildAgentImageflowAdminMeUrl(baseUrl))
 }
 
+export async function getAgentImageflowRuntimeStatus(baseUrl: string): Promise<AgentImageflowRuntimeStatusResponse> {
+  return requestJson<AgentImageflowRuntimeStatusResponse>(buildAgentImageflowRuntimeStatusUrl(baseUrl))
+}
+
 export async function logoutAgentImageflowAdmin(baseUrl: string): Promise<AgentImageflowAdminSessionResponse> {
   return requestJson<AgentImageflowAdminSessionResponse>(buildAgentImageflowAdminLogoutUrl(baseUrl), {
     method: 'POST',
@@ -1258,6 +1452,21 @@ export async function uploadAgentImageflowInputFile(
   })
 }
 
+export async function promoteAgentImageflowInputFileToAsset(
+  baseUrl: string,
+  scope: AgentImageflowScope,
+  inputFileId: string,
+  input: AgentImageflowPromoteInputFileToAssetInput,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowAssetResponse> {
+  const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowInputFilePromoteUrl(baseUrl, scope, inputFileId), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
+  })
+  return normalizeAgentImageflowAssetResponse(response)
+}
+
 export async function getAgentImageflowTask(baseUrl: string, taskId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowTaskResponse> {
   const response = await requestJson<AgentImageflowTaskResponse>(buildAgentImageflowTaskStatusUrl(baseUrl, taskId), {
     headers: buildAgentImageflowHeaders(auth),
@@ -1373,6 +1582,32 @@ export async function getAgentImageflowStorageIntegrity(
   })
 }
 
+export async function previewAgentImageflowStorageCleanup(
+  baseUrl: string,
+  scope: AgentImageflowScope,
+  input: AgentImageflowCleanupRequest,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowCleanupDryRunReport> {
+  return requestJson<AgentImageflowCleanupDryRunReport>(buildAgentImageflowStorageCleanupPreviewUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
+  })
+}
+
+export async function executeAgentImageflowStorageCleanup(
+  baseUrl: string,
+  scope: AgentImageflowScope,
+  input: AgentImageflowCleanupRequest,
+  auth?: AgentImageflowAuth,
+): Promise<AgentImageflowCleanupExecutionReport> {
+  return requestJson<AgentImageflowCleanupExecutionReport>(buildAgentImageflowStorageCleanupExecuteUrl(baseUrl, scope), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify(input),
+  })
+}
+
 export async function getAgentImageflowProviderProfile(
   baseUrl: string,
   scope: Pick<AgentImageflowScope, 'workspaceId' | 'projectId'>,
@@ -1478,7 +1713,13 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const message = typeof payload?.error_message === 'string' ? payload.error_message : `HTTP ${response.status}`
     const errorCode = typeof payload?.error_code === 'string' ? payload.error_code : undefined
-    throw new AgentImageflowApiError(message, response.status, errorCode)
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    throw new AgentImageflowApiError(
+      message,
+      response.status,
+      errorCode,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    )
   }
   return payload as T
 }
@@ -1490,6 +1731,12 @@ async function requestEmpty(url: string, init?: RequestInit): Promise<void> {
   if (!response.ok) {
     const message = typeof payload?.error_message === 'string' ? payload.error_message : `HTTP ${response.status}`
     const errorCode = typeof payload?.error_code === 'string' ? payload.error_code : undefined
-    throw new AgentImageflowApiError(message, response.status, errorCode)
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    throw new AgentImageflowApiError(
+      message,
+      response.status,
+      errorCode,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    )
   }
 }

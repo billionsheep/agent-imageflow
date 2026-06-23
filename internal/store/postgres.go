@@ -2072,33 +2072,54 @@ func (s *PostgresStore) storageGovernanceCountSnapshot(ctx context.Context, wher
 	return snapshot, nil
 }
 
-func (s *PostgresStore) ListCleanupAssetCandidates(ctx context.Context, scope domain.Scope, includeRejected, includeGenerated bool, limit int) ([]domain.AssetWithVersion, error) {
+func (s *PostgresStore) ListCleanupAssetCandidates(ctx context.Context, opts domain.CleanupDryRunOptions) ([]domain.AssetWithVersion, error) {
 	statuses := []string{}
-	if includeRejected {
+	if opts.IncludeRejected {
 		statuses = append(statuses, domain.AssetRejected)
 	}
-	if includeGenerated {
+	if opts.IncludeGenerated {
 		statuses = append(statuses, domain.AssetDraft)
+	}
+	if opts.IncludeDeprecated {
+		statuses = append(statuses, domain.AssetDeprecated)
 	}
 	if len(statuses) == 0 {
 		return nil, nil
 	}
-	if limit < 1 {
-		limit = 100
+	if opts.Limit < 1 {
+		opts.Limit = 100
 	}
-	args := []any{scope.WorkspaceID, scope.ProjectID, scope.CampaignID}
+	args := []any{opts.Scope.WorkspaceID, opts.Scope.ProjectID, opts.Scope.CampaignID}
 	placeholders := make([]string, 0, len(statuses))
 	for _, status := range statuses {
 		args = append(args, status)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 	}
-	args = append(args, limit)
+	conditions := []string{
+		"a.workspace_id = $1",
+		"a.project_id = $2",
+		"a.campaign_id = $3",
+		fmt.Sprintf("a.status IN (%s)", strings.Join(placeholders, ",")),
+	}
+	addStringCondition := func(sql string, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(sql, len(args)))
+	}
+	addStringCondition("a.id = $%d", opts.AssetID)
+	addStringCondition("a.task_id = $%d", opts.TaskID)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'session_id' = $%d", opts.SessionID)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'batch_id' = $%d", opts.BatchID)
+	addStringCondition("t.structured_input_json->'metadata_json'->>'story_id' = $%d", opts.StoryID)
+	args = append(args, opts.Limit)
 	rows, err := s.db.QueryContext(ctx, assetWithVersionSelect()+fmt.Sprintf(`
-		WHERE a.workspace_id = $1 AND a.project_id = $2 AND a.campaign_id = $3
-			AND a.status IN (%s)
+		WHERE %s
 		ORDER BY a.updated_at ASC, a.id ASC
 		LIMIT $%d
-	`, strings.Join(placeholders, ","), len(args)), args...)
+	`, strings.Join(conditions, " AND "), len(args)), args...)
 	if err != nil {
 		return nil, err
 	}

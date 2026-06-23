@@ -11,8 +11,36 @@
 - Batch Story Export Foundation 已完成第一版：batch/story/scene summary、Production View、scene asset actions、scene regenerate、JSON manifest 和 NAS/Docker 文件访问边界均已落地。
 - Web Operator Review Console 已完成第一版：Web 默认体验已从工程调试列表收敛为审图控制台，长 ID 和工程字段默认折叠。
 - Deployment Release Pipeline 已完成：GitHub Actions 构建 GHCR 私有 API/Web 镜像，服务器使用生产 compose 拉取镜像运行。
+- Web Console Auth Gate / Localization / Product Fit 已完成：Web 未登录时只显示 Admin 登录页，登录后进入服务器托管控制台；Help/About 和主路径 UI 已收敛为 Agent ImageFlow 中文控制台。设置页信息架构仍建议后续独立设计。
+- MCP Service Pack 已部分完成：接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地；实际 MCP mock smoke evidence 仍需回填。
+- Character Reference Intake and Consistency 已完成 foundation：后端支持 input-file 提升为 reference asset、角色主图/参考图字段、任务自动带参考和 provider 参考参与诊断；Web 角色卡已显示缩略图和缺图警告，资产卡快捷绑定已可把当前 asset 设为角色主图、加入参考图或保存为项目参考图。剩余是 mock pet consistency smoke、browser smoke 和人工真实参考 canary。
+- Web Review Feedback and Stability 已完成 Web 前端与 tests 范围：Select/Reject 现在有 pending、optimistic status/style、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃和 429 友好提示；仍建议补一次 browser smoke evidence。
+- Safe Delete and Trial Reset 已完成 CLI + Admin-only REST foundation 和 Web 当前 campaign 清理入口：支持 cleanup preview/execute 按 asset/task/session/batch/story/campaign 定位候选，继续保护 selected/published/approved 并写 audit；剩余单 asset restore/soft delete、task/input-file reset、browser smoke 和生产备份演练。MCP 不开放 workspace/project/campaign 硬删除。
 
 V1 之后的剩余任务和未来方向以 `docs/project/V1_BASELINE_AND_ROADMAP.md` 为准。本文保留早期场景记录用于溯源。
+
+## Trial Finding: Character Reference Is Not Yet a Reliable Visual Loop
+
+状态：未解决，已拆入 `issues/next-phase-p1-character-reference-intake-consistency.csv`。
+
+真实测试暴露的问题：
+
+- Project Visual Context 可以保存角色文字描述、reference binding 和 prompt recipe，但当角色没有 `primary_asset_id` / `reference_asset_ids` 时，它仍然只是文字角色卡。
+- 用户上传和裁切的原图如果只进入 campaign `input-files`，不会自动成为正式 asset，也不会出现在角色卡缩略图或 Project Reference Library 中。
+- MCP `create_image_task` 成功生成图片，只能证明任务链路或纯文生图链路可用；如果任务没有 reference images，不能证明角色参考图参与成功。
+- 真实 provider reference 路径失败时需要更清楚的 MIME/content-type 诊断和“参考图未参与生成”的用户可读提示。
+- 后续验收必须拆成三层：平台链路成功、参考图参与成功、角色一致性人工判断通过。
+
+## Trial Finding: Review UI Feedback Still Needs Follow-up
+
+状态：未解决，已拆入 `issues/next-phase-p1-web-review-feedback-stability.csv`。
+
+真实测试暴露的问题：
+
+- Web 点击 Select/Reject 后如果只有短暂 toast，用户无法确认卡片状态是否改变。
+- Production View 里的 scene select/reject 需要立即更新 scene header、selected coverage 和资产卡状态。
+- 下拉菜单切换 workspace/project/campaign/filter/recipe 时仍可能造成整页闪烁，说明还有 root remount、全量清空重拉或请求风暴。
+- 后续验收需要 browser smoke 证明：状态 badge 可见、失败可回滚、旧内容保留、下拉切换不闪白、无 console error、请求数量合理。
 
 ## Current Test Findings
 

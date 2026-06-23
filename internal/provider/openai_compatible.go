@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/textproto"
 	"os"
 	"strings"
 	"time"
@@ -357,10 +358,10 @@ func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.
 	for index, item := range input.ReferenceImages {
 		fileBytes, mimeType, err := p.readEditInputFile(item.FilePath, item.MimeType, input.MaskImage != nil && index == 0)
 		if err != nil {
-			return Result{}, err
+			return Result{}, referenceParticipationError(item, err)
 		}
-		if err := writeMultipartImageFile(writer, "image[]", fileBytes, fmt.Sprintf("input-%d%s", index+1, fileExtensionForMultipartMime(mimeType))); err != nil {
-			return Result{}, err
+		if err := writeMultipartImageFile(writer, "image[]", fileBytes, fmt.Sprintf("input-%d%s", index+1, fileExtensionForMultipartMime(mimeType)), mimeType); err != nil {
+			return Result{}, referenceParticipationError(item, err)
 		}
 	}
 	if input.MaskImage != nil {
@@ -368,7 +369,7 @@ func (p OpenAICompatibleProvider) generateEdit(ctx context.Context, task domain.
 		if err != nil {
 			return Result{}, err
 		}
-		if err := writeMultipartImageFile(writer, "mask", maskBytes, "mask.png"); err != nil {
+		if err := writeMultipartImageFile(writer, "mask", maskBytes, "mask.png", "image/png"); err != nil {
 			return Result{}, err
 		}
 	}
@@ -1088,13 +1089,23 @@ func normalizePNG(raw []byte) ([]byte, int, int, error) {
 	return buf.Bytes(), bounds.Dx(), bounds.Dy(), nil
 }
 
-func writeMultipartImageFile(writer *multipart.Writer, field string, raw []byte, filename string) error {
-	part, err := writer.CreateFormFile(field, filename)
+func writeMultipartImageFile(writer *multipart.Writer, field string, raw []byte, filename, mimeType string) error {
+	if strings.TrimSpace(mimeType) == "" {
+		mimeType = "image/png"
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeMultipartQuote(field), escapeMultipartQuote(filename)))
+	header.Set("Content-Type", mimeType)
+	part, err := writer.CreatePart(header)
 	if err != nil {
 		return err
 	}
 	_, err = part.Write(raw)
 	return err
+}
+
+func escapeMultipartQuote(value string) string {
+	return strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(value)
 }
 
 func dataURLForImageBytes(raw []byte, mimeType string) string {

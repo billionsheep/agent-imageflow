@@ -392,15 +392,18 @@ docker compose exec api /app/vag storage cleanup-preview \
   --workspace ws_default \
   --project prj_xhs_anime \
   --campaign cmp_7day_cover \
+  --batch-id <optional_batch_id> \
+  --session-id <optional_session_id> \
   --limit 20
 ```
 
 说明：
 
 - `cleanup-preview` 是只读 dry-run，不删除文件，不更新数据库。
-- 默认候选包括 `rejected` 资产、`generated/draft` 未选中资产、临时文件和 orphan final files。
+- 默认候选包括 `rejected` 资产、`generated/draft` 未选中资产、`deprecated` 资产、临时文件和 orphan final files。
 - `selected/approved` 与 `published` 默认 protected，不进入清理候选；响应只返回 protected 计数。
 - 文件明细使用 storage root 下的相对 `storage_key`，不暴露宿主机绝对路径。
+- 可选过滤：`--asset-id`、`--task-id`、`--session-id`、`--batch-id`、`--story-id`。这些过滤只限制当前 scope 内候选，不允许跨 workspace/project/campaign 清理。
 
 受控本地执行：
 
@@ -409,6 +412,8 @@ docker compose exec api /app/vag storage cleanup-execute \
   --workspace ws_default \
   --project prj_xhs_anime \
   --campaign cmp_7day_cover \
+  --batch-id <optional_batch_id> \
+  --session-id <optional_session_id> \
   --limit 20 \
   --execute \
   --dry-run-token <token_from_cleanup_preview> \
@@ -420,10 +425,36 @@ docker compose exec api /app/vag storage cleanup-execute \
 - 没有 `--execute` 时禁止删除。
 - 带 `--dry-run-token` 时必须匹配当前 dry-run 候选集；token 不匹配即使带 `--confirm` 也拒绝。
 - 无 token 的本地执行必须同时传 `--execute --confirm`，用于明确人工确认；建议常规操作仍先使用 dry-run token。
-- 第一版只提供 CLI 执行入口，不暴露匿名远程清理 REST。
-- 默认只清理 `rejected`、`generated/draft` 未选中资产、`tmp` 和明确 orphan files；`selected/approved`、`published`、`deprecated` 默认 protected。
+- 第一版提供 CLI 和 Admin-only REST 执行入口，不暴露匿名远程清理 REST，也不向 MCP 暴露 hard delete。
+- 默认只清理 `rejected`、`generated/draft` 未选中资产、`deprecated`、`tmp` 和明确 orphan files；`selected/approved` 与 `published` 默认 protected。
 - 资产清理会先在数据库事务内删除 `review_event` / `delivery_event` / `asset_version` / `asset` 行，再删除对应 storage files；若文件删除失败，执行报告会标记失败，数据库不会继续引用已清理资产。
 - 每次执行或拒绝执行都会写入本地 audit，`source=cli`、`action=storage_cleanup_execute`。
+
+Admin REST dry-run 预览：
+
+```bash
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -b '<admin_session_cookie>' \
+  http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-preview \
+  -d '{"batch_id":"<optional_batch_id>","limit":20}'
+```
+
+Admin REST 受控执行：
+
+```bash
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -b '<admin_session_cookie>' \
+  http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-execute \
+  -d '{"batch_id":"<same_batch_id>","limit":20,"execute":true,"dry_run_token":"<token_from_preview>"}'
+```
+
+REST 边界：
+
+- 需要 Admin session；不要把 Admin cookie、cleanup token 或任何 key 写进项目文档、MCP 配置或聊天记录。
+- Project API Key 继续服务外部 MCP/REST/CLI 正常生图和查资产，不作为 cleanup 执行凭据。
+- REST cleanup 与 CLI 使用同一候选和保护规则；执行前仍建议先做 Postgres dump 与 storage root 快照。
 
 查看清理审计：
 
@@ -489,6 +520,15 @@ imageflow.example.com {
 
 如果要把任务交给新线程或服务器运维执行，优先使用独立交接文档：`docs/project/SERVER_DEPLOYMENT_GUIDE.md`。
 
+当前 V1 后的部署演练入口是：
+
+```text
+issues/next-phase-p1-server-deployment-rehearsal.csv
+docs/project/stories/slice-053-server-deployment-rehearsal.md
+```
+
+本轮已准备部署演练工单和证据模板；真实服务器/NAS 上线仍需在目标环境执行。默认先跑 mock smoke，不运行真实 provider；如果需要 1 图真实 provider canary，必须先单独确认费用、provider、scope 和停止条件。演练证据只记录 `IMAGE_TAG`、服务状态、health/Web/Admin/mock/MCP/备份/回滚结果，不记录 `.env.prod`、GHCR token、provider key、project key、Basic/Auth/Admin cookie 或 session。
+
 默认镜像：
 
 ```text
@@ -509,7 +549,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 1. 在服务器执行 `docker login ghcr.io`，使用只具备 `read:packages` 权限的 GitHub token 或 deploy token。
 2. 从 `.env.example.prod` 复制出 `.env.prod`，只在服务器编辑真实值。
 3. 设置 `IMAGE_TAG`，可用 `main`、`vX.Y.Z` 或 `sha-xxxxxxx`。
-4. 设置 `PUBLIC_BASE_URL=https://your-domain.example`。
+4. 设置 `PUBLIC_BASE_URL=https://your-domain.example`，推荐指向 Web/HTTPS 公开入口，而不是 API 独立端口。
 5. 设置 `DATABASE_URL` 与 `POSTGRES_PASSWORD`；如果密码包含 URL 特殊字符，`DATABASE_URL` 中需要 URL encode。
 6. 设置 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`ADMIN_SESSION_SECRET`。
 7. 按需设置 `BASIC_AUTH_USERNAME`、`BASIC_AUTH_PASSWORD` 和 project API key。
@@ -517,13 +557,19 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 9. 如使用 NAS，把 `AGENT_IMAGEFLOW_STORAGE_ROOT` 设置为宿主机/NAS 路径；留空则使用 Docker named volume。
 10. 执行 pull/up，并通过反向代理开放 HTTPS。
 
-反向代理路由必须保持这个边界：
+生产浏览器入口推荐保持同源：
+
+- Web 镜像已代理 `/api/*` 与 `/healthz` 到 compose 内部 API；外部反向代理可以只把公开域名转发到 Web 宿主机端口。
+- `PUBLIC_BASE_URL` 应与用户浏览器打开的 Web origin 一致，保证 thumbnail/original/metadata URL 不跳到 API 独立端口。
+- API 宿主机端口只给同机反向代理或运维使用，不应作为日常 Web 用户入口。
+
+如果外部反向代理选择绕过 Web 镜像直接分流，也必须保持这个边界：
 
 - `/api/*` 转发到 API，例如宿主机 `127.0.0.1:8081`。
 - `/healthz` 转发到 API，便于上线 smoke 和外部健康检查。
 - 其他路径转发到 Web 镜像，例如宿主机 `127.0.0.1:8080`。
 
-Web Settings 里的 Agent ImageFlow API URL 建议填写同一个公开 HTTPS 域名，例如 `https://your-domain.example`，不要在远程浏览器里保留 `http://localhost:8081`；否则浏览器会访问操作者本机的 localhost，而不是服务器。
+Web Settings 里的 Agent ImageFlow API URL 留空时会默认使用当前 Web origin。高级场景可以填写同一个公开 HTTPS 域名，例如 `https://your-domain.example`，不要在远程浏览器里保留 `http://localhost:8081`；否则浏览器会访问操作者本机的 localhost，而不是服务器。
 
 版本更新步骤：
 
@@ -598,11 +644,16 @@ ADMIN_SESSION_TTL_SECONDS=43200
 
 说明：
 
+- Web 控制台现在采用前置 Admin 登录页：未登录时只显示登录页，不展示 Header、InputBar、资产库、Production View、Project Context 或 Settings 主体。
 - Admin session 只用于 Web 控制台和管理读取路径，不替代 project API key。
 - Provider API key 固定在服务端环境变量中，不返回给 Web、不写入 localStorage、不进入响应 JSON。
 - MCP / CLI / REST 外部 project 级调用继续使用 project API key，也可按需叠加 Basic Auth。
 - 如果启用了 Admin credentials，scope 管理、Recent Assets 和控制台读取路径需要 Admin session 或 Basic Auth。
-- 本地浏览器手测时不要混用 `127.0.0.1` Web origin 和 `localhost` API base；Admin cookie 绑定 host，建议统一使用 `http://localhost:8080` + `http://localhost:8081`。
+- Web 登录者使用的是服务器配置好的平台能力，不需要也不应该在 Web 里填写 provider key 或 provider base URL。
+- 本地浏览器手测时不要混用 `127.0.0.1` Web origin 和 `localhost` API base；Admin cookie 绑定 host。生产/preview 推荐使用同一个 Web origin，让 `/api/*` 和图片 delivery 都走同源入口。
+- 本地 Vite preview/dev 常用端口 `4173` / `5173` 没有 Web 镜像里的 Nginx `/api` 代理，Web 留空 API URL 时会按当前页面 host 自动回退到 `http://127.0.0.1:8081` 或 `http://localhost:8081`；生产 Web 镜像或正式反代仍保持同源 `/api`。
+- 已登录 Admin session 可读取 asset thumbnail/original/metadata；未登录仍返回 401，但图片类 delivery 不返回会触发浏览器原生 Basic Auth 弹窗的 challenge。
+- 如果用户看到旧的 provider/base URL 配置，它属于高级/旧模式兼容路径；正式资产生产优先走服务端托管模式和服务器配置的 provider。
 
 Admin login smoke：
 
@@ -1291,7 +1342,7 @@ npm --prefix web run dev -- --host 0.0.0.0 --port 8080
 在 Web 设置页的“习惯配置”中开启“服务端托管模式”，默认配置为：
 
 ```text
-API URL: http://localhost:8081
+API URL: (留空时使用当前 Web origin；本地 CLI/测试环境回退 http://localhost:8081)
 Project API Key: (optional)
 Basic 用户名: (optional)
 Basic 密码: (optional)
@@ -1314,6 +1365,8 @@ Selection mode: auto
 - 托管模式默认传 `selection_mode=auto`；多候选任务完成后，服务端会按任务输入或项目级 quality profile 中的 `best_of_config` 自动 selected 一张候选。
 - 如果服务端启用了 Basic Auth 或项目级 API key，Web 会自动附带 `Authorization: Basic ...` 和 `X-API-Key`。
 - Web 服务端资产库默认展示 Recent Assets；用户使用 Admin 登录后，不需要手填 project API key 也可以看到 MCP / CLI / REST / Web 生成的最近资产。
+- 生产部署时，Agent ImageFlow API URL 不是 provider base URL；provider key/base URL 只来自服务器环境变量。
+- Web Current Scope 可通过 workspace / project / campaign 三级下拉切换业务空间，Recent Assets、Production View 和 Project Context 会跟随当前 scope。
 - 资产卡会显示 workspace / project / campaign，并可点击 `Scope` 切换当前 scope；`Scope` 视图仍可查看当前 campaign 的资产。
 - 资产卡的 `Reference` 动作会打开 Project Context modal，用当前 asset 建立 character/style/scene/prop reference binding；该动作不改变 asset 文件或 selected/rejected 状态。
 - 未登录或 401 会显示 unauthorized/login 状态，不再和真实空列表、筛选无结果混成 `0 shown`。
@@ -1629,6 +1682,41 @@ OPENAI_COMPATIBLE_TOTAL_TIMEOUT_SECONDS=300
 - 返回图片会在服务端规范化为 PNG，再进入现有 asset processor / storage / delivery。
 - 自动化验证使用本地 HTTP mock，不会触发真实外部 API。真实 smoke 需要用户自行配置密钥，并自行承担 provider 成本。
 
+### Reference image 1 图 canary checklist
+
+仅在用户明确确认费用和使用真实 provider 后执行。默认 CI、mock smoke、Web browser smoke 都不要跑真实 provider。
+
+目标：验证固定角色参考图真的进入 openai-compatible `/images/edits` 链路，而不是绕过参考图后纯文生图成功。
+
+前置条件：
+
+- 服务器已部署包含 `fix: set edit multipart image content types` 的镜像或 commit。
+- `.env.prod` 中的真实 provider key 只保存在服务器环境变量，不写入仓库、MCP 配置、截图或聊天。
+- 使用一个独立 test project/campaign/session/batch，避免污染正式批次。
+- 准备 1-3 张同 project 的角色主图/参考图 asset，并在 Project Context 中绑定到角色。
+
+执行验收只记录这些非敏感证据：
+
+- task id / asset id / project id / campaign id / session id / batch id。
+- provider 和 model 名称。
+- task/asset metadata 中 `reference_asset_count > 0`。
+- `provider_reference_participation` 为 `resolved_input_files` 或等价成功状态。
+- task 使用 edits/reference 路径；如果失败，错误需要说明“参考图未参与生成”和 MIME/content-type。
+- thumbnail/original/metadata delivery URL 返回 200。
+- Web Project Context 能看到角色主图/参考图缩略图；Recent Assets 能看到生成资产。
+
+禁止记录：
+
+- provider key、project API key、Basic Auth、Admin cookie、session token、cleanup token。
+- 本地绝对文件路径。
+- 真实 provider 响应中的敏感 header。
+
+如果 canary 失败：
+
+- 不要自动重试多张图。
+- 先保存非敏感 task/attempt error、metadata 摘要和 provider/model。
+- 检查 multipart image/mask part 是否有正确 `Content-Type`，以及任务 metadata 是否显示参考图已解析。
+
 ## fal.ai provider
 
 服务端 Worker 当前也支持：
@@ -1688,6 +1776,15 @@ get_asset_delivery_info
 ```
 
 `select_image_asset` 在底层调用当前兼容的 approve 状态迁移，但 MCP 输出会把 `approved` 映射为产品语义 `selected`，把 `draft` 映射为 `generated`。
+
+MCP 新 agent 接入优先参考：
+
+- `docs/project/MCP_SERVICE_GUIDE.md`
+- `examples/mcp/agent-imageflow.local.json`
+- `examples/mcp/create-pet-scene.json`
+- `examples/mcp/smoke.md`
+
+当前 MCP Service Pack 已完成文档和示例落地，并通过 JSON parse 与静态检查；人工 mock smoke evidence 尚未回填，因此项目管理文档里暂不标 done。
 
 ## Debug Notes
 

@@ -23,11 +23,28 @@ type Options struct {
 	AdminPassword                string
 	AdminSessionSecret           string
 	AdminSessionTTL              time.Duration
+	Runtime                      RuntimeStatusOptions
 	AuditSink                    HTTPAuditSink
 	RateLimiter                  RateLimiter
 	RateLimitWindow              time.Duration
 	RateLimitInstanceMaxRequests int
 	RateLimitProjectMaxRequests  int
+}
+
+type RuntimeStatusOptions struct {
+	PublicBaseURL                  string
+	DefaultProvider                string
+	OpenAICompatibleModel          string
+	OpenAICompatibleConfigured     bool
+	OpenAICompatibleMaxConcurrency int
+	FalModel                       string
+	FalConfigured                  bool
+	FalMaxConcurrency              int
+	ProviderTimeoutSeconds         int
+	WorkerConcurrency              int
+	RateLimitWindowSeconds         int
+	RateLimitInstanceMaxRequests   int
+	RateLimitProjectMaxRequests    int
 }
 
 type Server struct {
@@ -38,15 +55,16 @@ type Server struct {
 const maxTaskInputUploadBytes int64 = 50 << 20
 
 type requestAuthScope struct {
-	WorkspaceID    string
-	ProjectID      string
-	CampaignID     string
-	TaskID         string
-	AssetID        string
-	InputFileID    string
-	AllowBasicOnly bool
-	AllowAdmin     bool
-	RequireAdmin   bool
+	WorkspaceID         string
+	ProjectID           string
+	CampaignID          string
+	TaskID              string
+	AssetID             string
+	InputFileID         string
+	AllowBasicOnly      bool
+	AllowAdmin          bool
+	RequireAdmin        bool
+	RequireAdminSession bool
 }
 
 func New(service *app.Service, options Options) *Server {
@@ -129,6 +147,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleDeleteCampaign(w, r, parts[2], parts[4], parts[6])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files"):
 		s.handleUploadTaskInputFile(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "promote-asset"):
+		s.handlePromoteTaskInputFileAsset(w, r, parts[2], parts[4], parts[6], parts[8])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*"):
 		s.handleGetTaskInputFile(w, r, parts[2], parts[4], parts[6], parts[8])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "content"):
@@ -137,6 +157,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleGetStorageGovernance(w, r, parts[2], parts[4], parts[6])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"):
 		s.handleGetStorageIntegrity(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview"):
+		s.handleStorageCleanupPreview(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
+		s.handleStorageCleanupExecute(w, r, parts[2], parts[4], parts[6])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "tasks"):
 		s.handleCreateTask(w, r, parts[2], parts[4], parts[6])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
@@ -163,6 +187,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleListAssets(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "admin", "assets", "recent"):
 		s.handleListRecentAssets(w, r)
+	case isRead && match(parts, "api", "admin", "runtime-status"):
+		s.handleRuntimeStatus(w, r)
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-progress"):
 		s.handleGetBatchProgress(w, r, parts[2], parts[4])
 	case isRead && match(parts, "api", "projects", "*", "campaigns", "*", "batch-summary"):
@@ -203,7 +229,18 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 			}
 		}
 	}
-	if !s.authorizeBasicAuth(w, r) {
+	if routeRequiresAdminSession(parts, r.Method) {
+		preScope, preOK, preErr := s.resolveRequestAuthScope(r, parts)
+		if preErr != nil {
+			return false, requestAuthScope{}, actor, preErr
+		}
+		if !preOK {
+			preScope = requestAuthScope{RequireAdminSession: true}
+		}
+		writeUnauthorized(w, "admin_session_required", "admin session is required", false)
+		return false, preScope, actor, nil
+	}
+	if !s.authorizeBasicAuth(w, r, shouldSendBasicChallenge(parts, r.Method)) {
 		return false, requestAuthScope{}, actor, nil
 	}
 	scope, ok, err := s.resolveRequestAuthScope(r, parts)
@@ -281,21 +318,40 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 	return true, scope, actor, nil
 }
 
-func (s *Server) authorizeBasicAuth(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) authorizeBasicAuth(w http.ResponseWriter, r *http.Request, basicChallenge bool) bool {
 	if !s.basicAuthConfigured() {
 		return true
 	}
 	username, password, ok := r.BasicAuth()
 	if !ok {
-		writeUnauthorized(w, "basic_auth_required", "basic auth is required", true)
+		writeUnauthorized(w, "basic_auth_required", "basic auth is required", basicChallenge)
 		return false
 	}
 	if subtle.ConstantTimeCompare([]byte(username), []byte(s.options.BasicAuthUsername)) != 1 ||
 		subtle.ConstantTimeCompare([]byte(password), []byte(s.options.BasicAuthPassword)) != 1 {
-		writeUnauthorized(w, "basic_auth_invalid", "basic auth is invalid", true)
+		writeUnauthorized(w, "basic_auth_invalid", "basic auth is invalid", basicChallenge)
 		return false
 	}
 	return true
+}
+
+func shouldSendBasicChallenge(parts []string, method string) bool {
+	if isAssetDeliveryRoute(parts, method) {
+		return false
+	}
+	return true
+}
+
+func routeRequiresAdminSession(parts []string, method string) bool {
+	return method == http.MethodPost && (match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"))
+}
+
+func isAssetDeliveryRoute(parts []string, method string) bool {
+	isRead := method == http.MethodGet || method == http.MethodHead
+	return isRead && (match(parts, "api", "assets", "*", "thumbnail") ||
+		match(parts, "api", "assets", "*", "original") ||
+		match(parts, "api", "assets", "*", "metadata"))
 }
 
 func (s *Server) basicAuthConfigured() bool {
@@ -357,6 +413,7 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4], CampaignID: parts[6]}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files"),
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "promote-asset"),
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "input-files", "*", "content"):
 		return requestAuthScope{
 			WorkspaceID: parts[2],
@@ -370,11 +427,18 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			ProjectID:   parts[4],
 			CampaignID:  parts[6],
 		}, true, nil
-	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"):
+	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
 		return requestAuthScope{
 			WorkspaceID: parts[2],
 			ProjectID:   parts[4],
 			CampaignID:  parts[6],
+			AllowAdmin:  true,
+			RequireAdmin: match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
+			RequireAdminSession: match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
@@ -404,6 +468,8 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		match(parts, "api", "projects", "*", "campaigns", "*", "scene-regenerations"):
 		return requestAuthScope{ProjectID: parts[2], CampaignID: parts[4], AllowAdmin: true}, true, nil
 	case match(parts, "api", "admin", "assets", "recent"):
+		return requestAuthScope{AllowAdmin: true, RequireAdmin: true}, true, nil
+	case match(parts, "api", "admin", "runtime-status"):
 		return requestAuthScope{AllowAdmin: true, RequireAdmin: true}, true, nil
 	case match(parts, "api", "assets", "*"),
 		match(parts, "api", "assets", "*", "metadata"),
@@ -631,6 +697,26 @@ func (s *Server) handleGetTaskInputFile(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) handlePromoteTaskInputFileAsset(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID, inputFileID string) {
+	defer r.Body.Close()
+	var req domain.PromoteInputFileToAssetRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	response, err := s.service.PromoteInputFileToAsset(r.Context(), domain.Scope{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		CampaignID:  campaignID,
+	}, inputFileID, req)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
 func (s *Server) handleTaskInputFileContent(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID, inputFileID string) {
 	path, mimeType, err := s.service.GetTaskInputFileContent(r.Context(), domain.Scope{
 		WorkspaceID: workspaceID,
@@ -663,6 +749,90 @@ func (s *Server) handleGetStorageIntegrity(w http.ResponseWriter, r *http.Reques
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 		CampaignID:  campaignID,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type storageCleanupRequest struct {
+	IncludeRejected      bool   `json:"include_rejected"`
+	IncludeGenerated     bool   `json:"include_generated"`
+	IncludeDeprecated    bool   `json:"include_deprecated"`
+	IncludeFailedTaskTmp bool   `json:"include_failed_task_tmp"`
+	IncludeOrphans       bool   `json:"include_orphans"`
+	AssetID              string `json:"asset_id"`
+	TaskID               string `json:"task_id"`
+	SessionID            string `json:"session_id"`
+	BatchID              string `json:"batch_id"`
+	StoryID              string `json:"story_id"`
+	Limit                int    `json:"limit"`
+	DryRunToken          string `json:"dry_run_token"`
+	Execute              bool   `json:"execute"`
+	Confirm              bool   `json:"confirm"`
+}
+
+func decodeStorageCleanupRequest(w http.ResponseWriter, r *http.Request) (storageCleanupRequest, bool) {
+	defer r.Body.Close()
+	var req storageCleanupRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return storageCleanupRequest{}, false
+	}
+	return req, true
+}
+
+func (s *Server) handleStorageCleanupPreview(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID string) {
+	req, ok := decodeStorageCleanupRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.service.CleanupDryRun(r.Context(), domain.CleanupDryRunOptions{
+		Scope:                domain.Scope{WorkspaceID: workspaceID, ProjectID: projectID, CampaignID: campaignID},
+		IncludeRejected:      req.IncludeRejected,
+		IncludeGenerated:     req.IncludeGenerated,
+		IncludeDeprecated:    req.IncludeDeprecated,
+		IncludeFailedTaskTmp: req.IncludeFailedTaskTmp,
+		IncludeOrphans:       req.IncludeOrphans,
+		AssetID:              req.AssetID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		BatchID:              req.BatchID,
+		StoryID:              req.StoryID,
+		Limit:                req.Limit,
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleStorageCleanupExecute(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID string) {
+	req, ok := decodeStorageCleanupRequest(w, r)
+	if !ok {
+		return
+	}
+	response, err := s.service.CleanupExecute(r.Context(), domain.CleanupExecuteOptions{
+		Scope:                domain.Scope{WorkspaceID: workspaceID, ProjectID: projectID, CampaignID: campaignID},
+		IncludeRejected:      req.IncludeRejected,
+		IncludeGenerated:     req.IncludeGenerated,
+		IncludeDeprecated:    req.IncludeDeprecated,
+		IncludeFailedTaskTmp: req.IncludeFailedTaskTmp,
+		IncludeOrphans:       req.IncludeOrphans,
+		AssetID:              req.AssetID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		BatchID:              req.BatchID,
+		StoryID:              req.StoryID,
+		Limit:                req.Limit,
+		DryRunToken:          req.DryRunToken,
+		Execute:              req.Execute,
+		Confirm:              req.Confirm,
+		Actor:                "admin_api",
 	})
 	if err != nil {
 		writeServiceError(w, err)
@@ -837,6 +1007,44 @@ func (s *Server) handleListRecentAssets(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleRuntimeStatus(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.adminSessionUsername(r)
+	if !ok {
+		writeUnauthorized(w, "admin_session_required", "admin session is required", false)
+		return
+	}
+	runtime := s.options.Runtime
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authenticated":            true,
+		"username":                 username,
+		"admin_configured":         s.adminConfigured(),
+		"basic_auth_configured":    s.basicAuthConfigured(),
+		"public_base_url":          strings.TrimSpace(runtime.PublicBaseURL),
+		"default_provider":         strings.TrimSpace(runtime.DefaultProvider),
+		"provider_timeout_seconds": runtime.ProviderTimeoutSeconds,
+		"worker": map[string]any{
+			"concurrency": runtime.WorkerConcurrency,
+		},
+		"rate_limits": map[string]any{
+			"window_seconds":        runtime.RateLimitWindowSeconds,
+			"instance_max_requests": runtime.RateLimitInstanceMaxRequests,
+			"project_max_requests":  runtime.RateLimitProjectMaxRequests,
+		},
+		"providers": map[string]any{
+			"openai_compatible": map[string]any{
+				"configured":      runtime.OpenAICompatibleConfigured,
+				"model":           strings.TrimSpace(runtime.OpenAICompatibleModel),
+				"max_concurrency": runtime.OpenAICompatibleMaxConcurrency,
+			},
+			"fal": map[string]any{
+				"configured":      runtime.FalConfigured,
+				"model":           strings.TrimSpace(runtime.FalModel),
+				"max_concurrency": runtime.FalMaxConcurrency,
+			},
+		},
+	})
 }
 
 func (s *Server) handleGetBatchProgress(w http.ResponseWriter, r *http.Request, projectID, campaignID string) {

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,6 +453,8 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	var capturedResponseFormat string
 	var capturedStream string
 	var capturedPartialImages string
+	var imagePartContentType string
+	var maskPartContentType string
 	var imageCount int
 	var maskCount int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -469,6 +472,12 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 		capturedPartialImages = r.FormValue("partial_images")
 		imageCount = len(r.MultipartForm.File["image[]"])
 		maskCount = len(r.MultipartForm.File["mask"])
+		if imageCount > 0 {
+			imagePartContentType = r.MultipartForm.File["image[]"][0].Header.Get("Content-Type")
+		}
+		if maskCount > 0 {
+			maskPartContentType = r.MultipartForm.File["mask"][0].Header.Get("Content-Type")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -520,6 +529,9 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	if imageCount != 1 || maskCount != 1 {
 		t.Fatalf("unexpected multipart file counts: images=%d mask=%d", imageCount, maskCount)
 	}
+	if imagePartContentType != "image/png" || maskPartContentType != "image/png" {
+		t.Fatalf("unexpected multipart image content types: image=%q mask=%q", imagePartContentType, maskPartContentType)
+	}
 	if len(result.Files) != 1 {
 		t.Fatalf("got %d files, want 1", len(result.Files))
 	}
@@ -529,6 +541,25 @@ func TestOpenAICompatibleProviderUsesEditsEndpointForResolvedInputs(t *testing.T
 	}
 	if params["request_mode"] != OpenAICompatibleRequestModeImagesStream || params["operation"] != "edit" || params["endpoint"] != openAICompatibleEndpointEdits {
 		t.Fatalf("expected edit URL request shape, got %#v", params)
+	}
+}
+
+func TestReferenceParticipationErrorIncludesUserReadableSourceAndMIME(t *testing.T) {
+	err := referenceParticipationError(resolvedTaskInputFile{
+		InputFileID: "inp_missing",
+		Kind:        "reference",
+		FilePath:    "/tmp/does-not-exist.png",
+		MimeType:    "image/webp",
+		Role:        "character_primary",
+	}, errors.New("open /tmp/does-not-exist.png: no such file or directory"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	message := err.Error()
+	for _, want := range []string{"参考图未参与生成", "input_file_id=inp_missing", "mime_type=image/webp", "source=input_file"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, message)
+		}
 	}
 }
 

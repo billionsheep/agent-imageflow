@@ -103,6 +103,26 @@ func TestValidateReusableAssetScopeAllowsSameProjectDifferentCampaign(t *testing
 	}
 }
 
+func TestNormalizePromoteInputFileToAssetRequest(t *testing.T) {
+	req, err := normalizePromoteInputFileToAssetRequest(domain.PromoteInputFileToAssetRequest{
+		Purpose:     " character ",
+		CharacterID: " dog_milo ",
+	})
+	if err != nil {
+		t.Fatalf("normalizePromoteInputFileToAssetRequest returned error: %v", err)
+	}
+	if req.Purpose != "character" || req.CharacterID != "dog_milo" {
+		t.Fatalf("unexpected normalized request: %#v", req)
+	}
+}
+
+func TestNormalizePromoteInputFileToAssetRequestRejectsInvalidPurpose(t *testing.T) {
+	_, err := normalizePromoteInputFileToAssetRequest(domain.PromoteInputFileToAssetRequest{Purpose: "avatar"})
+	if err == nil {
+		t.Fatal("expected invalid purpose to fail")
+	}
+}
+
 func writeReusableAssetTestFile(t *testing.T) string {
 	t.Helper()
 	filePath := t.TempDir() + "/original.png"
