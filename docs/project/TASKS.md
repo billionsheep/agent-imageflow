@@ -11,6 +11,7 @@
 - [x] P1 Web Review Feedback and Stability：已完成 Web 前端与测试范围内的 follow-up；`ServerAssetLibrary` 与 `ProductionViewModal` 已补 per-asset pending、optimistic status update、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃与 429 友好提示；同步补 `reviewFeedback` tests，不改 Go 后端，也不触碰未完成的角色图片绑定切片。
 - [x] 完成 P1 Safe Delete and Trial Reset 的 Web 数据清理入口（Task 2）：`ScopeManagerModal` 已新增当前 campaign 的数据清理面板，复用 Admin-only REST `storage-cleanup-preview/execute`，展示 candidate/file/bytes/by_reason/protected 摘要和截断 dry-run token；execute 需要输入“清理当前空间”，未 preview 不可执行，并对 401/403/429 给出可理解提示。验证：`npm --prefix web test -- --run` 23 files / 258 tests 通过，`npm --prefix web run build` 通过且仅有既有 chunk warning；未运行真实 provider，未读取或打印 key/secret/cookie/session。
 - [ ] P1 Safe Delete and Trial Reset 剩余产品化：CLI/REST cleanup preview/execute 基础已完成，Web Scope 管理也已补当前 campaign 的数据清理 preview/execute 入口、确认短语和 401/403/429 友好提示；仍需单 asset restore/soft delete 体验、task/input-file 级 reset 与浏览器 smoke。
+- [ ] P1 Scope Management Usability Follow-up：按 `issues/next-phase-p1-scope-management-usability-followup.csv` 处理真实试用反馈；用户已确认 scope 删除应支持非空级联删除并包含 selected/approved/published 资产，但必须保持 Admin 受控、二次确认、审计和非 MCP destructive 边界；同时修复确认弹窗层级、Scope 管理滚动和输入框 `@` 误导文案。
 - [ ] 嵌入式架构图只按图片资产流继续试用；若需要 Mermaid/D2/SVG 可编辑源，再单独确认 Diagram source track。
 
 ## Doing

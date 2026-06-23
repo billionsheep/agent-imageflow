@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-23: Scope 删除采用 Admin 受控级联删除语义
+
+- Decision: 追加 `issues/next-phase-p1-scope-management-usability-followup.csv`。Scope 管理中的 workspace/project/campaign 删除后续应支持非空级联删除：删除 campaign 会删除其 task/attempt/asset/version/review/input-files/storage；删除 project/workspace 会递归删除所有下级 campaign/project。用户已确认该语义包含 selected/approved/published 资产。该能力仍只走 Admin Web/REST/CLI 受控链路，不向 MCP 暴露 workspace/project/campaign destructive tools。
+- Reason: 真实 Web 试用中，empty-only 删除要求用户先手动清理子级 project/campaign/task/asset，和“删除这个测试空间/业务空间”的直觉不一致，也不适合持续试用产生的数据清理。Storage cleanup 默认保护 selected/published/approved 适合资产级清理；但用户明确删除整个 scope 时，应该按 scope 生命周期处理。
+- Impact: 后续实现必须提供明确二次确认文案，说明会删除子级、任务、资产、文件和 selected/approved/published 结果；操作必须写 audit，并保持未授权不可删除。MCP Service Pack、RUNBOOK 和数据生命周期文档必须继续说明：agent 通过 MCP 不能硬删除空间，删除/重置走 Admin 受控入口。
+
 ## 2026-06-23: V1 稳定性以服务器/NAS 演练证据作为验收门槛
 
 - Decision: 新增 `issues/next-phase-p1-server-deployment-rehearsal.csv` 和 `docs/project/stories/slice-053-server-deployment-rehearsal.md`，把服务器/NAS 部署演练作为 V1 baseline 之后的第一优先验收门槛。只有完成真实目标环境中的 GHCR pull、prod compose first boot、HTTPS 同源入口、Admin/Web mock task、MCP smoke、Postgres + storage 备份恢复和 `IMAGE_TAG` 回滚后，才把 V1 视为适合长期自托管运行。
