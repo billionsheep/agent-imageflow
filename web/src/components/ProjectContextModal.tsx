@@ -17,6 +17,12 @@ import {
   type AgentImageflowPromptRecipe,
   type AgentImageflowReferencePurpose,
 } from '../lib/agentImageflowApi'
+import {
+  addCharacterReferenceAsset,
+  setCharacterPrimaryAsset,
+  upsertCharacterProjectReference,
+  upsertProjectReferenceBinding,
+} from '../lib/projectContextQuickBinding'
 import { ArchiveIcon, CloseIcon, PlusIcon, RefreshIcon } from './icons'
 
 type ProjectContextTab = 'characters' | 'references' | 'recipes'
@@ -298,6 +304,7 @@ export default function ProjectContextModal() {
   const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null)
   const [characterDraft, setCharacterDraft] = useState<CharacterDraft>(EMPTY_CHARACTER_DRAFT)
   const [referenceDraft, setReferenceDraft] = useState<ReferenceDraft>(EMPTY_REFERENCE_DRAFT)
+  const [quickBindingCharacterId, setQuickBindingCharacterId] = useState('')
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
   const [recipeDraft, setRecipeDraft] = useState<RecipeDraft>(EMPTY_RECIPE_DRAFT)
   const activeCharacters = useMemo(() => activeItems(normalizedContext.characters), [normalizedContext.characters])
@@ -362,9 +369,25 @@ export default function ProjectContextModal() {
     setReferenceDraft((current) => ({
       ...current,
       assetId: referenceAssetId,
-      label: current.label || referenceAssetId,
+      label: current.assetId === referenceAssetId ? (current.label || referenceAssetId) : referenceAssetId,
     }))
   }, [open, referenceAssetId])
+
+  useEffect(() => {
+    if (!referenceAssetId) {
+      setQuickBindingCharacterId('')
+      return
+    }
+    if (activeCharacters.length === 0) {
+      setQuickBindingCharacterId('')
+      return
+    }
+    setQuickBindingCharacterId((current) => (
+      current && activeCharacters.some((character) => character.id === current)
+        ? current
+        : activeCharacters[0]?.id ?? ''
+    ))
+  }, [activeCharacters, referenceAssetId])
 
   const saveContext = useCallback(async (nextContext: AgentImageflowProjectVisualContext, successMessage: string) => {
     if (!scopeReady) {
@@ -436,25 +459,15 @@ export default function ProjectContextModal() {
     }
     const weight = Number(referenceDraft.weight)
     const normalizedWeight = Number.isFinite(weight) ? Math.min(5, Math.max(0.1, weight)) : 1
-    const existing = normalizedContext.references.find((item) =>
-      item.asset_id === assetId &&
-      item.purpose === referenceDraft.purpose &&
-      (item.character_id ?? '') === referenceDraft.characterId.trim(),
-    )
-    const nextReference: AgentImageflowProjectReferenceBinding = {
-      id: existing?.id ?? createVisualContextId(`ref_${referenceDraft.purpose}`, assetId),
-      asset_id: assetId,
+    const nextContext = upsertProjectReferenceBinding(normalizedContext, {
+      assetId,
       purpose: referenceDraft.purpose,
-      label: referenceDraft.label.trim() || undefined,
-      character_id: referenceDraft.characterId.trim() || undefined,
+      label: referenceDraft.label,
+      characterId: referenceDraft.characterId,
       weight: normalizedWeight,
-      notes: referenceDraft.notes.trim() || undefined,
-      status: 'active',
-    }
-    const nextReferences = existing
-      ? normalizedContext.references.map((item) => item.id === existing.id ? nextReference : item)
-      : [...normalizedContext.references, nextReference]
-    void saveContext({ ...normalizedContext, references: nextReferences }, '参考图绑定已保存')
+      notes: referenceDraft.notes,
+    })
+    void saveContext(nextContext, '参考图绑定已保存')
     setReferenceDraft({ ...EMPTY_REFERENCE_DRAFT, assetId: referenceAssetId ?? '' })
   }
 
@@ -463,6 +476,59 @@ export default function ProjectContextModal() {
       item.id === reference.id ? { ...item, status: item.status === 'archived' ? 'active' : 'archived' } : item,
     )
     void saveContext({ ...normalizedContext, references: nextReferences }, reference.status === 'archived' ? '参考图绑定已恢复' : '参考图绑定已归档')
+  }
+
+  const selectedQuickBindingCharacter = activeCharacters.find((character) => character.id === quickBindingCharacterId)
+
+  const ensureQuickBindingReady = () => {
+    if (!referenceAssetId) {
+      showToast('当前没有待绑定资产', 'error')
+      return null
+    }
+    if (!quickBindingCharacterId) {
+      showToast('请先选择角色卡', 'error')
+      return null
+    }
+    return {
+      assetId: referenceAssetId,
+      characterId: quickBindingCharacterId,
+    }
+  }
+
+  const savePendingAssetAsCharacterPrimary = () => {
+    const payload = ensureQuickBindingReady()
+    if (!payload) return
+    void saveContext(
+      setCharacterPrimaryAsset(normalizedContext, payload.characterId, payload.assetId),
+      `已将 ${payload.assetId} 设为角色主图`,
+    )
+  }
+
+  const savePendingAssetAsCharacterReference = () => {
+    const payload = ensureQuickBindingReady()
+    if (!payload) return
+    void saveContext(
+      addCharacterReferenceAsset(normalizedContext, payload.characterId, payload.assetId),
+      `已将 ${payload.assetId} 加入角色参考图`,
+    )
+  }
+
+  const savePendingAssetAsProjectReference = () => {
+    const payload = ensureQuickBindingReady()
+    if (!payload) return
+    setReferenceDraft({
+      assetId: payload.assetId,
+      purpose: 'character',
+      label: referenceDraft.label || payload.assetId,
+      characterId: payload.characterId,
+      weight: referenceDraft.weight || '1',
+      notes: referenceDraft.notes,
+    })
+    setActiveTab('references')
+    void saveContext(
+      upsertCharacterProjectReference(normalizedContext, payload.characterId, payload.assetId),
+      `已将 ${payload.assetId} 保存为项目参考图`,
+    )
   }
 
   const handleRecipeSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -604,6 +670,95 @@ export default function ProjectContextModal() {
                 <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
                   正在刷新，当前内容会保留到新结果返回。
                 </div>
+              )}
+              {referenceAssetId && (
+                <section className="mb-4 rounded-lg border border-blue-200/80 bg-blue-50/70 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-blue-900 dark:text-blue-100">待绑定资产</div>
+                      <div className="mt-1 text-[11px] text-blue-700 dark:text-blue-200">
+                        从资产库带入，无需手填 asset_id。
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-blue-200 bg-white/80 px-2 py-1 text-[10px] text-blue-700 dark:border-blue-400/20 dark:bg-blue-950/40 dark:text-blue-200">
+                      快捷绑定
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[120px_minmax(0,1fr)]">
+                    <div className="max-w-[120px]">
+                      <AssetThumb assetId={referenceAssetId} baseUrl={baseUrl} label="待绑定" />
+                    </div>
+                    <div className="min-w-0 space-y-3">
+                      <div className="rounded-lg border border-blue-200/70 bg-white/70 px-3 py-2 text-xs text-blue-900 dark:border-blue-400/20 dark:bg-blue-950/30 dark:text-blue-100">
+                        <div className="text-[10px] uppercase text-blue-500/80 dark:text-blue-300/80">asset_id</div>
+                        <div className="mt-1 break-all">{referenceAssetId}</div>
+                      </div>
+                      {activeCharacters.length === 0 ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                          还没有可绑定的角色卡。请先新建角色卡，再把这张图设为主图、角色参考图或项目参考图。
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('characters')}
+                              className="inline-flex h-8 items-center rounded-lg border border-amber-300 bg-white px-2.5 text-[11px] font-medium text-amber-800 transition hover:border-amber-400 dark:border-amber-400/30 dark:bg-amber-950/30 dark:text-amber-100"
+                            >
+                              去新建角色卡
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                            <Field label="绑定角色">
+                              <select
+                                value={quickBindingCharacterId}
+                                onChange={(event) => setQuickBindingCharacterId(event.target.value)}
+                                className={inputClass}
+                              >
+                                {activeCharacters.map((character) => (
+                                  <option key={character.id} value={character.id}>
+                                    {character.name || character.id}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                            <div className="rounded-lg border border-gray-200/70 bg-white/70 px-3 py-2 text-[11px] text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
+                              {selectedQuickBindingCharacter?.primary_asset_id
+                                ? `当前主图：${selectedQuickBindingCharacter.primary_asset_id}`
+                                : '当前主图：未设置'}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={savePendingAssetAsCharacterPrimary}
+                              disabled={saving}
+                              className="inline-flex h-9 items-center rounded-lg bg-blue-500 px-3 text-xs font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              设为主图
+                            </button>
+                            <button
+                              type="button"
+                              onClick={savePendingAssetAsCharacterReference}
+                              disabled={saving}
+                              className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
+                            >
+                              加入参考图
+                            </button>
+                            <button
+                              type="button"
+                              onClick={savePendingAssetAsProjectReference}
+                              disabled={saving}
+                              className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200"
+                            >
+                              保存为项目参考图
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </section>
               )}
 
               {activeTab === 'characters' && (
