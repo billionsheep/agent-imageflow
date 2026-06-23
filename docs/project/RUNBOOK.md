@@ -1673,6 +1673,41 @@ OPENAI_COMPATIBLE_TOTAL_TIMEOUT_SECONDS=300
 - 返回图片会在服务端规范化为 PNG，再进入现有 asset processor / storage / delivery。
 - 自动化验证使用本地 HTTP mock，不会触发真实外部 API。真实 smoke 需要用户自行配置密钥，并自行承担 provider 成本。
 
+### Reference image 1 图 canary checklist
+
+仅在用户明确确认费用和使用真实 provider 后执行。默认 CI、mock smoke、Web browser smoke 都不要跑真实 provider。
+
+目标：验证固定角色参考图真的进入 openai-compatible `/images/edits` 链路，而不是绕过参考图后纯文生图成功。
+
+前置条件：
+
+- 服务器已部署包含 `fix: set edit multipart image content types` 的镜像或 commit。
+- `.env.prod` 中的真实 provider key 只保存在服务器环境变量，不写入仓库、MCP 配置、截图或聊天。
+- 使用一个独立 test project/campaign/session/batch，避免污染正式批次。
+- 准备 1-3 张同 project 的角色主图/参考图 asset，并在 Project Context 中绑定到角色。
+
+执行验收只记录这些非敏感证据：
+
+- task id / asset id / project id / campaign id / session id / batch id。
+- provider 和 model 名称。
+- task/asset metadata 中 `reference_asset_count > 0`。
+- `provider_reference_participation` 为 `resolved_input_files` 或等价成功状态。
+- task 使用 edits/reference 路径；如果失败，错误需要说明“参考图未参与生成”和 MIME/content-type。
+- thumbnail/original/metadata delivery URL 返回 200。
+- Web Project Context 能看到角色主图/参考图缩略图；Recent Assets 能看到生成资产。
+
+禁止记录：
+
+- provider key、project API key、Basic Auth、Admin cookie、session token、cleanup token。
+- 本地绝对文件路径。
+- 真实 provider 响应中的敏感 header。
+
+如果 canary 失败：
+
+- 不要自动重试多张图。
+- 先保存非敏感 task/attempt error、metadata 摘要和 provider/model。
+- 检查 multipart image/mask part 是否有正确 `Content-Type`，以及任务 metadata 是否显示参考图已解析。
+
 ## fal.ai provider
 
 服务端 Worker 当前也支持：

@@ -23,8 +23,8 @@ export function buildStorageCleanupExecuteInput(dryRunToken: string): AgentImage
 export function maskStorageCleanupToken(token: string): string {
   const trimmed = token.trim()
   if (!trimmed) return '未生成'
-  if (trimmed.length <= 8) return `${trimmed}...`
-  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`
+  if (trimmed.length <= 8) return `已隐藏（${trimmed.length} 位）`
+  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`
 }
 
 export function formatStorageCleanupError(error: unknown): string {

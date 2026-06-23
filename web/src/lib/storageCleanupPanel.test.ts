@@ -32,8 +32,8 @@ describe('storage cleanup panel helpers', () => {
   })
 
   it('masks dry-run tokens instead of exposing the full token', () => {
-    expect(maskStorageCleanupToken('cleanup_1234567890abcdef')).toBe('cleanup_...cdef')
-    expect(maskStorageCleanupToken('short')).toBe('short...')
+    expect(maskStorageCleanupToken('cleanup_1234567890abcdef')).toBe('clea...cdef')
+    expect(maskStorageCleanupToken('short')).toBe('已隐藏（5 位）')
     expect(maskStorageCleanupToken('')).toBe('未生成')
   })
 
