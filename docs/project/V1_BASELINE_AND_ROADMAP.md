@@ -56,6 +56,7 @@ V1 不做：
 
 1. 服务器/NAS 部署复验
    - 使用 `docs/project/SERVER_DEPLOYMENT_GUIDE.md`。
+   - 当前已新增 `issues/next-phase-p1-server-deployment-rehearsal.csv` 和 `docs/project/stories/slice-053-server-deployment-rehearsal.md` 作为演练入口。
    - 验证 GHCR private package 拉取权限。
    - 准备服务器 `.env.prod`，不要提交或打印。
    - 推荐 `PUBLIC_BASE_URL` 指向 Web/HTTPS origin；Web 镜像可代理 `/api/*` 与 `/healthz` 到内部 API。
@@ -110,6 +111,12 @@ V1 不做：
 ```text
 issues/next-phase-p1-server-deployment-rehearsal.csv
 ```
+
+当前状态：
+
+- CSV 与 `docs/project/stories/slice-053-server-deployment-rehearsal.md` 已新增。
+- `docs/project/SERVER_DEPLOYMENT_GUIDE.md` 已补部署演练证据模板。
+- 本地发布材料仍通过静态检查；真实服务器/NAS 上的 GHCR pull、HTTPS、Admin/mock/MCP smoke、备份恢复和回滚待执行。
 
 目标：
 

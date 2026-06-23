@@ -520,6 +520,15 @@ imageflow.example.com {
 
 如果要把任务交给新线程或服务器运维执行，优先使用独立交接文档：`docs/project/SERVER_DEPLOYMENT_GUIDE.md`。
 
+当前 V1 后的部署演练入口是：
+
+```text
+issues/next-phase-p1-server-deployment-rehearsal.csv
+docs/project/stories/slice-053-server-deployment-rehearsal.md
+```
+
+本轮已准备部署演练工单和证据模板；真实服务器/NAS 上线仍需在目标环境执行。默认先跑 mock smoke，不运行真实 provider；如果需要 1 图真实 provider canary，必须先单独确认费用、provider、scope 和停止条件。演练证据只记录 `IMAGE_TAG`、服务状态、health/Web/Admin/mock/MCP/备份/回滚结果，不记录 `.env.prod`、GHCR token、provider key、project key、Basic/Auth/Admin cookie 或 session。
+
 默认镜像：
 
 ```text

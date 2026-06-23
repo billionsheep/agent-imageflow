@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-23: V1 稳定性以服务器/NAS 演练证据作为验收门槛
+
+- Decision: 新增 `issues/next-phase-p1-server-deployment-rehearsal.csv` 和 `docs/project/stories/slice-053-server-deployment-rehearsal.md`，把服务器/NAS 部署演练作为 V1 baseline 之后的第一优先验收门槛。只有完成真实目标环境中的 GHCR pull、prod compose first boot、HTTPS 同源入口、Admin/Web mock task、MCP smoke、Postgres + storage 备份恢复和 `IMAGE_TAG` 回滚后，才把 V1 视为适合长期自托管运行。
+- Reason: `slice-052` 已证明发布流水线和生产 compose 存在，但“部署文件存在”不等于“目标服务器可恢复、可回滚、可连续运行”。V1 当前最主要风险是运维可靠性，而不是缺新功能。
+- Impact: 后续默认先执行 server deployment rehearsal，再进入 pet account real workflow trial。演练默认只跑 mock，不运行真实 provider；1 图真实 provider canary 必须另行确认费用。演练证据只能记录非敏感状态、task/asset id、服务健康和回滚结果，不记录 `.env.prod`、GHCR token、provider key、project key、Basic/Auth/Admin cookie 或 session。
+
 ## 2026-06-22: Cleanup REST 采用 Admin session only
 
 - Decision: `storage-cleanup-preview` 和 `storage-cleanup-execute` 第一版只允许 Admin session 访问；即使实例开启 Basic Auth，或请求带有 Project API Key，也不能把它们当作清理/重置权限使用。CLI 仍作为本机/服务器运维入口，MCP 不新增 destructive tools。
