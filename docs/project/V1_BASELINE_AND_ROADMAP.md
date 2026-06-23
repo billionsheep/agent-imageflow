@@ -76,7 +76,8 @@ V1 不做：
    - 后端已支持把 campaign input-files 提升为正式 project reference asset。
    - 已支持角色主图/参考图字段、任务自动带参考资产、provider 参考参与 metadata 和参考图失败诊断。
    - Web 角色卡已显示主图/参考图缩略图和缺图警告。
-   - 下一步补“从当前资产设为角色主图/参考图”的快捷动作、mock pet consistency smoke 和人工确认后的 1 图真实参考 canary。
+   - 从资产卡打开 Project Context 时，已可把当前 asset 设为角色主图、加入角色参考图，或保存为项目参考图。
+   - 下一步补完整 mock pet consistency smoke、browser smoke 和人工确认后的 1 图真实参考 canary。
 
 5. Web Review Feedback and Stability
    - Web 前端和 tests 范围已完成：Select / Reject 后卡片、scene header、coverage count 和按钮状态会局部变化。
@@ -85,8 +86,9 @@ V1 不做：
 
 6. Safe Delete and Trial Reset
    - CLI + Admin-only REST foundation 已完成：cleanup preview/execute 可按 asset/task/session/batch/story/campaign 定位候选。
+   - Web Scope 管理已提供当前 campaign 的数据清理入口，可 preview/execute，并要求确认短语。
    - 继续要求 dry-run token 或显式确认，保护 selected/published/approved 并写 audit。
-   - 下一步补 Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign。
+   - 下一步补单 asset restore/soft delete、task/input-file reset、完整 browser smoke 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign。
 
 7. 发布版本策略确认
    - 当前 `main` 和 `sha-<commit>` 镜像可用。
@@ -176,13 +178,13 @@ issues/next-phase-p1-character-reference-intake-consistency.csv
 - 后端已支持 input-file promote 为正式 reference asset，并写入 asset/version/thumbnail/metadata。
 - Character Profile 已支持 `primary_asset_id`、`reference_asset_ids`、`reference_policy` 和 `appearance_lock_notes`。
 - CreateTask 使用 `character_ids` 与 `use_project_visual_context=true` 时可自动展开角色参考资产，并在 task/asset metadata 中记录参考参与诊断。
-- Web Project Context 角色卡已展示主图/参考图缩略图和缺图警告。
+- Web Project Context 角色卡已展示主图/参考图缩略图和缺图警告；从资产卡带 `asset_id` 打开时，已提供“设为主图 / 加入参考图 / 保存为项目参考图”的快捷绑定区。
 
 剩余目标：
 
-- 补“从当前资产设为角色主图/参考图”的快捷动作，减少手填 asset_id。
 - 跑完整 mock pet character consistency smoke。
 - 在人工确认费用后跑 1 图真实参考 canary；失败时明确告诉用户参考图没有参与生成。
+- 补完整 browser smoke，确认角色缩略图、快捷绑定、参考参与 metadata 和 Web 状态展示不断链。
 - 验收分三层：平台链路成功、参考图参与成功、角色一致性人工判断通过。
 - 暂不做通用 DAM、模板市场、AI 自动视觉质检、provider key 下发或大规模真实 provider benchmark。
 
@@ -215,12 +217,13 @@ issues/next-phase-p1-safe-delete-and-trial-reset.csv
 
 - CLI `vag storage cleanup-preview/execute` 已支持 `--asset-id`、`--task-id`、`--session-id`、`--batch-id`、`--story-id` 和 `--deprecated`。
 - Admin-only REST `storage-cleanup-preview/execute` 已接入，必须使用 Admin session；Project API Key 和 Basic Auth 不授予清理权限。
+- Web `ScopeManagerModal` 已提供当前 campaign 的数据清理面板，支持 cleanup preview/execute，展示候选统计、保护计数和脱敏 dry-run token，execute 前必须输入确认短语。
 - 清理继续复用 dry-run token / confirm、selected/published/approved 保护和 audit；MCP 不开放 destructive tools。
 
 剩余目标：
 
-- Web 提供当前 scope 的数据管理入口；CLI 提供可复制的本地/服务器运维命令。
 - 补单 asset restore/soft delete、task/input-file 级 reset 和生产备份演练。
+- 补完整 browser smoke 和 RUNBOOK 运维命令整理，确认 Web 清理入口、CLI/REST foundation、审计和备份策略一致。
 - 不做通用 DAM、回收站复杂权限、多用户审批流、MCP 大范围 destructive tool 或绕过备份的生产清库。
 
 ### P1 Product: Settings Information Architecture

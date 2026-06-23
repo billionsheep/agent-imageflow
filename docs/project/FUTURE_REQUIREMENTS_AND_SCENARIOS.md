@@ -13,9 +13,9 @@
 - Deployment Release Pipeline 已完成：GitHub Actions 构建 GHCR 私有 API/Web 镜像，服务器使用生产 compose 拉取镜像运行。
 - Web Console Auth Gate / Localization / Product Fit 已完成：Web 未登录时只显示 Admin 登录页，登录后进入服务器托管控制台；Help/About 和主路径 UI 已收敛为 Agent ImageFlow 中文控制台。设置页信息架构仍建议后续独立设计。
 - MCP Service Pack 已部分完成：接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地；实际 MCP mock smoke evidence 仍需回填。
-- Character Reference Intake and Consistency 已完成 foundation：后端支持 input-file 提升为 reference asset、角色主图/参考图字段、任务自动带参考和 provider 参考参与诊断；Web 角色卡已显示缩略图和缺图警告。剩余是绑定快捷动作、mock pet consistency smoke 和人工真实参考 canary。
+- Character Reference Intake and Consistency 已完成 foundation：后端支持 input-file 提升为 reference asset、角色主图/参考图字段、任务自动带参考和 provider 参考参与诊断；Web 角色卡已显示缩略图和缺图警告，资产卡快捷绑定已可把当前 asset 设为角色主图、加入参考图或保存为项目参考图。剩余是 mock pet consistency smoke、browser smoke 和人工真实参考 canary。
 - Web Review Feedback and Stability 已完成 Web 前端与 tests 范围：Select/Reject 现在有 pending、optimistic status/style、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃和 429 友好提示；仍建议补一次 browser smoke evidence。
-- Safe Delete and Trial Reset 已完成 CLI + Admin-only REST foundation：支持 cleanup preview/execute 按 asset/task/session/batch/story/campaign 定位候选，继续保护 selected/published/approved 并写 audit；剩余 Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练。MCP 不开放 workspace/project/campaign 硬删除。
+- Safe Delete and Trial Reset 已完成 CLI + Admin-only REST foundation 和 Web 当前 campaign 清理入口：支持 cleanup preview/execute 按 asset/task/session/batch/story/campaign 定位候选，继续保护 selected/published/approved 并写 audit；剩余单 asset restore/soft delete、task/input-file reset、browser smoke 和生产备份演练。MCP 不开放 workspace/project/campaign 硬删除。
 
 V1 之后的剩余任务和未来方向以 `docs/project/V1_BASELINE_AND_ROADMAP.md` 为准。本文保留早期场景记录用于溯源。
 

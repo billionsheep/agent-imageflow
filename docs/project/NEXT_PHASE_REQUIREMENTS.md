@@ -11,8 +11,8 @@ Current note 2026-06-22: 本文档中的 P0/P1 visibility、资产库、Scope Da
 1. Server Deployment Rehearsal：真实服务器/NAS 拉取 GHCR 镜像、配置 HTTPS 反代、跑 mock smoke、演练备份和回滚。
 2. Pet Account Real Workflow Trial：低并发真实 provider 小批量跑萌宠账号业务流，观察 agent 调用和 Web 审图摩擦。
 3. MCP Service Pack smoke：文档和示例已落地，下一步只需回填 tools/list、mock create task、get task、delivery info evidence。
-4. Character Reference Intake 剩余项：补“从当前资产设为角色主图/参考图”的快捷动作、mock pet consistency smoke 和人工确认后的 1 图真实参考 canary。
-5. Safe Delete 产品化：在 CLI + Admin-only REST foundation 上补 Web 数据管理入口、单 asset restore/soft delete、task/input-file reset 和生产备份演练。
+4. Character Reference Intake 剩余项：资产卡快捷绑定和 OpenAI-compatible MIME 修复已完成；下一步补 mock pet consistency smoke、browser smoke 和人工确认后的 1 图真实参考 canary。
+5. Safe Delete 产品化：CLI + Admin-only REST foundation 和 Web 当前 campaign 清理入口已完成；下一步补单 asset restore/soft delete、task/input-file reset、browser smoke 和生产备份演练。
 6. Settings Information Architecture：重新设计设置页分组和凭据语义展示，先出方案再实现。
 7. Usage Tracking and Edit Lineage：记录资产被哪些内容使用，以及 regenerate/edit lineage。
 8. Export Pack ZIP and Multi Select：在 JSON manifest 稳定后补小批量 selected assets ZIP。
