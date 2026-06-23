@@ -2,7 +2,7 @@
 
 ## Todo
 
-- [ ] V1 服务器/NAS 部署演练：已新增 `issues/next-phase-p1-server-deployment-rehearsal.csv` 和 `docs/project/stories/slice-053-server-deployment-rehearsal.md` 作为执行入口；真实服务器上仍需按 `docs/project/SERVER_DEPLOYMENT_GUIDE.md` 准备 `.env.prod`、GHCR read token、HTTPS 反代、Postgres/storage 备份，跑 health/Web/Admin/mock task/MCP tools-list smoke，并演练 `IMAGE_TAG` 回滚。
+- [ ] V1 服务器/NAS 部署演练剩余项：Volcengine 旧服务已完成 `main` 镜像更新、升级前 Postgres/storage/env/compose 备份、临时 HTTP health/Web smoke、MCP `tools/list` 和 mock benchmark smoke；仍需补 HTTPS/Caddy 正式同源入口、浏览器 Admin Recent Assets / delivery smoke、restore 演练和 `IMAGE_TAG` 回滚演练。
 - [ ] V1 真实试用观察：用低并发真实 provider 小批量跑萌宠账号工作流，记录 Web 审图、Project Context、Production View、manifest/NAS 交付中的具体摩擦；默认不做 benchmark。
 - [ ] 版本 tag 决策：当前先把 `main` 作为 V1 baseline 推送；是否创建 `v0.1.0` tag 触发正式 tag 镜像，需要单独确认。
 - [ ] 生成后续独立 CSV：`next-phase-p1-server-deployment-rehearsal.csv`、`next-phase-p1-mcp-service-pack.csv`、`next-phase-p1-character-reference-intake-consistency.csv`、`next-phase-p1-web-review-feedback-stability.csv` 和 `next-phase-p1-safe-delete-and-trial-reset.csv` 已存在；后续仍可按需创建 `next-phase-p1-pet-account-real-workflow-trial.csv`、`next-phase-p1-settings-information-architecture.csv`、`next-phase-p2-usage-lineage.csv`、`next-phase-p2-export-pack-zip.csv`、`next-phase-p2-deployment-secret-hardening.csv`。
@@ -15,7 +15,7 @@
 
 ## Doing
 
-- [ ] P1 Server Deployment Rehearsal：准备包已完成，等待真实服务器/NAS 执行 GHCR pull、HTTPS 同源入口、Admin/Web mock smoke、MCP smoke、备份恢复和 `IMAGE_TAG` 回滚。
+- [ ] P1 Server Deployment Rehearsal：Volcengine 旧服务已更新到 GHCR `main` 新镜像，临时 HTTP 入口和 mock 链路已通过；继续补正式 HTTPS 同源入口、浏览器 Admin/delivery smoke、备份恢复和 `IMAGE_TAG` 回滚。
 
 ## Done
 

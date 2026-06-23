@@ -57,11 +57,11 @@ V1 不做：
 1. 服务器/NAS 部署复验
    - 使用 `docs/project/SERVER_DEPLOYMENT_GUIDE.md`。
    - 当前已新增 `issues/next-phase-p1-server-deployment-rehearsal.csv` 和 `docs/project/stories/slice-053-server-deployment-rehearsal.md` 作为演练入口。
-   - 验证 GHCR private package 拉取权限。
+   - Volcengine 旧服务已完成 GHCR `main` 更新、升级前备份、临时 HTTP health/Web、MCP `tools/list` 和 mock benchmark smoke。
    - 准备服务器 `.env.prod`，不要提交或打印。
    - 推荐 `PUBLIC_BASE_URL` 指向 Web/HTTPS origin；Web 镜像可代理 `/api/*` 与 `/healthz` 到内部 API。
-   - 跑 healthz、Web、Admin、Recent Assets 缩略图、mock task、MCP `tools/list` smoke。
-   - 演练一次 `IMAGE_TAG` 更新和回滚。
+   - 继续补 HTTPS/Caddy 正式同源入口、浏览器 Admin、Recent Assets 缩略图、original/metadata delivery smoke。
+   - 演练一次 restore 和 `IMAGE_TAG` 回滚。
 
 2. 真实试用观察
    - 用低并发真实 provider 跑小批量萌宠故事图。
@@ -116,7 +116,7 @@ issues/next-phase-p1-server-deployment-rehearsal.csv
 
 - CSV 与 `docs/project/stories/slice-053-server-deployment-rehearsal.md` 已新增。
 - `docs/project/SERVER_DEPLOYMENT_GUIDE.md` 已补部署演练证据模板。
-- 本地发布材料仍通过静态检查；真实服务器/NAS 上的 GHCR pull、HTTPS、Admin/mock/MCP smoke、备份恢复和回滚待执行。
+- 本地发布材料仍通过静态检查；Volcengine 旧服务已完成 `main` 更新、升级前备份、临时 HTTP health/Web、MCP `tools/list` 和 mock benchmark smoke；HTTPS/Caddy 正式入口、浏览器 Admin delivery smoke、restore 和回滚仍待执行。
 
 目标：
 
