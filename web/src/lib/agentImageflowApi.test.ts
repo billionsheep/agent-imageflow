@@ -39,6 +39,8 @@ import {
   normalizeAgentImageflowApiBaseUrl,
   resolveAgentImageflowDeliveryUrl,
   getAgentImageflowBatchManifest,
+  executeAgentImageflowStorageCleanup,
+  previewAgentImageflowStorageCleanup,
   regenerateAgentImageflowSceneTask,
 } from './agentImageflowApi'
 
@@ -462,6 +464,117 @@ describe('agentImageflowApi', () => {
       headers: {
         'X-API-Key': 'project-secret',
       },
+    })
+  })
+
+  it('posts cleanup preview and execute payloads to the admin-only cleanup endpoints', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        generated_at: '2026-06-23T00:00:00Z',
+        dry_run: true,
+        dry_run_token: 'cleanup_1234567890abcdef',
+        scope: {},
+        summary: {
+          candidate_count: 2,
+          file_count: 6,
+          bytes: 4096,
+          by_reason: {
+            rejected_asset: 1,
+            orphan_file: 1,
+          },
+        },
+        candidates: [],
+        protected: {
+          selected_asset_count: 1,
+          published_asset_count: 1,
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        generated_at: '2026-06-23T00:00:01Z',
+        dry_run: false,
+        executed: true,
+        dry_run_token: 'cleanup_1234567890abcdef',
+        scope: {},
+        summary: {
+          candidate_count: 2,
+          deleted_candidate_count: 2,
+          skipped_candidate_count: 0,
+          failed_candidate_count: 0,
+          file_count: 6,
+          deleted_file_count: 6,
+          bytes: 4096,
+          deleted_bytes: 4096,
+          by_reason: {
+            rejected_asset: 1,
+            orphan_file: 1,
+          },
+        },
+        results: [],
+        protected: {
+          selected_asset_count: 1,
+          published_asset_count: 1,
+        },
+      }), { status: 200 }))
+
+    const scope = {
+      workspaceId: 'ws_default',
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }
+
+    await previewAgentImageflowStorageCleanup('http://localhost:8081/', scope, {
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+    })
+
+    await executeAgentImageflowStorageCleanup('http://localhost:8081/', scope, {
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+      dry_run_token: 'cleanup_1234567890abcdef',
+      execute: true,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [previewUrl, previewInit] = fetchMock.mock.calls[0]
+    expect(previewUrl).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-preview')
+    expect(previewInit).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    expect(JSON.parse(String(previewInit?.body))).toEqual({
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+    })
+
+    const [executeUrl, executeInit] = fetchMock.mock.calls[1]
+    expect(executeUrl).toBe('http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/campaigns/cmp_7day_cover/storage-cleanup-execute')
+    expect(executeInit).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    expect(JSON.parse(String(executeInit?.body))).toEqual({
+      include_rejected: true,
+      include_generated: true,
+      include_deprecated: true,
+      include_failed_task_tmp: true,
+      include_orphans: true,
+      dry_run_token: 'cleanup_1234567890abcdef',
+      execute: true,
     })
   })
 })

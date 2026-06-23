@@ -9,6 +9,7 @@
 - [ ] P1 MCP Service Pack：按 `issues/next-phase-p1-mcp-service-pack.csv` 为新 agent 接入 MCP 生图准备服务包；文档和示例已落地，已完成 JSON parse 与静态检查，并已补删除边界说明；人工 MCP mock smoke 仍待执行后再标 done；只做 mock smoke，不写入真实 provider key，不需要 Admin cookie。
 - [ ] P1 Character Reference Intake and Consistency 剩余验收：后端 input-file promote、character primary/reference asset binding、CreateTask 自动参考展开、provider reference participation diagnostics、Web 角色卡缩略图/缺图提示，以及从资产库打开 `Project Context` 时的角色快捷绑定区均已完成；仍需跑完整 mock pet character consistency smoke，并在人工确认费用后再考虑 1 图真实参考图 canary。
 - [x] P1 Web Review Feedback and Stability：已完成 Web 前端与测试范围内的 follow-up；`ServerAssetLibrary` 与 `ProductionViewModal` 已补 per-asset pending、optimistic status update、失败回滚、局部 counts 更新、旧内容保留、请求去重/旧响应丢弃与 429 友好提示；同步补 `reviewFeedback` tests，不改 Go 后端，也不触碰未完成的角色图片绑定切片。
+- [x] 完成 P1 Safe Delete and Trial Reset 的 Web 数据清理入口（Task 2）：`ScopeManagerModal` 已新增当前 campaign 的数据清理面板，复用 Admin-only REST `storage-cleanup-preview/execute`，展示 candidate/file/bytes/by_reason/protected 摘要和截断 dry-run token；execute 需要输入“清理当前空间”，未 preview 不可执行，并对 401/403/429 给出可理解提示。验证：`npm --prefix web test -- --run` 23 files / 258 tests 通过，`npm --prefix web run build` 通过且仅有既有 chunk warning；未运行真实 provider，未读取或打印 key/secret/cookie/session。
 - [ ] P1 Safe Delete and Trial Reset 剩余产品化：CLI/REST cleanup preview/execute 基础已完成，Web Scope 管理也已补当前 campaign 的数据清理 preview/execute 入口、确认短语和 401/403/429 友好提示；仍需单 asset restore/soft delete 体验、task/input-file 级 reset 与浏览器 smoke。
 - [ ] 嵌入式架构图只按图片资产流继续试用；若需要 Mermaid/D2/SVG 可编辑源，再单独确认 Diagram source track。
 

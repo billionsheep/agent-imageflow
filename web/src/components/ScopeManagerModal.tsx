@@ -8,6 +8,7 @@ import {
   deleteAgentImageflowCampaign,
   deleteAgentImageflowProject,
   deleteAgentImageflowWorkspace,
+  executeAgentImageflowStorageCleanup,
   listAgentImageflowCampaigns,
   listAgentImageflowAssets,
   listAgentImageflowProjects,
@@ -15,18 +16,28 @@ import {
   getAgentImageflowStorageIntegrity,
   listAgentImageflowWorkspaces,
   normalizeAgentImageflowApiBaseUrl,
+  previewAgentImageflowStorageCleanup,
   updateAgentImageflowCampaign,
   updateAgentImageflowProject,
   updateAgentImageflowWorkspace,
   type AgentImageflowAuth,
   type AgentImageflowAssetResponse,
   type AgentImageflowCampaign,
+  type AgentImageflowCleanupDryRunReport,
+  type AgentImageflowCleanupExecutionReport,
   type AgentImageflowProject,
   type AgentImageflowStorageGovernanceCountSnapshot,
   type AgentImageflowStorageIntegrityResponse,
   type AgentImageflowStorageUsageSnapshot,
   type AgentImageflowWorkspace,
 } from '../lib/agentImageflowApi'
+import {
+  STORAGE_CLEANUP_CONFIRM_PHRASE,
+  buildStorageCleanupExecuteInput,
+  buildStorageCleanupPreviewInput,
+  formatStorageCleanupError,
+  maskStorageCleanupToken,
+} from '../lib/storageCleanupPanel'
 import type { AppSettings } from '../types'
 import { ArchiveIcon, CloseIcon, CollectionManageIcon, EditIcon, RefreshIcon, TrashIcon } from './icons'
 
@@ -230,6 +241,15 @@ function renderStatsLine(stats?: ScopeStats): string {
     `storage ${formatBytes(stats.storageBytes)}`,
   ].filter(Boolean)
   return `${parts.join(' · ')} · ${renderStorageBreakdown(stats)} · ${formatLatestActivity(stats.latestActivity)}`
+}
+
+function renderCleanupReasonSummary(byReason: Record<string, number> | undefined): string {
+  if (!byReason) return '暂无候选原因'
+  const entries = Object.entries(byReason)
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+  if (entries.length === 0) return '暂无候选原因'
+  return entries.map(([reason, count]) => `${reason} ${count}`).join(' · ')
 }
 
 function ScopeBadge({ children, tone = 'default' }: { children: string; tone?: 'default' | 'info' | 'warning' }) {
@@ -436,6 +456,7 @@ export default function ScopeManagerModal() {
   const dashboardRequestRef = useRef(0)
   const dashboardTimerRef = useRef<number | null>(null)
   const dashboardCacheRef = useRef<{ key: string; stats: ScopeDashboardStats; error: string | null; createdAt: number } | null>(null)
+  const cleanupRequestRef = useRef(0)
 
   const [loading, setLoading] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -452,6 +473,11 @@ export default function ScopeManagerModal() {
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState('')
   const [projectNameDraft, setProjectNameDraft] = useState('')
   const [campaignNameDraft, setCampaignNameDraft] = useState('')
+  const [cleanupPreview, setCleanupPreview] = useState<AgentImageflowCleanupDryRunReport | null>(null)
+  const [cleanupExecution, setCleanupExecution] = useState<AgentImageflowCleanupExecutionReport | null>(null)
+  const [cleanupConfirmPhrase, setCleanupConfirmPhrase] = useState('')
+  const [cleanupBusy, setCleanupBusy] = useState<'preview' | 'execute' | null>(null)
+  const [cleanupError, setCleanupError] = useState<string | null>(null)
 
   const normalizedSettings = useMemo(() => normalizeSettings(settings), [settings])
   const baseUrl = useMemo(
@@ -668,6 +694,15 @@ export default function ScopeManagerModal() {
   useEffect(() => {
     setCampaignNameDraft(selectedCampaign?.name ?? '')
   }, [selectedCampaign?.name, selectedCampaign?.campaign_id])
+
+  useEffect(() => {
+    cleanupRequestRef.current += 1
+    setCleanupPreview(null)
+    setCleanupExecution(null)
+    setCleanupConfirmPhrase('')
+    setCleanupBusy(null)
+    setCleanupError(null)
+  }, [selectedWorkspaceId, selectedProjectId, selectedCampaignId])
 
   const reloadHierarchy = useCallback(async (
     preferredWorkspaceId?: string,
@@ -980,6 +1015,86 @@ export default function ScopeManagerModal() {
     })
   }
 
+  const campaignScope = selectedWorkspace && selectedProject && selectedCampaign
+    ? {
+      workspaceId: selectedWorkspace.workspace_id,
+      projectId: selectedProject.project_id,
+      campaignId: selectedCampaign.campaign_id,
+    }
+    : null
+
+  const selectedCampaignStats = selectedCampaign
+    ? dashboardStats.campaigns[getCampaignKey(selectedCampaign.project_id, selectedCampaign.campaign_id)]
+    : undefined
+
+  const executePhraseMatched = cleanupConfirmPhrase.trim() === STORAGE_CLEANUP_CONFIRM_PHRASE
+
+  const runCleanupPreview = () => {
+    if (!campaignScope) {
+      showToast('请先选择完整的 workspace / project / campaign', 'error')
+      return
+    }
+    const requestId = cleanupRequestRef.current + 1
+    cleanupRequestRef.current = requestId
+    setCleanupBusy('preview')
+    setCleanupError(null)
+    setCleanupExecution(null)
+    void previewAgentImageflowStorageCleanup(baseUrl, campaignScope, buildStorageCleanupPreviewInput(), auth)
+      .then((report) => {
+        if (cleanupRequestRef.current !== requestId) return
+        setCleanupPreview(report)
+        setCleanupConfirmPhrase('')
+        showToast(`已生成清理预览：${report.summary.candidate_count} 个候选`, 'success')
+      })
+      .catch((nextError) => {
+        if (cleanupRequestRef.current !== requestId) return
+        const message = formatStorageCleanupError(nextError)
+        setCleanupError(message)
+        showToast(message, 'error')
+      })
+      .finally(() => {
+        if (cleanupRequestRef.current === requestId) setCleanupBusy(null)
+      })
+  }
+
+  const runCleanupExecute = () => {
+    if (!campaignScope || !cleanupPreview?.dry_run_token) {
+      showToast('请先执行清理预览，再进行正式清理', 'error')
+      return
+    }
+    if (!executePhraseMatched) {
+      showToast(`请输入确认短语「${STORAGE_CLEANUP_CONFIRM_PHRASE}」`, 'error')
+      return
+    }
+    const requestId = cleanupRequestRef.current + 1
+    cleanupRequestRef.current = requestId
+    setCleanupBusy('execute')
+    setCleanupError(null)
+    void executeAgentImageflowStorageCleanup(
+      baseUrl,
+      campaignScope,
+      buildStorageCleanupExecuteInput(cleanupPreview.dry_run_token),
+      auth,
+    )
+      .then(async (report) => {
+        if (cleanupRequestRef.current !== requestId) return
+        setCleanupExecution(report)
+        setCleanupConfirmPhrase('')
+        showToast(`数据清理已执行：删除 ${report.summary.deleted_candidate_count} 个候选 / ${report.summary.deleted_file_count} 个文件`, 'success')
+        dashboardCacheRef.current = null
+        await reloadHierarchy(selectedWorkspaceId, selectedProjectId, selectedCampaignId)
+      })
+      .catch((nextError) => {
+        if (cleanupRequestRef.current !== requestId) return
+        const message = formatStorageCleanupError(nextError)
+        setCleanupError(message)
+        showToast(message, 'error')
+      })
+      .finally(() => {
+        if (cleanupRequestRef.current === requestId) setCleanupBusy(null)
+      })
+  }
+
   if (!open) return null
 
   const currentScopeSummary = normalizedSettings.imageflowWorkspaceId && normalizedSettings.imageflowProjectId && normalizedSettings.imageflowCampaignId
@@ -1155,6 +1270,100 @@ export default function ScopeManagerModal() {
                 busy={Boolean(busyAction)}
                 disabled={!selectedCampaign}
               />
+              <section className="mt-3 rounded-2xl border border-gray-200/80 bg-white/80 px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">数据清理</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                      仅针对当前 campaign 调用 Admin-only cleanup preview/execute。默认保护 selected / published 资产，不展示本地路径或完整 token。
+                    </div>
+                  </div>
+                  {selectedCampaignStats && (
+                    <ScopeBadge tone="info">{`${selectedCampaignStats.assetCount} assets`}</ScopeBadge>
+                  )}
+                </div>
+
+                {!selectedCampaign ? (
+                  <div className="mt-3 rounded-xl border border-dashed border-gray-200 px-3 py-4 text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
+                    请选择一个 campaign 后查看数据清理预览。
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="rounded-xl border border-gray-200/70 bg-gray-50/80 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Dry-run token</div>
+                        <div className="mt-1 break-all text-xs font-medium text-gray-700 dark:text-gray-200">
+                          {maskStorageCleanupToken(cleanupPreview?.dry_run_token ?? cleanupExecution?.dry_run_token ?? '')}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200/70 bg-gray-50/80 px-3 py-2 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Protected</div>
+                        <div className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                          {`${cleanupExecution?.protected.selected_asset_count ?? cleanupPreview?.protected.selected_asset_count ?? 0} selected · ${cleanupExecution?.protected.published_asset_count ?? cleanupPreview?.protected.published_asset_count ?? 0} published`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {cleanupError && (
+                      <div className="mt-3 rounded-xl border border-red-200 bg-red-50/80 px-3 py-2 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200">
+                        {cleanupError}
+                      </div>
+                    )}
+
+                    <div className="mt-3 rounded-xl border border-gray-200/70 bg-gray-50/70 px-3 py-3 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                      <div className="grid grid-cols-1 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-3">
+                        <div>{`候选 ${cleanupExecution?.summary.candidate_count ?? cleanupPreview?.summary.candidate_count ?? 0}`}</div>
+                        <div>{`文件 ${cleanupExecution?.summary.file_count ?? cleanupPreview?.summary.file_count ?? 0}`}</div>
+                        <div>{`体积 ${formatBytes(cleanupExecution?.summary.bytes ?? cleanupPreview?.summary.bytes ?? 0)}`}</div>
+                      </div>
+                      <div className="mt-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                        {`原因分布：${renderCleanupReasonSummary(cleanupExecution?.summary.by_reason ?? cleanupPreview?.summary.by_reason)}`}
+                      </div>
+                      {cleanupExecution && (
+                        <div className="mt-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                          {`已删除 ${cleanupExecution.summary.deleted_candidate_count} 个候选 / ${cleanupExecution.summary.deleted_file_count} 个文件，跳过 ${cleanupExecution.summary.skipped_candidate_count}，失败 ${cleanupExecution.summary.failed_candidate_count}。`}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={runCleanupPreview}
+                        disabled={cleanupBusy !== null}
+                        className="inline-flex h-8 items-center rounded-lg border border-gray-200/70 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-400"
+                      >
+                        {cleanupBusy === 'preview' ? '预览中...' : '预览清理'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={runCleanupExecute}
+                        disabled={cleanupBusy !== null || !cleanupPreview?.dry_run_token || !executePhraseMatched}
+                        className="inline-flex h-8 items-center rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-medium text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-500/40 dark:hover:bg-red-500/15"
+                      >
+                        {cleanupBusy === 'execute' ? '执行中...' : '执行清理'}
+                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="scope-cleanup-confirm">
+                        输入确认短语后才能执行：{STORAGE_CLEANUP_CONFIRM_PHRASE}
+                      </label>
+                      <input
+                        id="scope-cleanup-confirm"
+                        value={cleanupConfirmPhrase}
+                        onChange={(event) => setCleanupConfirmPhrase(event.target.value)}
+                        placeholder={STORAGE_CLEANUP_CONFIRM_PHRASE}
+                        disabled={!cleanupPreview?.dry_run_token || cleanupBusy === 'execute'}
+                        className="mt-1 w-full rounded-lg border border-gray-200/70 bg-white px-2.5 py-2 text-xs text-gray-700 outline-none transition focus:border-red-300 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-red-500/50"
+                      />
+                      <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        未先做 preview 时不会启用 execute；execute 会自动带上 dry-run token 和 `execute=true`。
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
             </div>
           </div>
         </div>
