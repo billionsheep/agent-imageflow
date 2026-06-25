@@ -2,6 +2,8 @@
 
 本文档记录 Agent ImageFlow 当前第一版基线、可验收范围、剩余任务和未来方向。它用于后续部署、试用和新一轮 CSV 拆分，不替代 `TASKS.md` 或 `PROJECT_STATUS_MAP.md`。
 
+当前 V1 baseline 已以 `v0.1.0` tag 推送。后续工作按版本化维护推进：`v0.1.x` 优先修部署、鉴权、Web 体验和运维可靠性；`v0.2.x` 再强化 IP 工作流、Settings 信息架构和真实业务批量生产体验。
+
 ## V1 Baseline
 
 V1 的产品定义：
@@ -28,6 +30,13 @@ V1 已验证的关键真实场景：
 - 萌宠账号图片资产生产最小闭环：项目视觉上下文、prompt recipe、真实 provider、落盘、缩略图、metadata、Recent Assets 和 Production View 已打通。
 - MCP 工具入口真实 provider 1 图 canary：MCP `create_image_task` 已证明不只停留在 mock 路径。
 - 服务器部署路径：`main` 分支 push 后 Docker Publish workflow 已构建并发布 API/Web 镜像。
+
+文档入口已收敛：
+
+- 日常入口：`docs/project/README.md`。
+- CSV 索引：`issues/README.md`。
+- 历史 slice 索引：`docs/project/stories/README.md`。
+- 已完成的 P0/P1/P2 CSV 和 slice 默认不复开，后续新增需求新建独立 CSV 或 story。
 
 ## V1 Scope Boundary
 
