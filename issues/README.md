@@ -6,12 +6,13 @@
 
 - `next-phase-p1-server-deployment-rehearsal.csv`：服务器/NAS 部署演练，当前第一优先。
 - `next-phase-p1-pet-account-real-workflow-trial.csv`：服务器/NAS 或本地低并发萌宠账号真实业务试用，记录角色一致性、场景漂移、Web 审图和 manifest/NAS 交付摩擦。
-- `next-phase-p1-story-continuity-comic-workflow.csv`：Story Bible、Panel Plan、reference roles、Story Review 和连续故事生产工作流。
-- `next-phase-p1-caption-edit-lineage.csv`：基于固定 asset 加字 edit 的派生资产谱系、Web 加字入口和批量 caption 工作流。
+- `next-phase-p1-story-continuity-mvc.csv`：第一优先的连续故事最小闭环，限定为 3 格、无字、顺序生成、人工选图、真实参考图参与；这是下一轮默认执行入口。
 - `next-phase-p1-settings-information-architecture.csv`：待创建，用于 Settings 信息架构重整。
 
 ## Maintenance / Partially Open
 
+- `next-phase-p1-story-continuity-comic-workflow.csv`：上位路线保留；先不要全量开工，待 MVC 通过后再拆 Story Review 等扩展。
+- `next-phase-p1-caption-edit-lineage.csv`：派生资产谱系仍重要；Web 加字入口、批量 caption 和 renderer 预留后置到 Story MVC 之后。
 - `next-phase-p1-runtime-auth-accessibility-lifecycle-closure.csv`：本地验收已完成；部署环境 replay、Basic Auth 复核和服务器证据回填仍待做。
 - `next-phase-p1-character-reference-intake-consistency.csv`：本地 mock + 1 图真实 canary 已完成；部署环境复放和更完整真实业务观察仍待做。
 - `next-phase-p1-safe-delete-and-trial-reset.csv`：单 asset archive/restore 已完成；cleanup panel browser smoke、task/input-file reset 和生产备份演练仍待做。

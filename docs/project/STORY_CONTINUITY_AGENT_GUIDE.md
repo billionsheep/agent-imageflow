@@ -28,16 +28,19 @@ Story Continuity Agent 不应该拥有：
 
 ## 工作流
 
-推荐顺序：
+第一轮推荐顺序采用 **Sequential Previous Panel Mode**，不要并发提交全部分镜：
 
 1. 读取 project 的角色卡、参考图、prompt recipe 和已有 selected assets。
 2. 创建 `story_bible`：固定场景、固定道具、角色关系、画风和禁止变化项。
 3. 创建 `panel_plan`：每格的上一格状态、动作、对白、镜头、必须保留物和允许变化物。
-4. 对每格调用 MCP `create_image_task`，把 `story_bible` 和当前 panel 写入 `metadata_json` 或结构化输入快照。
-5. 等待 `get_image_task` completed，再用 `list_image_assets` 或 Web Production View 审图。
-6. 用 `select_image_asset` 标记每格最终图；错图用 `reject_image_asset`，不要删除。
-7. 如需加字，基于 selected asset 再创建 caption edit task，记录 `derived_from_asset_id` 和 `caption_text`。
-8. 用 `get_asset_delivery_info` 或 batch manifest 交付最终资产。
+4. 创建第一格无字任务，最多 2 个候选，等待人工 `select_image_asset`。
+5. 创建第二格任务时，必须把第一格 selected asset 作为 `previous_panel_reference`。
+6. 创建第三格任务时，必须把第二格 selected asset 作为 `previous_panel_reference`。
+7. 如需重生图，只重生单格，不覆盖旧 task、旧 asset 或其他格 selected 状态。
+8. 第一轮不加字；加字作为 Caption/Edit Lineage 后续切片。
+9. 用 `get_asset_delivery_info` 或 batch manifest 交付最终资产。
+
+轻连续试用可以使用 **Parallel Minimal Props Mode**：两个角色、少量道具、弱背景、问答递进，并发生成。它适合快速产出，但不能证明上一格参考参与，也不能替代强连续验收。
 
 ## Story Bible 最小字段
 
@@ -55,14 +58,36 @@ Story Continuity Agent 不应该拥有：
 
 原则：Story Bible 描述“整组图都必须一致”的东西，不写每格具体动作。
 
+## Story Context V1
+
+第一轮建议把故事上下文统一放进 `story_context_v1`，不要散落在 metadata 根节点：
+
+- `schema_version`
+- `story_id`
+- `story_revision`
+- `story_plan_hash`
+- `generation_mode`: `sequential_previous_panel` 或 `parallel_minimal_props`
+- `story_bible`
+- `panel_plan`
+- `reference_bindings`
+- `resolved_reference_assets`
+- `continuity_policy`
+
+`reference_bindings` 是计划想使用的参考；`resolved_reference_assets` 是平台实际解析到、属于当前 project 且可送入 provider 的资产。只有后者存在，才能把任务称为 reference-assisted continuity。
+
 ## Panel Plan 最小字段
 
 示例见 `examples/mcp/create-panel-plan.json`。第一版建议每格字段：
 
+- `panel_index`
 - `scene_id`
+- `narrative_role`
 - `previous_state`
-- `action`
+- `trigger_event`
+- `visible_action`
+- `resulting_state`
 - `dialogue`
+- `dialogue_intent`
 - `camera`
 - `must_keep_props`
 - `allowed_changes`
@@ -81,7 +106,18 @@ Story Continuity Agent 不应该拥有：
 - `style_reference`：画风参考。
 - `edit_target`：要被编辑的原图，例如加字时的输入 asset。
 
-如果当前 MCP schema 还没有独立 role 字段，可以先把 role 写入 `metadata_json.reference_roles`，并在 prompt 中明确说明。
+如果当前 MCP schema 还没有独立 role 字段，可以先把 role 写入 `story_context_v1.reference_bindings`，并在 prompt 中明确说明。但验收时必须检查 `story_context_v1.resolved_reference_assets`，避免把文字说明误判成真实参考图参与。
+
+## Preflight
+
+创建每格任务前，agent 或平台应确认：
+
+- 角色有真实 reference asset。
+- 环境参考存在，或明确标记为文字约束环境。
+- 所有引用 asset 属于当前 project。
+- provider 支持所需参考图数量。
+- `panel_index > 1` 时，上一格必须已经有 selected asset。
+- 参考图解析失败时，不应静默退化为纯文生图；必须阻止任务或写入降级 warning。
 
 ## 生成策略
 
@@ -120,9 +156,10 @@ Story Continuity Agent 应把失败分清楚：
 
 第一轮只要求：
 
-- 3 格 mock story 能完成。
-- 每格都有 `story_id`、`scene_id`、panel plan 和 reference role 摘要。
+- 3 格无字 story 能顺序完成。
+- 每格都有 `story_context_v1`、`panel_index`、panel plan 和 resolved reference 摘要。
+- 第二格实际引用第一格 selected asset；第三格实际引用第二格 selected asset。
 - Web 能按 story/scene 审图并 select/reject。
 - manifest 或 delivery info 能拿到最终图。
 
-真实 provider 只做人工确认后的低频 canary，不做 benchmark。
+Mock 只验证数据链路，不证明视觉连续性。真实 provider 只做人工确认后的低频 canary：provider cap=1，每格最多 2 个候选，总量上限 8 张，不做 benchmark。

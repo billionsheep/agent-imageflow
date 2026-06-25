@@ -361,3 +361,9 @@
 - Decision: 下一阶段不把 Agent ImageFlow 扩展成漫画编辑器或小红书运营系统；平台只增加 Story Bible、Panel Plan、reference roles、Story Review 和 caption/edit lineage 等资产生产上下文能力。连续叙事、分镜、上下文补全、reference choices 和重试策略由额外的 Story Continuity Agent 负责。
 - Reason: 真实试用证明“固定 asset 加字 edit”链路已通，但多张图缺少连续性，根因是生产单位从一开始就是多次单图任务，而不是一个带固定场景、固定道具、上一格状态和因果对白的 story plan。让平台承担完整创作脑会把项目拖向通用漫画/设计平台；由 agent 生成结构化计划，平台保存和执行资产任务，更符合当前产品定位。
 - Impact: 新增 `issues/next-phase-p1-story-continuity-comic-workflow.csv`、`issues/next-phase-p1-caption-edit-lineage.csv`、`docs/project/STORY_CONTINUITY_AGENT_GUIDE.md` 和 `examples/mcp/` 下 story continuity 示例。第一版优先复用 metadata，不新增 destructive MCP tools，不给 agent provider key/Admin cookie/删除权限。真实 provider 仍只做低频 canary，不做大 benchmark。
+
+## 2026-06-25: Story Continuity 第一实施切片收敛为 3 格无字顺序 MVC
+
+- Decision: 外部评审后，Story Continuity 第一轮不执行原大范围 CSV，而是新增 `issues/next-phase-p1-story-continuity-mvc.csv`：3 格、无字、顺序生成、人工选图、真实参考图参与。第一轮只做 `story_context_v1`、panel 因果字段、reference_bindings/resolved_reference_assets 分离、sequential preflight、Production View 最小展示、manifest 摘要、mock 数据链路 smoke 和 cap=1 的真实 provider 小样本 canary。
+- Reason: 原 Story Continuity、Caption Lineage 和 Pet Trial 计划交叉且过大；mock smoke 只能验证数据链路，不能证明视觉连续性；Story Review 新页面、Web 加字入口、批量 caption、ZIP 和自动视觉质检会把第一轮拖成漫画编辑器/交付系统。把第一轮压成 3 格无字顺序生成，可以最快验证“上一格 selected asset 参与”是否真的提升连续性。
+- Impact: `issues/next-phase-p1-story-continuity-comic-workflow.csv` 保留为上位路线；`issues/next-phase-p1-caption-edit-lineage.csv` 保留但 Web 加字和批量 caption 后置；新增 `examples/mcp/create-story-context-v1.json` 和 `docs/project/STORY_CONTINUITY_MVC_HANDOFF_PROMPT.md`。真实 provider 首轮总图量上限为 8 张，provider cap=1；MCP 仍不新增 destructive tools。

@@ -4,7 +4,7 @@
 
 当前 V1 baseline 已以 `v0.1.0` tag 推送。后续工作按版本化维护推进：`v0.1.x` 优先修部署、鉴权、Web 体验和运维可靠性；`v0.2.x` 再强化 IP 工作流、Settings 信息架构和真实业务批量生产体验。
 
-2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Review、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。
+2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Review、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。外部评审后已修订第一执行切片：先做 `issues/next-phase-p1-story-continuity-mvc.csv`，限定为 3 格、无字、顺序生成、人工选图、真实参考图参与；原 Story / Caption 大计划后置。
 
 ## V1 Baseline
 
@@ -81,15 +81,16 @@ V1 不做：
    - 当前入口为 `issues/next-phase-p1-pet-account-real-workflow-trial.csv`。
 
 3. Story Continuity / Comic Workflow
-   - 先写 Story Bible 和 Panel Plan，再创建 scene tasks。
-   - 记录固定环境、固定道具、上一格状态、对白、镜头和 reference roles。
-   - 平台保存和展示这些结构化上下文；连续叙事和重试策略由 Story Continuity Agent 负责。
-   - 当前入口为 `issues/next-phase-p1-story-continuity-comic-workflow.csv` 和 `docs/project/STORY_CONTINUITY_AGENT_GUIDE.md`。
+   - 第一执行入口改为 `issues/next-phase-p1-story-continuity-mvc.csv`。
+   - 先做 3 格无字 Sequential Previous Panel Mode：第 1 格 selected 后才能生成第 2 格，第 2 格 selected 后才能生成第 3 格。
+   - 记录 `story_context_v1`、panel causality、reference_bindings、resolved_reference_assets、preflight 和 manifest 摘要。
+   - Mock 只验数据链路；视觉连续性必须通过 cap=1 的真实 provider 小样本和人工评分验证。
+   - `issues/next-phase-p1-story-continuity-comic-workflow.csv` 作为上位路线保留，待 MVC 通过后再拆 Story Review 等扩展。
 
 4. Caption / Edit Lineage
    - 把基于固定 asset 加字 edit 的结果定义为派生资产。
    - 记录 `derived_from_asset_id`、`derivation_type=caption_edit`、`caption_text`、`caption_style` 和 source task。
-   - 当前入口为 `issues/next-phase-p1-caption-edit-lineage.csv`。
+   - 当前入口为 `issues/next-phase-p1-caption-edit-lineage.csv`，但 Web 加字入口、批量 caption 和 renderer 预留后置到 Story Continuity MVC 之后。
 
 5. MCP Service Pack smoke
    - 接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地。
@@ -183,6 +184,22 @@ issues/next-phase-p1-pet-account-real-workflow-trial.csv
 
 ### P1 Story: Story Continuity / Comic Workflow
 
+第一执行入口：
+
+```text
+issues/next-phase-p1-story-continuity-mvc.csv
+```
+
+目标：
+
+- 验证“3 格、无字、顺序生成、人工选图、真实参考图参与”的连续故事最小闭环。
+- 统一 `story_context_v1`，区分 `reference_bindings` 与 `resolved_reference_assets`。
+- 增加 preflight，避免上一格 selected asset 缺失时静默退化为纯文生图。
+- 第一轮复用 Production View / Technical details 和 manifest，不新建完整 Story Review 页面。
+- 真实 provider canary 限定 cap=1、每格最多 2 候选、总图量最多 8 张。
+
+上位路线文件：
+
 建议文件名：
 
 ```text
@@ -193,7 +210,7 @@ issues/next-phase-p1-story-continuity-comic-workflow.csv
 
 - 解决“多张图只是同风格散图，不是连续故事”的问题。
 - 定义 Story Bible、Panel Plan、Reference Roles 和 Continuity Metadata。
-- Web 按 story/scene 顺序展示候选图、对白、动作、参考图、已选状态和 regenerate 入口。
+- Web 后续可按 story/scene 顺序展示候选图、对白、动作、参考图、已选状态和 regenerate 入口。
 - 第一版优先复用 metadata，不做复杂数据库迁移，不做漫画编辑器或 AI 自动视觉质检。
 
 ### P1 Agent: Story Continuity Agent
