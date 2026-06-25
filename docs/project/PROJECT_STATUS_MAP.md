@@ -24,6 +24,8 @@ P1 Deployment Release Pipeline 已完成：项目现在具备 GitHub Actions 构
 
 P1 Web Console Auth Gate / Localization / Product Fit 已完成：Web 未登录时只显示全局 Admin 登录页，登录后进入完整服务器托管控制台；资产库不再内嵌二次登录表单；Help/About 与主路径 UI 文案已收敛为 Agent ImageFlow 中文控制台语义。Settings 当前只做轻量文案修正，后续如要彻底融合服务端/旧 provider/业务空间配置，需要单独执行 `Settings Information Architecture` CSV。
 
+2026-06-25 已对 `18079c7 Close runtime diagnostics and asset lifecycle gaps` 完成本地上线前验收：容器化 Go tests、Web tests/build、开发/prod compose config 和部署静态检查全部通过；本地 `healthz`、Web preview、Admin 登录、runtime status、Current Scope 中文 `aria-label`、Recent Assets 缩略图、单 asset archive/restore 生命周期、MCP 安全工具边界均通过；mock 角色一致性 smoke 与 1 张真实 provider reference canary 也已完成。结论是当前版本可以进入服务器部署前置阶段，但仍建议在 GHCR/HTTPS 同源环境复放一次 Basic Auth、build metadata 和 delivery 路径。
+
 ## 当前脑图
 
 ```mermaid
@@ -188,13 +190,13 @@ mindmap
 | P1 专项 | `issues/next-phase-p1-deployment-release-pipeline.csv` | 把项目从本地源码构建运行升级为 GitHub Actions 构建 GHCR 私有镜像、服务器拉取镜像上线，并补首次部署、更新、回滚、备份和 smoke 文档 | P1-DEPLOY-001 到 P1-DEPLOY-008 已完成 |
 | P1 历史拆分 | `issues/next-phase-p1-asset-library-filters.csv`、`issues/next-phase-p1-session-source-tracking.csv`、`issues/next-phase-p1-provider-profile-cloud-safety.csv` | 已被合并主线吸收，保留作参考 | 不直接执行 |
 | 后续 P1 | Server Deployment Rehearsal | 真实服务器/NAS 拉取 GHCR 镜像、配置 HTTPS 反代、跑 mock smoke、验证备份和回滚 | Volcengine 旧服务已完成 `main` 更新、升级前备份、临时 HTTP health/Web、MCP `tools/list` 和 mock benchmark smoke；HTTPS/Caddy、浏览器 Admin delivery、restore 和回滚待做 |
-| 后续 P1 | Pet Account Real Workflow Trial | 用低并发真实 provider 小批量跑萌宠故事图，观察 Web 审图和 agent 调用摩擦 | 服务器部署或本地稳定后做 |
+| 后续 P1 | Pet Account Real Workflow Trial | 用低并发真实 provider 小批量跑萌宠故事图，观察 Web 审图和 agent 调用摩擦 | 本地已完成 1 张真实 reference canary；下一步建议在服务器/NAS 环境复放完整低并发萌宠工作流 |
 | P1 专项 | `issues/next-phase-p1-mcp-service-pack.csv` | 给新 agent 一份最小 MCP 接入包，说明怎么连、怎么鉴权、怎么 mock 生图、怎么查 task/asset/delivery，避免每个新线程都重新理解项目 | 已完成；示例改为单行 JSON-RPC + 默认 seed scope，MCP mock smoke 已完成 tools/list、create task、get task、list assets、delivery info |
-| P1 专项 | `issues/next-phase-p1-character-reference-intake-consistency.csv` | 补角色图像入库、input-file 提升为 asset、角色主图/参考图绑定、Web 角色卡缩略图、MCP 自动带参考和 provider 参考图诊断 | 后端 foundation、Web 角色卡缩略图、资产卡快捷绑定和 OpenAI-compatible MIME 修复已完成；mock pet consistency smoke、browser smoke 和人工真实参考 canary 待完成 |
+| P1 专项 | `issues/next-phase-p1-character-reference-intake-consistency.csv` | 补角色图像入库、input-file 提升为 asset、角色主图/参考图绑定、Web 角色卡缩略图、MCP 自动带参考和 provider 参考图诊断 | 后端 foundation、Web 角色卡缩略图、资产卡快捷绑定、OpenAI-compatible MIME 修复、本地 mock pet consistency smoke、Project Context browser smoke 和 1 张真实参考 canary 已完成；剩余是部署环境复放和更完整低并发工作流观察 |
 | P1 专项 | `issues/next-phase-p1-web-review-feedback-stability.csv` | 修复 Select/Reject 状态反馈不明显、Production View 局部状态不清晰、下拉切换整页闪烁和审图请求风暴 | Web 前端与 tests 范围已完成；仍建议补一次 browser smoke evidence |
-| P1 专项 | `issues/next-phase-p1-safe-delete-and-trial-reset.csv` | 补受控删除、归档和试用重置能力，解决废图、失败任务、测试 batch/session/campaign 持续累积；Admin Web/REST/CLI 优先，MCP 不开放 workspace/project/campaign/asset destructive tools | CLI + Admin-only REST foundation、Web 当前 campaign 清理入口、单 asset archive/restore 已完成；archived 默认不进 cleanup；task/input-file reset、browser smoke 和生产备份演练待完成 |
+| P1 专项 | `issues/next-phase-p1-safe-delete-and-trial-reset.csv` | 补受控删除、归档和试用重置能力，解决废图、失败任务、测试 batch/session/campaign 持续累积；Admin Web/REST/CLI 优先，MCP 不开放 workspace/project/campaign/asset destructive tools | CLI + Admin-only REST foundation、Web 当前 campaign 清理入口、单 asset archive/restore 和本地 browser smoke 已完成；archived 默认不进 cleanup；cleanup panel browser smoke、task/input-file reset 和生产备份演练待完成 |
 | P1 真实试用 follow-up | `issues/next-phase-p1-scope-management-usability-followup.csv` | 修复 Scope 管理真实试用中的高频摩擦：非空 scope 无法直接删除、确认弹窗层级点不到、页面无法滚动到底、输入框 `@` 参考图提示误导 | 已完成并补 browser smoke；Admin 受控级联删除、确认层级、ScopeManager 小视口滚动和 placeholder 收敛已落地；Web 删除非空测试 campaign 后 asset delivery 404，MCP 仍不开放 destructive tools |
-| P1 收口 | `issues/next-phase-p1-runtime-auth-accessibility-lifecycle-closure.csv` | 收口运行诊断、登录清晰度、Scope selector 可访问性、单 asset 归档/恢复和 archived 清理保护 | 主要代码项已完成；仍需部署后 browser smoke、mock 角色一致性 smoke 和人工确认后的 1 图真实 reference canary |
+| P1 收口 | `issues/next-phase-p1-runtime-auth-accessibility-lifecycle-closure.csv` | 收口运行诊断、登录清晰度、Scope selector 可访问性、单 asset 归档/恢复和 archived 清理保护 | 本地代码、browser smoke、mock 角色一致性 smoke 和 1 张真实 reference canary 已完成；剩余是部署环境 HTTPS/同源 replay、Basic Auth 场景复核和服务器证据回填 |
 | 后续 P1 | Settings Information Architecture | 重新整理控制台状态、业务空间、服务端能力、高级/旧模式、数据管理、关于，避免凭据和旧 provider 配置混杂 | 需要先设计再实现 |
 | 后续 P2 | Usage Tracking、edit lineage、Export Pack ZIP、Deployment Secret Hardening | 使用记录、编辑谱系、小批量交付包、部署安全状态和 non-exposure regression | 需要重新拆独立 CSV |
 | 后续 P3 | 真实视觉质检 | 视觉一致性质量判断，先做人工辅助再评估 AI 自动质检 | 后置 |
@@ -202,7 +204,7 @@ mindmap
 
 ## 推荐下一步
 
-当前不要再次执行 P1 Asset Production Readiness CSV、P1 Web Performance / Startup CSV、P1 Provider Throughput & Reliability CSV、P1 Web Console Auth & Asset Visibility CSV、P1 Web UX Smoothness CSV、P1 Project Production Context CSV、P1 Batch Story Export Foundation CSV、P2 Web Operator Review Console CSV、P1 Deployment Release Pipeline CSV 或 P1 Web Console Auth Gate / Localization / Product Fit CSV。下一步建议继续 V1 之后的独立推进：第一优先仍是 `Server Deployment Rehearsal`，Volcengine 旧服务已完成 `main` 更新、升级前备份、临时 HTTP health/Web、MCP `tools/list` 和 mock benchmark smoke，下一步补 HTTPS/Caddy 正式同源入口、浏览器 Admin delivery smoke、restore 和改 tag 回滚。第二优先是 `Pet Account Real Workflow Trial`，继续用低并发真实 provider 小批量跑“agent 写故事 -> agent 调 MCP/REST 批量生图 -> Web Recent Assets 审图 -> Production View 按 scene select/reject -> JSON manifest/NAS 交付”闭环；当前 MCP Service Pack、Scope Management Usability follow-up 已完成，Character Reference Intake、Web Review Feedback 和 Safe Delete foundation 已推进，后续重点是补角色一致性 mock/browser smoke、真实参考图 1 图人工 canary、单 asset restore/soft delete、task/input-file reset 和生产备份演练。如果继续优化 Web 设置页，优先新开 `Settings Information Architecture`，先确认结构设计再实现。
+当前不要再次执行 P1 Asset Production Readiness CSV、P1 Web Performance / Startup CSV、P1 Provider Throughput & Reliability CSV、P1 Web Console Auth & Asset Visibility CSV、P1 Web UX Smoothness CSV、P1 Project Production Context CSV、P1 Batch Story Export Foundation CSV、P2 Web Operator Review Console CSV、P1 Deployment Release Pipeline CSV 或 P1 Web Console Auth Gate / Localization / Product Fit CSV。下一步建议继续 V1 之后的独立推进：第一优先仍是 `Server Deployment Rehearsal`，Volcengine 旧服务已完成 `main` 更新、升级前备份、临时 HTTP health/Web、MCP `tools/list` 和 mock benchmark smoke，本地 `18079c7` 上线前验收也已通过，下一步补 HTTPS/Caddy 正式同源入口、浏览器 Admin delivery smoke、restore 和改 tag 回滚。第二优先是 `Pet Account Real Workflow Trial`，继续用低并发真实 provider 小批量跑“agent 写故事 -> agent 调 MCP/REST 批量生图 -> Web Recent Assets 审图 -> Production View 按 scene select/reject -> JSON manifest/NAS 交付”闭环；当前 MCP Service Pack、Scope Management Usability follow-up 已完成，Character Reference Intake、Web Review Feedback 和 Safe Delete foundation 已推进，后续重点是部署环境复放角色一致性链路、单 asset restore/soft delete、task/input-file reset 和生产备份演练。如果继续优化 Web 设置页，优先新开 `Settings Information Architecture`，先确认结构设计再实现。
 
 ```text
 Completed P2 CSV: issues/next-phase-p2-web-operator-review-console.csv
