@@ -1,0 +1,42 @@
+{
+  "story_id": "pet_blanket_fort_story",
+  "title": "小白和鸡毛的毯子堡垒",
+  "premise": "小白在固定客厅里假装没有等鸡毛，鸡毛端着牛奶出现，两只小狗慢慢靠近，最后一起贴贴。",
+  "fixed_environment": {
+    "name": "warm_pink_living_room",
+    "description": "同一个暖粉色客厅，同一张粉色双人沙发，左侧小圆桌，桌上粉色马克杯，右侧黄色抱枕，背景有月亮挂灯。"
+  },
+  "characters": [
+    {
+      "character_id": "dog_xiaobai",
+      "name": "小白",
+      "must_keep": "白色小狗，圆脸，软耳朵，浅蓝围巾，表情害羞。"
+    },
+    {
+      "character_id": "dog_jimao",
+      "name": "鸡毛",
+      "must_keep": "奶油色小狗，蓬松毛发，橘色小围巾，表情温柔。"
+    }
+  ],
+  "continuity_props": [
+    "粉色双人沙发",
+    "左侧小圆桌",
+    "粉色马克杯",
+    "黄色抱枕",
+    "月亮挂灯",
+    "浅粉毯子堡垒"
+  ],
+  "style_rules": [
+    "可爱手绘感",
+    "暖色柔光",
+    "适合小红书萌宠漫画",
+    "每格构图保持同一客厅空间"
+  ],
+  "negative_continuity": [
+    "不要改变狗的品种和颜色",
+    "不要把客厅改成卧室或户外",
+    "不要新增无关角色",
+    "不要让固定道具消失或变形太大"
+  ],
+  "delivery_notes": "先生成无字图，Web 选中后再做 caption edit。"
+}

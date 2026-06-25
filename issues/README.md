@@ -5,7 +5,9 @@
 ## Active
 
 - `next-phase-p1-server-deployment-rehearsal.csv`：服务器/NAS 部署演练，当前第一优先。
-- `next-phase-p1-pet-account-real-workflow-trial.csv`：待创建，用于服务器环境低并发萌宠账号真实业务试用。
+- `next-phase-p1-pet-account-real-workflow-trial.csv`：服务器/NAS 或本地低并发萌宠账号真实业务试用，记录角色一致性、场景漂移、Web 审图和 manifest/NAS 交付摩擦。
+- `next-phase-p1-story-continuity-comic-workflow.csv`：Story Bible、Panel Plan、reference roles、Story Review 和连续故事生产工作流。
+- `next-phase-p1-caption-edit-lineage.csv`：基于固定 asset 加字 edit 的派生资产谱系、Web 加字入口和批量 caption 工作流。
 - `next-phase-p1-settings-information-architecture.csv`：待创建，用于 Settings 信息架构重整。
 
 ## Maintenance / Partially Open
@@ -13,6 +15,7 @@
 - `next-phase-p1-runtime-auth-accessibility-lifecycle-closure.csv`：本地验收已完成；部署环境 replay、Basic Auth 复核和服务器证据回填仍待做。
 - `next-phase-p1-character-reference-intake-consistency.csv`：本地 mock + 1 图真实 canary 已完成；部署环境复放和更完整真实业务观察仍待做。
 - `next-phase-p1-safe-delete-and-trial-reset.csv`：单 asset archive/restore 已完成；cleanup panel browser smoke、task/input-file reset 和生产备份演练仍待做。
+- `next-phase-p2-usage-lineage.csv`：待创建，用于更完整的 usage tracking、edit lineage 和交付使用记录；当前 P1 caption lineage 先解决加字派生最小闭环。
 
 ## Completed / Historical
 

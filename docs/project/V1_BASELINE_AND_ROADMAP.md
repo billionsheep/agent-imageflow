@@ -4,6 +4,8 @@
 
 当前 V1 baseline 已以 `v0.1.0` tag 推送。后续工作按版本化维护推进：`v0.1.x` 优先修部署、鉴权、Web 体验和运维可靠性；`v0.2.x` 再强化 IP 工作流、Settings 信息架构和真实业务批量生产体验。
 
+2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Review、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。
+
 ## V1 Baseline
 
 V1 的产品定义：
@@ -76,37 +78,49 @@ V1 不做：
    - 用低并发真实 provider 跑小批量萌宠故事图。
    - 观察 Web 审图是否仍有闪烁、卡顿、字段噪音或操作路径太长。
    - 记录具体 URL host、Admin 登录态、scope、filter、batch/session/story/scene 和复现步骤。
+   - 当前入口为 `issues/next-phase-p1-pet-account-real-workflow-trial.csv`。
 
-3. MCP Service Pack smoke
+3. Story Continuity / Comic Workflow
+   - 先写 Story Bible 和 Panel Plan，再创建 scene tasks。
+   - 记录固定环境、固定道具、上一格状态、对白、镜头和 reference roles。
+   - 平台保存和展示这些结构化上下文；连续叙事和重试策略由 Story Continuity Agent 负责。
+   - 当前入口为 `issues/next-phase-p1-story-continuity-comic-workflow.csv` 和 `docs/project/STORY_CONTINUITY_AGENT_GUIDE.md`。
+
+4. Caption / Edit Lineage
+   - 把基于固定 asset 加字 edit 的结果定义为派生资产。
+   - 记录 `derived_from_asset_id`、`derivation_type=caption_edit`、`caption_text`、`caption_style` 和 source task。
+   - 当前入口为 `issues/next-phase-p1-caption-edit-lineage.csv`。
+
+5. MCP Service Pack smoke
    - 接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地。
    - 下一步只需回填 `tools/list`、mock create task、get task 和 delivery info 的实际 evidence。
    - 继续明确 Project API Key、Basic Auth、Admin Login 和 provider key 的边界。
 
-4. Character Reference Intake and Consistency
+6. Character Reference Intake and Consistency
    - 后端已支持把 campaign input-files 提升为正式 project reference asset。
    - 已支持角色主图/参考图字段、任务自动带参考资产、provider 参考参与 metadata 和参考图失败诊断。
    - Web 角色卡已显示主图/参考图缩略图和缺图警告。
    - 从资产卡打开 Project Context 时，已可把当前 asset 设为角色主图、加入角色参考图，或保存为项目参考图。
    - 下一步补完整 mock pet consistency smoke、browser smoke 和人工确认后的 1 图真实参考 canary。
 
-5. Web Review Feedback and Stability
+7. Web Review Feedback and Stability
    - Web 前端和 tests 范围已完成：Select / Reject 后卡片、scene header、coverage count 和按钮状态会局部变化。
    - 下拉和筛选刷新保留旧内容，审图请求已有去重、旧响应丢弃和 429 友好提示。
    - 下一步只建议补一次 browser smoke evidence。
 
-6. Safe Delete and Trial Reset
+8. Safe Delete and Trial Reset
    - CLI + Admin-only REST foundation 已完成：cleanup preview/execute 可按 asset/task/session/batch/story/campaign 定位候选。
    - Web Scope 管理已提供当前 campaign 的数据清理入口，可 preview/execute，并要求确认短语。
    - 继续要求 dry-run token 或显式确认，保护 selected/published/approved 并写 audit。
    - 单 asset archive/restore 已补到 Admin REST/Web/CLI；archived 默认不进 cleanup。
    - 下一步补 task/input-file reset、完整 browser smoke 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign/asset。
 
-7. 发布版本策略确认
+9. 发布版本策略确认
    - 当前 `main` 和 `sha-<commit>` 镜像可用。
    - 是否创建 `v0.1.0` tag 作为正式第一版，需要单独确认。
    - 若创建 tag，会触发 GHCR `v0.1.0` 镜像发布。
 
-8. 备份与恢复演练
+10. 备份与恢复演练
    - Postgres dump。
    - storage root / NAS snapshot。
    - `.env.prod` 安全备份。
@@ -161,6 +175,59 @@ issues/next-phase-p1-pet-account-real-workflow-trial.csv
 - 用真实萌宠账号工作流跑 1 个 project、1 个 campaign、2-3 个 story scenes。
 - 验证 agent 写故事 -> MCP/REST 生图 -> Web 审图 -> Production View select/reject -> JSON manifest/NAS 交付。
 - 只做低频真实 provider canary，不做 benchmark。
+
+当前状态：
+
+- CSV 已新增。
+- 本任务用于真实业务观察，不直接实现新功能；观察结果应归类到 Story Continuity、Caption Lineage、Settings IA、Safe Delete 或 provider follow-up。
+
+### P1 Story: Story Continuity / Comic Workflow
+
+建议文件名：
+
+```text
+issues/next-phase-p1-story-continuity-comic-workflow.csv
+```
+
+目标：
+
+- 解决“多张图只是同风格散图，不是连续故事”的问题。
+- 定义 Story Bible、Panel Plan、Reference Roles 和 Continuity Metadata。
+- Web 按 story/scene 顺序展示候选图、对白、动作、参考图、已选状态和 regenerate 入口。
+- 第一版优先复用 metadata，不做复杂数据库迁移，不做漫画编辑器或 AI 自动视觉质检。
+
+### P1 Agent: Story Continuity Agent
+
+建议文档：
+
+```text
+docs/project/STORY_CONTINUITY_AGENT_GUIDE.md
+examples/mcp/story-continuity-agent.local.json
+examples/mcp/create-story-bible.json
+examples/mcp/create-panel-plan.json
+examples/mcp/run-3-panel-story-smoke.md
+```
+
+目标：
+
+- 让额外 agent 负责故事连续性、分镜、reference choices 和重试策略。
+- Agent 只调用 MCP 安全工具，不持有 provider key、Admin cookie 或删除权限。
+- 新 agent 先跑 3 格 mock story，再在人工确认费用后做真实 provider canary。
+
+### P1 Caption: Caption Edit Lineage
+
+建议文件名：
+
+```text
+issues/next-phase-p1-caption-edit-lineage.csv
+```
+
+目标：
+
+- 把“基于固定 asset 加可爱文字”的 edit 结果纳入正式派生资产语义。
+- 记录 `derived_from_asset_id`、`derivation_type`、`caption_text`、`caption_style` 和 source task。
+- Web 后续提供“基于此图加字”入口；Story 工作流后续支持 selected panels 批量加字。
+- 第一版保留 future caption renderer slot，区分风格化 AI edit 和稳定确定性贴字。
 
 ### P1 Agent Onboarding: MCP Service Pack
 

@@ -1,0 +1,100 @@
+{
+  "story_id": "pet_blanket_fort_story",
+  "panels": [
+    {
+      "scene_id": "scene_001",
+      "previous_state": "故事开始，小白独自坐在粉色沙发左侧，毯子堡垒已经搭好。",
+      "action": "小白抱着书假装专心，但眼睛看向门口。",
+      "dialogue": "才没有等你",
+      "camera": "中景，固定客厅视角，能看到沙发、小圆桌、马克杯和月亮挂灯。",
+      "must_keep_props": [
+        "粉色沙发",
+        "左侧小圆桌",
+        "粉色马克杯",
+        "黄色抱枕",
+        "月亮挂灯",
+        "浅粉毯子堡垒"
+      ],
+      "allowed_changes": [
+        "小白表情",
+        "书本角度"
+      ],
+      "reference_roles": {
+        "character_reference": [
+          "dog_xiaobai"
+        ],
+        "environment_reference": [
+          "warm_pink_living_room"
+        ]
+      },
+      "target_path": "stories/pet_blanket_fort_story/scene_001.png"
+    },
+    {
+      "scene_id": "scene_002",
+      "previous_state": "小白坐在沙发左侧，门口方向留出空间，桌上仍有粉色马克杯。",
+      "action": "鸡毛从右侧出现，端着一杯热牛奶，小白偷偷抬头。",
+      "dialogue": "牛奶来啦",
+      "camera": "同一客厅中景，镜头略向右但保留沙发、桌子、马克杯和月亮挂灯。",
+      "must_keep_props": [
+        "粉色沙发",
+        "左侧小圆桌",
+        "粉色马克杯",
+        "黄色抱枕",
+        "月亮挂灯",
+        "浅粉毯子堡垒"
+      ],
+      "allowed_changes": [
+        "鸡毛进入画面",
+        "小白视线转向鸡毛",
+        "新增一杯热牛奶"
+      ],
+      "reference_roles": {
+        "character_reference": [
+          "dog_xiaobai",
+          "dog_jimao"
+        ],
+        "previous_panel_reference": [
+          "scene_001_selected_asset"
+        ],
+        "environment_reference": [
+          "warm_pink_living_room"
+        ]
+      },
+      "target_path": "stories/pet_blanket_fort_story/scene_002.png"
+    },
+    {
+      "scene_id": "scene_003",
+      "previous_state": "鸡毛已经坐到沙发右侧，牛奶在小圆桌上，小白不再看书。",
+      "action": "小白往鸡毛身边挪一点，鸡毛用尾巴轻轻圈住小白。",
+      "dialogue": "靠近一点点",
+      "camera": "同一客厅近中景，重点是两只小狗的距离变近，但仍能看到固定道具。",
+      "must_keep_props": [
+        "粉色沙发",
+        "左侧小圆桌",
+        "粉色马克杯",
+        "黄色抱枕",
+        "月亮挂灯",
+        "浅粉毯子堡垒",
+        "热牛奶"
+      ],
+      "allowed_changes": [
+        "两只小狗靠近",
+        "尾巴动作",
+        "表情更放松"
+      ],
+      "reference_roles": {
+        "character_reference": [
+          "dog_xiaobai",
+          "dog_jimao"
+        ],
+        "previous_panel_reference": [
+          "scene_002_selected_asset"
+        ],
+        "environment_reference": [
+          "warm_pink_living_room"
+        ]
+      },
+      "target_path": "stories/pet_blanket_fort_story/scene_003.png"
+    }
+  ]
+}

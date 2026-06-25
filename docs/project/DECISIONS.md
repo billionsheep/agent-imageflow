@@ -355,3 +355,9 @@
 - Decision: P1-BSE-011 确认 NAS、WebDAV、SMB 和 Finder 只作为部署层文件访问能力，主要承担浏览、复制、交付拷贝和备份；Agent ImageFlow 的 DB / metadata / manifest 继续作为 task、asset、selected/rejected/published、visual context、scene/story/batch 追踪和审计的事实源。
 - Reason: 自托管和 NAS 场景下，直接访问图片目录很高效，但如果把文件夹移动、重命名或删除当成资产状态变化，会破坏 delivery URL、manifest、storage-integrity、selected/published 保护和跨入口一致性。
 - Impact: RUNBOOK 明确建议 NAS / WebDAV / SMB / Finder 常规访问只读；不要手动移动、重命名或删除平台管理的 selected / approved / published 资产；备份/恢复必须同时处理 Postgres dump 和 storage root 一致快照。应用内不实现 WebDAV/SMB server，也不把目录树扩成通用 DAM。
+
+## 2026-06-25: 连续漫画生产由 Story Continuity Agent 承担创作脑，平台保持资产事实源
+
+- Decision: 下一阶段不把 Agent ImageFlow 扩展成漫画编辑器或小红书运营系统；平台只增加 Story Bible、Panel Plan、reference roles、Story Review 和 caption/edit lineage 等资产生产上下文能力。连续叙事、分镜、上下文补全、reference choices 和重试策略由额外的 Story Continuity Agent 负责。
+- Reason: 真实试用证明“固定 asset 加字 edit”链路已通，但多张图缺少连续性，根因是生产单位从一开始就是多次单图任务，而不是一个带固定场景、固定道具、上一格状态和因果对白的 story plan。让平台承担完整创作脑会把项目拖向通用漫画/设计平台；由 agent 生成结构化计划，平台保存和执行资产任务，更符合当前产品定位。
+- Impact: 新增 `issues/next-phase-p1-story-continuity-comic-workflow.csv`、`issues/next-phase-p1-caption-edit-lineage.csv`、`docs/project/STORY_CONTINUITY_AGENT_GUIDE.md` 和 `examples/mcp/` 下 story continuity 示例。第一版优先复用 metadata，不新增 destructive MCP tools，不给 agent provider key/Admin cookie/删除权限。真实 provider 仍只做低频 canary，不做大 benchmark。
