@@ -563,6 +563,22 @@ func (s *Service) ReviewAsset(ctx context.Context, assetID, action string) (doma
 	return s.assetResponse(item), nil
 }
 
+func (s *Service) ArchiveAsset(ctx context.Context, assetID string) (domain.AssetResponse, error) {
+	item, err := s.store.LifecycleAsset(ctx, assetID, "archive", "local-user", "archive asset")
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	return s.assetResponse(item), nil
+}
+
+func (s *Service) RestoreAsset(ctx context.Context, assetID string) (domain.AssetResponse, error) {
+	item, err := s.store.LifecycleAsset(ctx, assetID, "restore", "local-user", "restore archived asset")
+	if err != nil {
+		return domain.AssetResponse{}, err
+	}
+	return s.assetResponse(item), nil
+}
+
 func (s *Service) ProcessTask(ctx context.Context, taskID string) error {
 	task, err := s.store.GetTask(ctx, taskID)
 	if err != nil {

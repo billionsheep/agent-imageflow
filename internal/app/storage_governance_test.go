@@ -15,16 +15,29 @@ func TestCleanupDryRunReasonForAssetStatusProtectsSelectedAndPublished(t *testin
 		{status: domain.AssetDraft, wantOK: true},
 		{status: domain.AssetApproved, wantOK: false},
 		{status: domain.AssetPublished, wantOK: false},
-		{status: domain.AssetDeprecated, wantOK: true},
+		{status: domain.AssetDeprecated, wantOK: false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.status, func(t *testing.T) {
-			_, ok := cleanupDryRunReasonForAssetStatus(tc.status)
+			_, ok := cleanupDryRunReasonForAssetStatus(tc.status, false)
 			if ok != tc.wantOK {
 				t.Fatalf("cleanupDryRunReasonForAssetStatus(%q) ok=%v, want %v", tc.status, ok, tc.wantOK)
 			}
 		})
+	}
+}
+
+func TestCleanupDryRunReasonForDeprecatedRequiresExplicitOptIn(t *testing.T) {
+	if _, ok := cleanupDryRunReasonForAssetStatus(domain.AssetDeprecated, false); ok {
+		t.Fatal("deprecated archived assets should not be cleanup candidates by default")
+	}
+	reason, ok := cleanupDryRunReasonForAssetStatus(domain.AssetDeprecated, true)
+	if !ok || reason != "deprecated_asset" {
+		t.Fatalf("deprecated archived assets should be cleanup candidates when explicitly included, got reason=%q ok=%v", reason, ok)
+	}
+	if statuses := cleanupAllowedAssetStatuses(false); len(statuses) != 2 || statuses[0] != domain.AssetRejected || statuses[1] != domain.AssetDraft {
+		t.Fatalf("default cleanup statuses should exclude deprecated, got %#v", statuses)
 	}
 }
 
@@ -46,7 +59,7 @@ func TestCleanupDryRunOptionsFromExecuteOptionsCarriesTargetFilters(t *testing.T
 
 func TestNormalizeCleanupDryRunOptionsDefaultsToAllReadOnlyCandidateClasses(t *testing.T) {
 	opts := normalizeCleanupDryRunOptions(domain.CleanupDryRunOptions{})
-	if !opts.IncludeRejected || !opts.IncludeGenerated || !opts.IncludeFailedTaskTmp || !opts.IncludeOrphans {
+	if !opts.IncludeRejected || !opts.IncludeGenerated || opts.IncludeDeprecated || !opts.IncludeFailedTaskTmp || !opts.IncludeOrphans {
 		t.Fatalf("expected all candidate classes to default on, got %#v", opts)
 	}
 	if opts.Limit != defaultCleanupDryRunLimit {

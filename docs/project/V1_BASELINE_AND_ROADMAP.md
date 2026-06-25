@@ -89,7 +89,8 @@ V1 不做：
    - CLI + Admin-only REST foundation 已完成：cleanup preview/execute 可按 asset/task/session/batch/story/campaign 定位候选。
    - Web Scope 管理已提供当前 campaign 的数据清理入口，可 preview/execute，并要求确认短语。
    - 继续要求 dry-run token 或显式确认，保护 selected/published/approved 并写 audit。
-   - 下一步补单 asset restore/soft delete、task/input-file reset、完整 browser smoke 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign。
+   - 单 asset archive/restore 已补到 Admin REST/Web/CLI；archived 默认不进 cleanup。
+   - 下一步补 task/input-file reset、完整 browser smoke 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign/asset。
 
 7. 发布版本策略确认
    - 当前 `main` 和 `sha-<commit>` 镜像可用。
@@ -229,7 +230,7 @@ issues/next-phase-p1-safe-delete-and-trial-reset.csv
 
 剩余目标：
 
-- 补单 asset restore/soft delete、task/input-file 级 reset 和生产备份演练。
+- 单 asset archive/restore 已完成；补 task/input-file 级 reset、完整 browser smoke 和生产备份演练。
 - 补完整 browser smoke 和 RUNBOOK 运维命令整理，确认 Web 清理入口、CLI/REST foundation、审计和备份策略一致。
 - 不做通用 DAM、回收站复杂权限、多用户审批流、MCP 大范围 destructive tool 或绕过备份的生产清库。
 

@@ -16,6 +16,7 @@ env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/billionsheep/agent-imageflow-api
   WEB_IMAGE: ghcr.io/billionsheep/agent-imageflow-web
+  BUILD_TIME: ${{ github.event.head_commit.timestamp }}
 
 jobs:
   test:
@@ -99,6 +100,11 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
+          build-args: |
+            AGENT_IMAGEFLOW_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
+            AGENT_IMAGEFLOW_COMMIT=${{ github.sha }}
+            AGENT_IMAGEFLOW_BUILD_TIME=${{ env.BUILD_TIME }}
+            AGENT_IMAGEFLOW_IMAGE_TAG=${{ github.ref_type == 'tag' && github.ref_name || format('sha-{0}', github.sha) }}
 
       - name: Build and publish Web image
         uses: docker/build-push-action@v6
@@ -108,3 +114,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
+          build-args: |
+            AGENT_IMAGEFLOW_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
+            AGENT_IMAGEFLOW_COMMIT=${{ github.sha }}
+            AGENT_IMAGEFLOW_BUILD_TIME=${{ env.BUILD_TIME }}
+            AGENT_IMAGEFLOW_IMAGE_TAG=${{ github.ref_type == 'tag' && github.ref_name || format('sha-{0}', github.sha) }}

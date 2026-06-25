@@ -5,6 +5,7 @@ import {
   getAgentImageflowAdminMe,
   getAgentImageflowRuntimeStatus,
   AgentImageflowApiError,
+  archiveAgentImageflowAsset,
   isAgentImageflowUnauthorizedError,
   listAgentImageflowCampaigns,
   listAgentImageflowAssets,
@@ -14,6 +15,7 @@ import {
   normalizeAgentImageflowApiBaseUrl,
   rejectAgentImageflowAsset,
   resolveAgentImageflowDeliveryUrl,
+  restoreAgentImageflowAsset,
   selectAgentImageflowAsset,
   type AgentImageflowAssetListQuery,
   type AgentImageflowAssetResponse,
@@ -67,6 +69,7 @@ const STATUS_FILTERS = [
   { value: 'generated', label: '待选' },
   { value: 'selected', label: '已选' },
   { value: 'rejected', label: '已拒绝' },
+  { value: 'archived', label: '已归档' },
   { value: 'published', label: '已发布' },
 ]
 
@@ -88,6 +91,7 @@ function formatAssetDate(value?: string): string {
 function statusClassName(status: string): string {
   if (status === 'selected') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200'
   if (status === 'rejected') return 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200'
+  if (status === 'archived') return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-slate-300'
   return 'border-gray-200 bg-gray-50 text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300'
 }
 
@@ -158,11 +162,17 @@ function cardClassName(status: string, pending: boolean): string {
   if (pending && status === 'rejected') {
     return `${base} border-red-300 bg-red-50/60 dark:border-red-400/30 dark:bg-red-500/10`
   }
+  if (pending && status === 'archived') {
+    return `${base} border-slate-300 bg-slate-50/70 dark:border-white/[0.14] dark:bg-white/[0.06]`
+  }
   if (status === 'selected') {
     return `${base} border-emerald-200 bg-emerald-50/40 dark:border-emerald-500/20 dark:bg-emerald-500/5`
   }
   if (status === 'rejected') {
     return `${base} border-red-200 bg-red-50/40 dark:border-red-500/20 dark:bg-red-500/5`
+  }
+  if (status === 'archived') {
+    return `${base} border-slate-200 bg-slate-50/50 dark:border-white/[0.08] dark:bg-white/[0.04]`
   }
   return `${base} border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40`
 }
@@ -174,6 +184,8 @@ interface ServerAssetCardProps {
   busy: boolean
   onSelectAsset: (asset: AgentImageflowAssetResponse) => void
   onRejectAsset: (asset: AgentImageflowAssetResponse) => void
+  onArchiveAsset: (asset: AgentImageflowAssetResponse) => void
+  onRestoreAsset: (asset: AgentImageflowAssetResponse) => void
   onMarkAsReference: (asset: AgentImageflowAssetResponse) => void
   onOpenProductionView: (asset: AgentImageflowAssetResponse) => void
   onCopyText: (text: string, label: string) => void
@@ -187,6 +199,8 @@ const ServerAssetCard = memo(function ServerAssetCard({
   busy,
   onSelectAsset,
   onRejectAsset,
+  onArchiveAsset,
+  onRestoreAsset,
   onMarkAsReference,
   onOpenProductionView,
   onCopyText,
@@ -200,6 +214,7 @@ const ServerAssetCard = memo(function ServerAssetCard({
   const thumbnailUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.thumbnail_url)
   const originalUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.download_url)
   const metadataUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.metadata_url)
+  const isArchived = asset.status === 'archived'
   const displayedStatus = busy ? `${getAssetReviewStatusLabel(asset.status)} · 保存中` : getAssetReviewStatusLabel(asset.status)
 
   return (
@@ -298,19 +313,41 @@ const ServerAssetCard = memo(function ServerAssetCard({
           <button
             type="button"
             onClick={() => void onSelectAsset(asset)}
-            disabled={busy}
+            disabled={busy || isArchived}
             className="inline-flex h-8 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
+            title={isArchived ? '已归档资产需先恢复后再选择' : '选择资产'}
           >
             选择
           </button>
           <button
             type="button"
             onClick={() => void onRejectAsset(asset)}
-            disabled={busy}
+            disabled={busy || isArchived}
             className="inline-flex h-8 items-center rounded-lg border border-red-200 bg-red-50 px-2.5 text-[11px] font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200"
+            title={isArchived ? '已归档资产需先恢复后再拒绝' : '拒绝资产'}
           >
             拒绝
           </button>
+          {isArchived ? (
+            <button
+              type="button"
+              onClick={() => void onRestoreAsset(asset)}
+              disabled={busy}
+              className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+            >
+              恢复
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void onArchiveAsset(asset)}
+              disabled={busy || asset.status === 'selected' || asset.status === 'published'}
+              className="inline-flex h-8 items-center rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
+              title={asset.status === 'selected' || asset.status === 'published' ? '已选或已发布资产需先取消选择后再归档' : '归档资产'}
+            >
+              归档
+            </button>
+          )}
           <a
             href={originalUrl}
             target="_blank"
@@ -667,6 +704,52 @@ export default function ServerAssetLibrary() {
     }
   }, [auth, baseUrl, showToast, updateAsset])
 
+  const archiveAsset = useCallback(async (asset: AgentImageflowAssetResponse) => {
+    setPendingReviews((current) => ({ ...current, [asset.asset_id]: { nextStatus: 'archived' } }))
+    setActionErrors((current) => {
+      const next = { ...current }
+      delete next[asset.asset_id]
+      return next
+    })
+    try {
+      updateAsset(await archiveAgentImageflowAsset(baseUrl, asset.asset_id, auth))
+      showToast('已归档', 'success')
+    } catch (nextError) {
+      const message = getReviewFriendlyErrorMessage(nextError)
+      setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
+      showToast(message, 'error')
+    } finally {
+      setPendingReviews((current) => {
+        const next = { ...current }
+        delete next[asset.asset_id]
+        return next
+      })
+    }
+  }, [auth, baseUrl, showToast, updateAsset])
+
+  const restoreAsset = useCallback(async (asset: AgentImageflowAssetResponse) => {
+    setPendingReviews((current) => ({ ...current, [asset.asset_id]: { nextStatus: 'generated' } }))
+    setActionErrors((current) => {
+      const next = { ...current }
+      delete next[asset.asset_id]
+      return next
+    })
+    try {
+      updateAsset(await restoreAgentImageflowAsset(baseUrl, asset.asset_id, auth))
+      showToast('已恢复为待选', 'success')
+    } catch (nextError) {
+      const message = getReviewFriendlyErrorMessage(nextError)
+      setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
+      showToast(message, 'error')
+    } finally {
+      setPendingReviews((current) => {
+        const next = { ...current }
+        delete next[asset.asset_id]
+        return next
+      })
+    }
+  }, [auth, baseUrl, showToast, updateAsset])
+
   const copyText = useCallback(async (text: string, label: string) => {
     try {
       await copyTextToClipboard(text)
@@ -764,6 +847,12 @@ export default function ServerAssetLibrary() {
   const providerSummary = runtimeStatus
     ? `${runtimeProvider}${openAIStatus?.configured ? ` · openai-compatible ${openAIStatus.model || ''}`.trimEnd() : falStatus?.configured ? ` · fal ${falStatus.model || ''}`.trimEnd() : ' · 未配置真实 provider key'}`
     : runtimeError || '状态不可用'
+  const apiBuildCommit = runtimeStatus?.build?.commit?.trim() || ''
+  const webBuildCommit = __APP_COMMIT__.trim()
+  const buildMismatch = Boolean(apiBuildCommit && webBuildCommit && apiBuildCommit !== webBuildCommit)
+  const buildSummary = runtimeStatus
+    ? `API ${runtimeStatus.build?.image_tag?.trim() || runtimeStatus.build?.version?.trim() || 'unknown'} · Web ${__APP_IMAGE_TAG__.trim() || __APP_VERSION__ || 'unknown'}`
+    : 'Build 状态不可用'
   const summaryText = unauthorized
     ? '未授权'
     : `${displayAssets.length} 张 · ${selectedCount} 已选中 · ${rejectedCount} 已拒绝${loading && displayAssets.length > 0 ? ' · 刷新中' : ''}`
@@ -840,6 +929,7 @@ export default function ServerAssetLibrary() {
             <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
               <span className="mb-1 block uppercase">工作区</span>
               <select
+                aria-label="选择工作区"
                 value={scope.workspaceId}
                 onChange={(event) => void handleWorkspaceChange(event.target.value)}
                 disabled={scopeLoading || workspaces.length === 0}
@@ -857,6 +947,7 @@ export default function ServerAssetLibrary() {
             <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
               <span className="mb-1 block uppercase">项目</span>
               <select
+                aria-label="选择项目"
                 value={scope.projectId}
                 onChange={(event) => void handleProjectChange(event.target.value)}
                 disabled={scopeLoading || projects.length === 0}
@@ -874,6 +965,7 @@ export default function ServerAssetLibrary() {
             <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
               <span className="mb-1 block uppercase">批次</span>
               <select
+                aria-label="选择批次"
                 value={scope.campaignId}
                 onChange={(event) => handleCampaignChange(event.target.value)}
                 disabled={scopeLoading || campaigns.length === 0}
@@ -917,6 +1009,14 @@ export default function ServerAssetLibrary() {
           {runtimeStatus && (
             <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 dark:border-white/[0.08] dark:bg-white/[0.04]">
               Admin {runtimeStatus.admin_configured ? '已配置' : '未启用'} · Basic Auth {runtimeStatus.basic_auth_configured ? '已开启' : '未开启'}
+            </span>
+          )}
+          {runtimeStatus && (
+            <span
+              className={`rounded-full border px-2 py-0.5 dark:border-white/[0.08] dark:bg-white/[0.04] ${buildMismatch ? 'border-amber-200 bg-amber-50 text-amber-700 dark:text-amber-100' : 'border-gray-200 bg-white text-gray-500 dark:text-gray-400'}`}
+              title={buildMismatch ? 'Web 和 API commit 不一致，可能是前端或后端镜像未同步更新。' : '当前 Web/API build 摘要'}
+            >
+              {buildMismatch ? `${buildSummary} · 版本不一致` : buildSummary}
             </span>
           )}
         </div>
@@ -1021,6 +1121,8 @@ export default function ServerAssetLibrary() {
                 busy={Boolean(pendingReviews[asset.asset_id])}
                 onSelectAsset={selectAsset}
                 onRejectAsset={rejectAsset}
+                onArchiveAsset={archiveAsset}
+                onRestoreAsset={restoreAsset}
                 onMarkAsReference={markAsReference}
                 onOpenProductionView={openProductionViewFromAsset}
                 onCopyText={copyText}

@@ -5,7 +5,7 @@ import {
   type AgentImageflowBatchStorySummaryResponse,
 } from './agentImageflowApi'
 
-export type ReviewableAssetStatus = 'selected' | 'rejected'
+export type ReviewableAssetStatus = 'selected' | 'rejected' | 'archived' | 'generated'
 
 export interface PendingAssetReview {
   nextStatus: ReviewableAssetStatus

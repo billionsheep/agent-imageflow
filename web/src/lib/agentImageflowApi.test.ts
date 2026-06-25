@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentImageflowHeaders,
   buildAgentImageflowAssetReviewUrl,
+  buildAgentImageflowAssetLifecycleUrl,
   buildAgentImageflowAssetsUrl,
   buildAgentImageflowAssetUrl,
   buildAgentImageflowBatchProgressUrl,
@@ -42,6 +43,8 @@ import {
   executeAgentImageflowStorageCleanup,
   previewAgentImageflowStorageCleanup,
   regenerateAgentImageflowSceneTask,
+  archiveAgentImageflowAsset,
+  restoreAgentImageflowAsset,
 } from './agentImageflowApi'
 
 describe('agentImageflowApi', () => {
@@ -112,6 +115,8 @@ describe('agentImageflowApi', () => {
     expect(buildAgentImageflowAssetUrl('http://localhost:8081', 'asset_1')).toBe('http://localhost:8081/api/assets/asset_1')
     expect(buildAgentImageflowAssetReviewUrl('http://localhost:8081', 'asset_1', 'select')).toBe('http://localhost:8081/api/assets/asset_1/approve')
     expect(buildAgentImageflowAssetReviewUrl('http://localhost:8081', 'asset_1', 'reject')).toBe('http://localhost:8081/api/assets/asset_1/reject')
+    expect(buildAgentImageflowAssetLifecycleUrl('http://localhost:8081', 'asset_1', 'archive')).toBe('http://localhost:8081/api/assets/asset_1/archive')
+    expect(buildAgentImageflowAssetLifecycleUrl('http://localhost:8081', 'asset_1', 'restore')).toBe('http://localhost:8081/api/assets/asset_1/restore')
     expect(buildAgentImageflowAdminLoginUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/login')
     expect(buildAgentImageflowAdminMeUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/me')
     expect(buildAgentImageflowAdminLogoutUrl('http://localhost:8081/')).toBe('http://localhost:8081/api/admin/logout')
@@ -241,6 +246,7 @@ describe('agentImageflowApi', () => {
     expect(normalizeAgentImageflowAssetStatus('draft')).toBe('generated')
     expect(normalizeAgentImageflowAssetStatus('approved')).toBe('selected')
     expect(normalizeAgentImageflowAssetStatus('rejected')).toBe('rejected')
+    expect(normalizeAgentImageflowAssetStatus('deprecated')).toBe('archived')
   })
 
   it('builds auth headers for managed mode requests', () => {
@@ -576,5 +582,35 @@ describe('agentImageflowApi', () => {
       dry_run_token: 'cleanup_1234567890abcdef',
       execute: true,
     })
+  })
+
+  it('posts archive and restore actions to admin session asset lifecycle endpoints', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        asset_id: 'asset_1',
+        status: 'deprecated',
+        delivery: {
+          download_url: '/original',
+          thumbnail_url: '/thumbnail',
+          metadata_url: '/metadata',
+        },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        asset_id: 'asset_1',
+        status: 'draft',
+        delivery: {
+          download_url: '/original',
+          thumbnail_url: '/thumbnail',
+          metadata_url: '/metadata',
+        },
+      }), { status: 200 }))
+
+    await expect(archiveAgentImageflowAsset('http://localhost:8081/', 'asset_1')).resolves.toMatchObject({ status: 'archived' })
+    await expect(restoreAgentImageflowAsset('http://localhost:8081/', 'asset_1')).resolves.toMatchObject({ status: 'generated' })
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['http://localhost:8081/api/assets/asset_1/archive', 'POST'],
+      ['http://localhost:8081/api/assets/asset_1/restore', 'POST'],
+    ])
   })
 })

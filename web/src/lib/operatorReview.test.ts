@@ -52,6 +52,8 @@ describe('operator review helpers', () => {
     expect(getAssetReviewStatusLabel('selected')).toBe('已选')
     expect(getAssetReviewStatusLabel('approved')).toBe('已选')
     expect(getAssetReviewStatusLabel('rejected')).toBe('已拒绝')
+    expect(getAssetReviewStatusLabel('archived')).toBe('已归档')
+    expect(getAssetReviewStatusLabel('deprecated')).toBe('已归档')
     expect(getAssetReviewStatusLabel('published')).toBe('已发布')
   })
 

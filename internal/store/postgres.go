@@ -1695,6 +1695,8 @@ func publicAssetStatus(status string) string {
 		return "generated"
 	case domain.AssetApproved:
 		return "selected"
+	case domain.AssetDeprecated:
+		return "archived"
 	default:
 		return status
 	}
@@ -2288,6 +2290,29 @@ func (s *PostgresStore) ReviewAsset(ctx context.Context, assetID, action, review
 	return item, nil
 }
 
+func (s *PostgresStore) LifecycleAsset(ctx context.Context, assetID, action, reviewer, note string) (domain.AssetWithVersion, error) {
+	item, err := s.GetAssetWithVersion(ctx, assetID)
+	if err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	item, err = lifecycleAssetTx(ctx, tx, item, action, reviewer, note)
+	if err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+	return item, nil
+}
+
 func (s *PostgresStore) ApplyBestOfSelection(ctx context.Context, selectedAssetID string, rejectedAssetIDs []string, reviewer, selectedNote, rejectedNote string) (domain.AssetWithVersion, error) {
 	selectedItem, err := s.GetAssetWithVersion(ctx, selectedAssetID)
 	if err != nil {
@@ -2469,6 +2494,54 @@ func canReviewAssetTransition(currentStatus, action string) bool {
 		return currentStatus == domain.AssetDraft || currentStatus == domain.AssetRejected
 	case "reject":
 		return currentStatus == domain.AssetDraft || currentStatus == domain.AssetApproved
+	default:
+		return false
+	}
+}
+
+func lifecycleAssetTx(ctx context.Context, tx *sql.Tx, item domain.AssetWithVersion, action, reviewer, note string) (domain.AssetWithVersion, error) {
+	nextStatus, err := nextStatusForLifecycleAction(action)
+	if err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+	if item.Status == nextStatus {
+		return item, nil
+	}
+	if !canLifecycleAssetTransition(item.Status, action) {
+		return domain.AssetWithVersion{}, fmt.Errorf("asset %s is %s and cannot lifecycle transition to %s", item.ID, item.Status, nextStatus)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE asset SET status = $2, updated_at = now() WHERE id = $1
+	`, item.ID, nextStatus); err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO review_event (id, asset_id, version_id, action, reviewer, note)
+		VALUES ($1,$2,$3,$4,$5,$6)
+	`, domain.NewID("rev"), item.ID, item.Version.ID, action, reviewer, note); err != nil {
+		return domain.AssetWithVersion{}, err
+	}
+	item.Status = nextStatus
+	return item, nil
+}
+
+func nextStatusForLifecycleAction(action string) (string, error) {
+	switch action {
+	case "archive":
+		return domain.AssetDeprecated, nil
+	case "restore":
+		return domain.AssetDraft, nil
+	default:
+		return "", fmt.Errorf("unknown lifecycle action %q", action)
+	}
+}
+
+func canLifecycleAssetTransition(currentStatus, action string) bool {
+	switch action {
+	case "archive":
+		return currentStatus == domain.AssetDraft || currentStatus == domain.AssetRejected
+	case "restore":
+		return currentStatus == domain.AssetDeprecated
 	default:
 		return false
 	}

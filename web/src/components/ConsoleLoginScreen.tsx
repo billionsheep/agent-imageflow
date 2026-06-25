@@ -10,11 +10,12 @@ interface ConsoleLoginScreenProps {
   onCheckingChange: (checking: boolean) => void
 }
 
-function getLoginErrorMessage(error: unknown): string {
+export function getLoginErrorMessage(error: unknown): string {
   if (error instanceof AgentImageflowApiError) {
-    if (error.status === 401 || error.status === 403) return '用户名或密码不正确'
+    if (error.status === 401 || error.status === 403) return '用户名或密码不正确；请确认这是服务器 Admin 登录，不是 Project API Key 或 provider key。'
     if (error.errorCode === 'admin_not_configured') return '控制台登录未配置，请先在服务器设置 Admin 账号。'
     if (error.status === 429) return '请求过于频繁，请稍后再试。'
+    if (error.status === 404) return '当前服务不像 Agent ImageFlow API，可能是 Web/API 版本或地址不匹配。'
     return error.message
   }
   return error instanceof Error ? error.message : String(error)
@@ -146,4 +147,3 @@ export default function ConsoleLoginScreen({
     </main>
   )
 }
-

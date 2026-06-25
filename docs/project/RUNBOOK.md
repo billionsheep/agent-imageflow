@@ -400,7 +400,8 @@ docker compose exec api /app/vag storage cleanup-preview \
 说明：
 
 - `cleanup-preview` 是只读 dry-run，不删除文件，不更新数据库。
-- 默认候选包括 `rejected` 资产、`generated/draft` 未选中资产、`deprecated` 资产、临时文件和 orphan final files。
+- 默认候选包括 `rejected` 资产、`generated/draft` 未选中资产、临时文件和 orphan final files；`deprecated/archived` 资产默认保留，用于支持单资产归档后的恢复。
+- 如需物理清理已归档资产，必须显式传 `--deprecated`（REST payload 为 `include_deprecated=true`），并先确认这些资产不需要恢复。
 - `selected/approved` 与 `published` 默认 protected，不进入清理候选；响应只返回 protected 计数。
 - 文件明细使用 storage root 下的相对 `storage_key`，不暴露宿主机绝对路径。
 - 可选过滤：`--asset-id`、`--task-id`、`--session-id`、`--batch-id`、`--story-id`。这些过滤只限制当前 scope 内候选，不允许跨 workspace/project/campaign 清理。
@@ -426,7 +427,7 @@ docker compose exec api /app/vag storage cleanup-execute \
 - 带 `--dry-run-token` 时必须匹配当前 dry-run 候选集；token 不匹配即使带 `--confirm` 也拒绝。
 - 无 token 的本地执行必须同时传 `--execute --confirm`，用于明确人工确认；建议常规操作仍先使用 dry-run token。
 - 第一版提供 CLI 和 Admin-only REST 执行入口，不暴露匿名远程清理 REST，也不向 MCP 暴露 hard delete。
-- 默认只清理 `rejected`、`generated/draft` 未选中资产、`deprecated`、`tmp` 和明确 orphan files；`selected/approved` 与 `published` 默认 protected。
+- 默认只清理 `rejected`、`generated/draft` 未选中资产、`tmp` 和明确 orphan files；`archived/deprecated` 只有显式 `--deprecated` / `include_deprecated=true` 时才会进入物理清理候选；`selected/approved` 与 `published` 默认 protected。
 - 资产清理会先在数据库事务内删除 `review_event` / `delivery_event` / `asset_version` / `asset` 行，再删除对应 storage files；若文件删除失败，执行报告会标记失败，数据库不会继续引用已清理资产。
 - 每次执行或拒绝执行都会写入本地 audit，`source=cli`、`action=storage_cleanup_execute`。
 
@@ -666,6 +667,20 @@ ADMIN_SESSION_TTL_SECONDS=43200
 - 本地 Vite preview/dev 常用端口 `4173` / `5173` 没有 Web 镜像里的 Nginx `/api` 代理，Web 留空 API URL 时会按当前页面 host 自动回退到 `http://127.0.0.1:8081` 或 `http://localhost:8081`；生产 Web 镜像或正式反代仍保持同源 `/api`。
 - 已登录 Admin session 可读取 asset thumbnail/original/metadata；未登录仍返回 401，但图片类 delivery 不返回会触发浏览器原生 Basic Auth 弹窗的 challenge。
 - 如果用户看到旧的 provider/base URL 配置，它属于高级/旧模式兼容路径；正式资产生产优先走服务端托管模式和服务器配置的 provider。
+
+Runtime status smoke：
+
+```bash
+curl -s -b /tmp/agent-imageflow-admin.cookie \
+  http://localhost:8081/api/admin/runtime-status
+```
+
+说明：
+
+- 该接口只返回 Admin 已登录状态下可见的非敏感摘要：API build/version/commit/image tag、provider mode/model、Admin/Basic 是否配置、限流/并发摘要。
+- 本地开发或旧镜像缺失 build metadata 时会显示 `unknown`，不影响使用。
+- Web 控制台会同时显示 Web build 和 API build；如果 commit 不一致，应优先确认浏览器入口、镜像 tag 和服务器 compose 是否都已更新。
+- 响应不得包含 provider key、project key、Basic/Auth 密码、cookie、session、本地绝对路径或完整 secret。
 
 Admin login smoke：
 

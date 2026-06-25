@@ -66,6 +66,10 @@ func main() {
 			Runtime: httpapi.RuntimeStatusOptions{
 				PublicBaseURL:                  cfg.PublicBaseURL,
 				DefaultProvider:                cfg.DefaultProvider,
+				BuildVersion:                   cfg.BuildVersion,
+				BuildCommit:                    cfg.BuildCommit,
+				BuildTime:                      cfg.BuildTime,
+				ImageTag:                       cfg.ImageTag,
 				OpenAICompatibleModel:          cfg.OpenAICompatibleModel,
 				OpenAICompatibleConfigured:     cfg.OpenAICompatibleAPIKey != "",
 				OpenAICompatibleMaxConcurrency: cfg.OpenAICompatibleMaxConcurrency,

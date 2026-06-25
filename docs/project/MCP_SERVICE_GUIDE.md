@@ -216,9 +216,9 @@ docker compose ps
 
 ### 想删除错图、批次或重新开始试用
 
-MCP 第一轮不提供删除 workspace / project / campaign / asset 的工具。新 agent 只能通过 `reject_image_asset` 标记错图、通过 `select_image_asset` 确认好图、通过查询和 delivery 工具拿交付结果。
+MCP 第一轮不提供删除 workspace / project / campaign / asset 的工具，也不提供 archive/restore。新 agent 只能通过 `reject_image_asset` 标记错图、通过 `select_image_asset` 确认好图、通过查询和 delivery 工具拿交付结果。
 
-真正的数据清理或试用重置走 Admin Web / REST / CLI 的受控 cleanup 流程：先 dry-run 预览候选，再用 dry-run token 或明确确认执行。不要把 Admin cookie、cleanup token、provider key 或真实 project key 写进 MCP 配置示例。
+单资产归档/恢复走 Admin Web / REST / CLI 的 `archive/restore` 路径；真正的数据清理或试用重置走 Admin Web / REST / CLI 的受控 cleanup 流程：先 dry-run 预览候选，再用 dry-run token 或明确确认执行。不要把 Admin cookie、cleanup token、provider key 或真实 project key 写进 MCP 配置示例。
 
 若人类在 Web 中删除整个 workspace / project / campaign，平台会按 scope 生命周期做级联删除，包括子级、任务、资产、缩略图、metadata、原图和 selected / approved / published 结果；这仍然是 Admin 受控操作，不是 MCP 能力。
 

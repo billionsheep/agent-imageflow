@@ -1294,7 +1294,7 @@ export default function ScopeManagerModal() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">数据清理</div>
                     <div className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-                      仅针对当前 campaign 调用 Admin-only cleanup preview/execute。默认保护 selected / published 资产，不展示本地路径或完整 token。
+                      仅针对当前 campaign 调用 Admin-only cleanup preview/execute。默认保护 selected / published / archived 资产，不展示本地路径或完整 token。
                     </div>
                   </div>
                   {selectedCampaignStats && (

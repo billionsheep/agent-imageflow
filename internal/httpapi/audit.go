@@ -142,6 +142,8 @@ func enrichHTTPAuditEvent(event *domain.HTTPAuditEvent, parts []string, response
 	case match(parts, "api", "assets", "*"),
 		match(parts, "api", "assets", "*", "approve"),
 		match(parts, "api", "assets", "*", "reject"),
+		match(parts, "api", "assets", "*", "archive"),
+		match(parts, "api", "assets", "*", "restore"),
 		match(parts, "api", "assets", "*", "original"),
 		match(parts, "api", "assets", "*", "thumbnail"):
 		if event.AssetID == "" {
@@ -276,6 +278,10 @@ func inferAuditRoute(parts []string, method string) (string, string) {
 		return "/api/assets/{asset_id}/approve", "approve_asset"
 	case method == http.MethodPost && match(parts, "api", "assets", "*", "reject"):
 		return "/api/assets/{asset_id}/reject", "reject_asset"
+	case method == http.MethodPost && match(parts, "api", "assets", "*", "archive"):
+		return "/api/assets/{asset_id}/archive", "archive_asset"
+	case method == http.MethodPost && match(parts, "api", "assets", "*", "restore"):
+		return "/api/assets/{asset_id}/restore", "restore_asset"
 	case isRead && match(parts, "api", "assets", "*", "original"):
 		return "/api/assets/{asset_id}/original", "get_asset_original"
 	case isRead && match(parts, "api", "assets", "*", "thumbnail"):

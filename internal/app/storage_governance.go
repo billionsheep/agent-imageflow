@@ -74,7 +74,7 @@ func (s *Service) CleanupDryRun(ctx context.Context, opts domain.CleanupDryRunOp
 		return domain.CleanupDryRunReport{}, err
 	}
 	for _, item := range assetCandidates {
-		reason, ok := cleanupDryRunReasonForAssetStatus(item.Status)
+		reason, ok := cleanupDryRunReasonForAssetStatus(item.Status, opts.IncludeDeprecated)
 		if !ok {
 			continue
 		}
@@ -171,7 +171,6 @@ func normalizeCleanupDryRunOptions(opts domain.CleanupDryRunOptions) domain.Clea
 	if !opts.IncludeRejected && !opts.IncludeGenerated && !opts.IncludeDeprecated && !opts.IncludeFailedTaskTmp && !opts.IncludeOrphans {
 		opts.IncludeRejected = true
 		opts.IncludeGenerated = true
-		opts.IncludeDeprecated = true
 		opts.IncludeFailedTaskTmp = true
 		opts.IncludeOrphans = true
 	}
@@ -217,21 +216,28 @@ func validateCleanupExecutionConfirmation(opts domain.CleanupExecuteOptions, exp
 	return fmt.Errorf("cleanup execution requires a matching dry-run token or --confirm")
 }
 
-func cleanupDryRunReasonForAssetStatus(status string) (string, bool) {
+func cleanupDryRunReasonForAssetStatus(status string, includeDeprecated bool) (string, bool) {
 	switch status {
 	case domain.AssetRejected:
 		return "rejected_asset", true
 	case domain.AssetDraft:
 		return "generated_unselected_asset", true
 	case domain.AssetDeprecated:
-		return "deprecated_asset", true
+		if includeDeprecated {
+			return "deprecated_asset", true
+		}
+		return "", false
 	default:
 		return "", false
 	}
 }
 
-func cleanupAllowedAssetStatuses() []string {
-	return []string{domain.AssetRejected, domain.AssetDraft, domain.AssetDeprecated}
+func cleanupAllowedAssetStatuses(includeDeprecated bool) []string {
+	statuses := []string{domain.AssetRejected, domain.AssetDraft}
+	if includeDeprecated {
+		statuses = append(statuses, domain.AssetDeprecated)
+	}
+	return statuses
 }
 
 func addCleanupCandidate(r *domain.CleanupDryRunReport, candidate domain.CleanupCandidate) {
@@ -274,12 +280,13 @@ func (s *Service) executeCleanupCandidate(ctx context.Context, scope domain.Scop
 }
 
 func (s *Service) executeCleanupAssetCandidate(ctx context.Context, scope domain.Scope, candidate domain.CleanupCandidate, result domain.CleanupExecutionResult) domain.CleanupExecutionResult {
-	if _, ok := cleanupDryRunReasonForAssetStatus(candidate.Status); !ok {
+	includeDeprecated := candidate.Status == domain.AssetDeprecated
+	if _, ok := cleanupDryRunReasonForAssetStatus(candidate.Status, includeDeprecated); !ok {
 		result.Action = "skipped"
 		result.Error = fmt.Sprintf("asset %s is %s and is protected from cleanup", candidate.AssetID, candidate.Status)
 		return result
 	}
-	deleted, err := s.store.DeleteCleanupAssetCandidate(ctx, scope, candidate.AssetID, cleanupAllowedAssetStatuses())
+	deleted, err := s.store.DeleteCleanupAssetCandidate(ctx, scope, candidate.AssetID, cleanupAllowedAssetStatuses(includeDeprecated))
 	if err != nil {
 		result.Action = cleanupAssetErrorAction(err)
 		result.Error = err.Error()

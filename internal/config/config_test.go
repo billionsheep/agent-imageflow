@@ -112,3 +112,15 @@ func TestLoadAdminCredentialsFallbackToBasicAuth(t *testing.T) {
 		t.Fatalf("admin session ttl = %d, want 60", cfg.AdminSessionTTLSeconds)
 	}
 }
+
+func TestLoadRuntimeBuildMetadata(t *testing.T) {
+	t.Setenv("AGENT_IMAGEFLOW_VERSION", "0.1.0")
+	t.Setenv("AGENT_IMAGEFLOW_COMMIT", "abc1234")
+	t.Setenv("AGENT_IMAGEFLOW_BUILD_TIME", "2026-06-25T03:00:00Z")
+	t.Setenv("AGENT_IMAGEFLOW_IMAGE_TAG", "sha-abc1234")
+
+	cfg := Load()
+	if cfg.BuildVersion != "0.1.0" || cfg.BuildCommit != "abc1234" || cfg.BuildTime != "2026-06-25T03:00:00Z" || cfg.ImageTag != "sha-abc1234" {
+		t.Fatalf("runtime build metadata was not loaded: %#v", cfg)
+	}
+}

@@ -4,6 +4,10 @@ import { readFileSync } from 'fs'
 import { normalizeDevProxyConfig } from './src/lib/devProxy'
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
+const appVersion = process.env.AGENT_IMAGEFLOW_VERSION || pkg.version
+const appCommit = process.env.AGENT_IMAGEFLOW_COMMIT || ''
+const appBuildTime = process.env.AGENT_IMAGEFLOW_BUILD_TIME || ''
+const appImageTag = process.env.AGENT_IMAGEFLOW_IMAGE_TAG || ''
 
 function loadDevProxyConfig() {
   try {
@@ -24,7 +28,10 @@ export default defineConfig(({ command }) => {
     plugins: [react()],
     base: './',
     define: {
-      __APP_VERSION__: JSON.stringify(pkg.version),
+      __APP_VERSION__: JSON.stringify(appVersion),
+      __APP_COMMIT__: JSON.stringify(appCommit),
+      __APP_BUILD_TIME__: JSON.stringify(appBuildTime),
+      __APP_IMAGE_TAG__: JSON.stringify(appImageTag),
       __DEV_PROXY_CONFIG__: JSON.stringify(devProxyConfig),
     },
     server: {

@@ -13,7 +13,7 @@ describe('storage cleanup panel helpers', () => {
     expect(buildStorageCleanupPreviewInput()).toEqual({
       include_rejected: true,
       include_generated: true,
-      include_deprecated: true,
+      include_deprecated: false,
       include_failed_task_tmp: true,
       include_orphans: true,
     })
@@ -23,7 +23,7 @@ describe('storage cleanup panel helpers', () => {
     expect(buildStorageCleanupExecuteInput('cleanup_1234567890abcdef')).toEqual({
       include_rejected: true,
       include_generated: true,
-      include_deprecated: true,
+      include_deprecated: false,
       include_failed_task_tmp: true,
       include_orphans: true,
       dry_run_token: 'cleanup_1234567890abcdef',

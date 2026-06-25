@@ -47,6 +47,10 @@ type Config struct {
 	WorkerRetryBaseDelaySec        int
 	ThumbnailMaxWidth              int
 	ThumbnailMaxHeight             int
+	BuildVersion                   string
+	BuildCommit                    string
+	BuildTime                      string
+	ImageTag                       string
 }
 
 func Load() Config {
@@ -92,6 +96,10 @@ func Load() Config {
 		WorkerRetryBaseDelaySec:        envInt("WORKER_RETRY_BASE_DELAY_SECONDS", 15),
 		ThumbnailMaxWidth:              envInt("THUMBNAIL_MAX_WIDTH", 720),
 		ThumbnailMaxHeight:             envInt("THUMBNAIL_MAX_HEIGHT", 720),
+		BuildVersion:                   env("AGENT_IMAGEFLOW_VERSION", ""),
+		BuildCommit:                    env("AGENT_IMAGEFLOW_COMMIT", ""),
+		BuildTime:                      env("AGENT_IMAGEFLOW_BUILD_TIME", ""),
+		ImageTag:                       env("AGENT_IMAGEFLOW_IMAGE_TAG", ""),
 	}
 }
 

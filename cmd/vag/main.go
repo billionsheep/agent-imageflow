@@ -215,10 +215,10 @@ func taskCmd(args []string) error {
 
 func assetCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: vag asset approve|reject|get|list")
+		return fmt.Errorf("usage: vag asset approve|reject|archive|restore|get|list")
 	}
 	switch args[0] {
-	case "approve", "reject":
+	case "approve", "reject", "archive", "restore":
 		fs := flag.NewFlagSet("vag asset "+args[0], flag.ExitOnError)
 		apiURL := fs.String("api-url", defaultAPIURL(), "API base URL")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -1657,7 +1657,7 @@ func storageCmd(args []string) error {
 		limit := fs.Int("limit", 100, "maximum candidates per category")
 		includeRejected := fs.Bool("rejected", true, "include rejected assets")
 		includeGenerated := fs.Bool("generated", true, "include generated but unselected assets")
-		includeDeprecated := fs.Bool("deprecated", true, "include deprecated archived assets")
+		includeDeprecated := fs.Bool("deprecated", false, "include deprecated archived assets")
 		includeTmp := fs.Bool("tmp", true, "include temporary files")
 		includeOrphans := fs.Bool("orphans", true, "include orphan final files")
 		assetID := fs.String("asset-id", "", "limit cleanup candidates to one asset")
@@ -1704,7 +1704,7 @@ func storageCmd(args []string) error {
 		limit := fs.Int("limit", 100, "maximum candidates per category")
 		includeRejected := fs.Bool("rejected", true, "include rejected assets")
 		includeGenerated := fs.Bool("generated", true, "include generated but unselected assets")
-		includeDeprecated := fs.Bool("deprecated", true, "include deprecated archived assets")
+		includeDeprecated := fs.Bool("deprecated", false, "include deprecated archived assets")
 		includeTmp := fs.Bool("tmp", true, "include temporary files")
 		includeOrphans := fs.Bool("orphans", true, "include orphan final files")
 		assetID := fs.String("asset-id", "", "limit cleanup candidates to one asset")
@@ -1854,6 +1854,8 @@ func usage() {
   vag asset get <asset_id>
   vag asset approve <asset_id>
   vag asset reject <asset_id>
+  vag asset archive <asset_id>
+  vag asset restore <asset_id>
   vag audit list [--limit 50] [--project prj_xxx]
   vag benchmark image-generation --provider mock --tasks 32 --requested-count 1 --concurrency-label worker-4
   vag batch progress --session-id <session_id> --batch-id <batch_id>

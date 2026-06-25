@@ -29,6 +29,12 @@ export interface AgentImageflowRuntimeStatusResponse {
   basic_auth_configured: boolean
   public_base_url?: string
   default_provider?: string
+  build?: {
+    version?: string
+    commit?: string
+    build_time?: string
+    image_tag?: string
+  }
   provider_timeout_seconds?: number
   worker?: {
     concurrency?: number
@@ -1155,9 +1161,14 @@ export function buildAgentImageflowAssetReviewUrl(baseUrl: string, assetId: stri
   return `${buildAgentImageflowAssetUrl(baseUrl, assetId)}/${pathAction}`
 }
 
+export function buildAgentImageflowAssetLifecycleUrl(baseUrl: string, assetId: string, action: 'archive' | 'restore'): string {
+  return `${buildAgentImageflowAssetUrl(baseUrl, assetId)}/${action}`
+}
+
 export function normalizeAgentImageflowAssetStatus(status: string): string {
   if (status === 'draft') return 'generated'
   if (status === 'approved') return 'selected'
+  if (status === 'deprecated') return 'archived'
   return status
 }
 
@@ -1688,6 +1699,22 @@ export async function approveAgentImageflowAsset(baseUrl: string, assetId: strin
 
 export async function rejectAgentImageflowAsset(baseUrl: string, assetId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowAssetResponse> {
   const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowAssetReviewUrl(baseUrl, assetId, 'reject'), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth),
+  })
+  return normalizeAgentImageflowAssetResponse(response)
+}
+
+export async function archiveAgentImageflowAsset(baseUrl: string, assetId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowAssetResponse> {
+  const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowAssetLifecycleUrl(baseUrl, assetId, 'archive'), {
+    method: 'POST',
+    headers: buildAgentImageflowHeaders(auth),
+  })
+  return normalizeAgentImageflowAssetResponse(response)
+}
+
+export async function restoreAgentImageflowAsset(baseUrl: string, assetId: string, auth?: AgentImageflowAuth): Promise<AgentImageflowAssetResponse> {
+  const response = await requestJson<AgentImageflowAssetResponse>(buildAgentImageflowAssetLifecycleUrl(baseUrl, assetId, 'restore'), {
     method: 'POST',
     headers: buildAgentImageflowHeaders(auth),
   })

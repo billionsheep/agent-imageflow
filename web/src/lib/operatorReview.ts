@@ -108,6 +108,7 @@ export function getAssetReviewStatusLabel(status: string): string {
   const normalized = status.trim().toLowerCase()
   if (normalized === 'selected' || normalized === 'approved') return '已选'
   if (normalized === 'rejected') return '已拒绝'
+  if (normalized === 'archived' || normalized === 'deprecated') return '已归档'
   if (normalized === 'published') return '已发布'
   if (normalized === 'failed') return '失败'
   return '待选'

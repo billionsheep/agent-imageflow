@@ -34,6 +34,10 @@ type Options struct {
 type RuntimeStatusOptions struct {
 	PublicBaseURL                  string
 	DefaultProvider                string
+	BuildVersion                   string
+	BuildCommit                    string
+	BuildTime                      string
+	ImageTag                       string
 	OpenAICompatibleModel          string
 	OpenAICompatibleConfigured     bool
 	OpenAICompatibleMaxConcurrency int
@@ -205,6 +209,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleReviewAsset(w, r, parts[2], "approve")
 	case r.Method == http.MethodPost && match(parts, "api", "assets", "*", "reject"):
 		s.handleReviewAsset(w, r, parts[2], "reject")
+	case r.Method == http.MethodPost && match(parts, "api", "assets", "*", "archive"):
+		s.handleArchiveAsset(w, r, parts[2])
+	case r.Method == http.MethodPost && match(parts, "api", "assets", "*", "restore"):
+		s.handleRestoreAsset(w, r, parts[2])
 	case isRead && match(parts, "api", "assets", "*", "original"):
 		s.handleAssetFile(w, r, parts[2], "original")
 	case isRead && match(parts, "api", "assets", "*", "thumbnail"):
@@ -344,7 +352,9 @@ func shouldSendBasicChallenge(parts []string, method string) bool {
 
 func routeRequiresAdminSession(parts []string, method string) bool {
 	return method == http.MethodPost && (match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
-		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"))
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute") ||
+		match(parts, "api", "assets", "*", "archive") ||
+		match(parts, "api", "assets", "*", "restore"))
 }
 
 func isAssetDeliveryRoute(parts []string, method string) bool {
@@ -475,6 +485,8 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		match(parts, "api", "assets", "*", "metadata"),
 		match(parts, "api", "assets", "*", "approve"),
 		match(parts, "api", "assets", "*", "reject"),
+		match(parts, "api", "assets", "*", "archive"),
+		match(parts, "api", "assets", "*", "restore"),
 		match(parts, "api", "assets", "*", "original"),
 		match(parts, "api", "assets", "*", "thumbnail"):
 		scope, err := s.service.GetAssetScope(r.Context(), parts[2])
@@ -487,6 +499,10 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 			CampaignID:  scope.CampaignID,
 			AssetID:     parts[2],
 			AllowAdmin:  true,
+			RequireAdmin: match(parts, "api", "assets", "*", "archive") ||
+				match(parts, "api", "assets", "*", "restore"),
+			RequireAdminSession: match(parts, "api", "assets", "*", "archive") ||
+				match(parts, "api", "assets", "*", "restore"),
 		}, true, nil
 	default:
 		return requestAuthScope{}, false, nil
@@ -1024,6 +1040,12 @@ func (s *Server) handleRuntimeStatus(w http.ResponseWriter, r *http.Request) {
 		"public_base_url":          strings.TrimSpace(runtime.PublicBaseURL),
 		"default_provider":         strings.TrimSpace(runtime.DefaultProvider),
 		"provider_timeout_seconds": runtime.ProviderTimeoutSeconds,
+		"build": map[string]any{
+			"version":    strings.TrimSpace(runtime.BuildVersion),
+			"commit":     strings.TrimSpace(runtime.BuildCommit),
+			"build_time": strings.TrimSpace(runtime.BuildTime),
+			"image_tag":  strings.TrimSpace(runtime.ImageTag),
+		},
 		"worker": map[string]any{
 			"concurrency": runtime.WorkerConcurrency,
 		},
@@ -1128,6 +1150,24 @@ func (s *Server) handleGetAssetMetadata(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) handleReviewAsset(w http.ResponseWriter, r *http.Request, assetID, action string) {
 	response, err := s.service.ReviewAsset(r.Context(), assetID, action)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleArchiveAsset(w http.ResponseWriter, r *http.Request, assetID string) {
+	response, err := s.service.ArchiveAsset(r.Context(), assetID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleRestoreAsset(w http.ResponseWriter, r *http.Request, assetID string) {
+	response, err := s.service.RestoreAsset(r.Context(), assetID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -1244,7 +1284,7 @@ func parseAssetListQuery(r *http.Request, projectID, campaignID string) (domain.
 	query := domain.AssetListQuery{
 		ProjectID:  projectID,
 		CampaignID: campaignID,
-		Status:     values.Get("status"),
+		Status:     normalizeAssetListStatusFilter(values.Get("status")),
 		Provider:   values.Get("provider"),
 		Model:      values.Get("model"),
 		Source:     values.Get("source"),
@@ -1281,6 +1321,19 @@ func parseAssetListQuery(r *http.Request, projectID, campaignID string) (domain.
 		query.CreatedTo = &createdTo
 	}
 	return query, nil
+}
+
+func normalizeAssetListStatusFilter(status string) string {
+	switch strings.TrimSpace(status) {
+	case "generated":
+		return domain.AssetDraft
+	case "selected":
+		return domain.AssetApproved
+	case "archived":
+		return domain.AssetDeprecated
+	default:
+		return strings.TrimSpace(status)
+	}
 }
 
 func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) {

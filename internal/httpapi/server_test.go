@@ -270,6 +270,10 @@ func TestRuntimeStatusRequiresAdminAndRedactsSecrets(t *testing.T) {
 			Runtime: RuntimeStatusOptions{
 				PublicBaseURL:                  "https://imageflow.example.com",
 				DefaultProvider:                "openai-compatible",
+				BuildVersion:                   "0.1.0",
+				BuildCommit:                    "abc1234",
+				BuildTime:                      "2026-06-25T03:00:00Z",
+				ImageTag:                       "sha-abc1234",
 				OpenAICompatibleModel:          "gpt-image-2",
 				OpenAICompatibleConfigured:     true,
 				OpenAICompatibleMaxConcurrency: 2,
@@ -314,6 +318,13 @@ func TestRuntimeStatusRequiresAdminAndRedactsSecrets(t *testing.T) {
 	if payload["default_provider"] != "openai-compatible" {
 		t.Fatalf("unexpected default provider: %#v", payload)
 	}
+	build, ok := payload["build"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected build map, got %#v", payload["build"])
+	}
+	if build["version"] != "0.1.0" || build["commit"] != "abc1234" || build["build_time"] != "2026-06-25T03:00:00Z" || build["image_tag"] != "sha-abc1234" {
+		t.Fatalf("unexpected build metadata: %#v", build)
+	}
 	providers, ok := payload["providers"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected providers map, got %#v", payload["providers"])
@@ -321,6 +332,35 @@ func TestRuntimeStatusRequiresAdminAndRedactsSecrets(t *testing.T) {
 	openai, ok := providers["openai_compatible"].(map[string]any)
 	if !ok || openai["configured"] != true || openai["model"] != "gpt-image-2" {
 		t.Fatalf("unexpected openai-compatible status: %#v", providers["openai_compatible"])
+	}
+}
+
+func TestAssetArchiveRestoreRoutesUseAdminSessionAndAudit(t *testing.T) {
+	tests := []struct {
+		path       []string
+		wantRoute  string
+		wantAction string
+	}{
+		{
+			path:       []string{"api", "assets", "asset_demo", "archive"},
+			wantRoute:  "/api/assets/{asset_id}/archive",
+			wantAction: "archive_asset",
+		},
+		{
+			path:       []string{"api", "assets", "asset_demo", "restore"},
+			wantRoute:  "/api/assets/{asset_id}/restore",
+			wantAction: "restore_asset",
+		},
+	}
+
+	for _, tt := range tests {
+		if !routeAllowsAdminSession(tt.path, http.MethodPost) {
+			t.Fatalf("expected %s to allow admin session", strings.Join(tt.path, "/"))
+		}
+		route, action := inferAuditRoute(tt.path, http.MethodPost)
+		if route != tt.wantRoute || action != tt.wantAction {
+			t.Fatalf("unexpected audit route/action for %v: %s %s", tt.path, route, action)
+		}
 	}
 }
 
@@ -765,7 +805,7 @@ func TestParseAssetListQuery(t *testing.T) {
 	if query.ProjectID != "prj_demo" || query.CampaignID != "cmp_demo" {
 		t.Fatalf("unexpected scope: %#v", query)
 	}
-	if query.Limit != 500 || query.Offset != 7 || query.Status != "selected" || query.Provider != "mock" || query.Model != "mock-image" {
+	if query.Limit != 500 || query.Offset != 7 || query.Status != domain.AssetApproved || query.Provider != "mock" || query.Model != "mock-image" {
 		t.Fatalf("basic filters were not parsed: %#v", query)
 	}
 	if query.Source != "mcp" || query.SessionID != "s1" || query.BatchID != "b1" || query.Keyword != "hero" {
@@ -773,6 +813,18 @@ func TestParseAssetListQuery(t *testing.T) {
 	}
 	if query.CreatedFrom == nil || query.CreatedTo == nil {
 		t.Fatalf("date filters were not parsed: %#v", query)
+	}
+}
+
+func TestParseAssetListQueryMapsArchivedStatusToDeprecatedStorageStatus(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/assets?status=archived", nil)
+
+	query, err := parseAssetListQuery(request, "prj_demo", "cmp_demo")
+	if err != nil {
+		t.Fatalf("parseAssetListQuery returned error: %v", err)
+	}
+	if query.Status != domain.AssetDeprecated {
+		t.Fatalf("archived filter should map to deprecated storage status, got %#v", query.Status)
 	}
 }
 

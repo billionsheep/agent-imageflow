@@ -1,5 +1,17 @@
 # Decisions
 
+## 2026-06-25: 单资产清理采用 Admin 归档/恢复，默认不物理删除 archived
+
+- Decision: 单 asset 第一轮采用 Admin-only `archive/restore` 语义：归档写入现有 `deprecated` 存储状态，对外显示为 `archived`；恢复回 `generated`。`storage cleanup` 默认不再包含 archived/deprecated，只有显式 `--deprecated` 或 `include_deprecated=true` 才会物理清理归档资产。MCP 继续不提供删除、清库、workspace/project/campaign/asset destructive tools。
+- Reason: 用户需要把废图从人工审图主路径移走，但不希望一次误点就物理删除；同时 agent 接入 MCP 的语义应保持“生产、查询、选择/拒绝、拿交付”，不应天然拥有破坏性数据生命周期权限。
+- Impact: 删除/归档/恢复继续走 Admin Web / Admin REST / CLI，写 audit；Project API Key 仍服务外部 agent 生图和查资产，不代表清理权限。后续如果需要 task/input-file reset 或 MCP 低风险 archive tool，必须单独确认权限、dry-run、审计和误删保护。
+
+## 2026-06-25: Runtime 诊断只暴露非敏感 build/provider/auth 摘要
+
+- Decision: Admin runtime status 可以暴露 API/Web version、commit、image tag、provider mode/model、Admin/Basic 是否配置等非敏感状态，用于定位本地/服务器/Web 镜像不一致；缺失 build 信息显示 `unknown`。接口和 Web 不返回 provider key、project key、Basic/Auth 密码、cookie、session、本地敏感路径或完整 secret。
+- Reason: 自托管部署后，用户高频遇到“我连的是哪个服务、为什么本地和服务器表现不同、为什么登录/缩略图/Provider 状态不一致”的问题；非敏感运行诊断比让用户手动看容器 env 或日志更安全。
+- Impact: GitHub Actions / Docker image 会注入 build metadata；Web 控制台显示当前 Agent ImageFlow Server 状态，并提示 API/Web commit mismatch。该能力不改变账号体系，也不引入每用户 provider key。
+
 ## 2026-06-23: Scope 删除采用 Admin 受控级联删除语义
 
 - Decision: 追加 `issues/next-phase-p1-scope-management-usability-followup.csv`。Scope 管理中的 workspace/project/campaign 删除后续应支持非空级联删除：删除 campaign 会删除其 task/attempt/asset/version/review/input-files/storage；删除 project/workspace 会递归删除所有下级 campaign/project。用户已确认该语义包含 selected/approved/published 资产。该能力仍只走 Admin Web/REST/CLI 受控链路，不向 MCP 暴露 workspace/project/campaign destructive tools。

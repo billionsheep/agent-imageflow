@@ -6,7 +6,7 @@ export function buildStorageCleanupPreviewInput(): AgentImageflowCleanupRequest 
   return {
     include_rejected: true,
     include_generated: true,
-    include_deprecated: true,
+    include_deprecated: false,
     include_failed_task_tmp: true,
     include_orphans: true,
   }

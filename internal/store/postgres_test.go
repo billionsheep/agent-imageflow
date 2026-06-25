@@ -21,6 +21,39 @@ func TestCanReviewAssetTransitionAllowsApproveFromRejected(t *testing.T) {
 	}
 }
 
+func TestLifecycleAssetTransitionsArchiveAndRestore(t *testing.T) {
+	tests := []struct {
+		status string
+		action string
+		want   bool
+	}{
+		{status: domain.AssetDraft, action: "archive", want: true},
+		{status: domain.AssetRejected, action: "archive", want: true},
+		{status: domain.AssetApproved, action: "archive", want: false},
+		{status: domain.AssetPublished, action: "archive", want: false},
+		{status: domain.AssetDeprecated, action: "restore", want: true},
+		{status: domain.AssetDraft, action: "restore", want: false},
+	}
+	for _, tt := range tests {
+		if got := canLifecycleAssetTransition(tt.status, tt.action); got != tt.want {
+			t.Fatalf("canLifecycleAssetTransition(%q, %q) = %v, want %v", tt.status, tt.action, got, tt.want)
+		}
+	}
+
+	if got, err := nextStatusForLifecycleAction("archive"); err != nil || got != domain.AssetDeprecated {
+		t.Fatalf("archive next status = %q err=%v", got, err)
+	}
+	if got, err := nextStatusForLifecycleAction("restore"); err != nil || got != domain.AssetDraft {
+		t.Fatalf("restore next status = %q err=%v", got, err)
+	}
+}
+
+func TestPublicAssetStatusMapsDeprecatedToArchived(t *testing.T) {
+	if got := publicAssetStatus(domain.AssetDeprecated); got != "archived" {
+		t.Fatalf("deprecated should map to archived for public responses, got %q", got)
+	}
+}
+
 func TestVisualContextFromProjectMetadataPreservesExistingMetadataShape(t *testing.T) {
 	raw, err := json.Marshal(map[string]any{
 		"quality_profile": map[string]any{
