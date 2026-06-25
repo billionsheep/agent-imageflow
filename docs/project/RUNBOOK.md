@@ -467,6 +467,18 @@ docker compose exec api /app/vag audit list \
   --limit 20
 ```
 
+### Scope 级联删除边界
+
+Scope 管理里的 workspace / project / campaign 删除现在是 Admin 受控级联删除，不再要求 scope 为空：
+
+- 删除 `campaign` 会清理该 campaign 下的 task、task attempt、asset、asset version、review/delivery event 和对应 storage scope 目录。
+- 删除 `project` 会递归清理下级 campaign，再删除 project scope storage。
+- 删除 `workspace` 会递归清理下级 project/campaign，再删除 workspace scope storage。
+- 这是“删除整个业务空间/测试空间”的生命周期动作。用户确认后，`selected/approved/published` 资产也会随 scope 删除。
+- 资产级 `storage-cleanup-preview/execute` 仍默认保护 `selected/approved/published`；不要把这两条链路混用。
+- MCP 仍不提供 workspace/project/campaign/asset 硬删除工具；agent 如需清理，只能标记 `reject_image_asset` 或请求人类/运维通过 Admin Web/REST/CLI 处理。
+- 执行真实删除前建议先备份 Postgres 与 storage root/NAS 快照；浏览器确认框会提示影响范围，但它不是备份机制。
+
 ## Self-hosting Minimum
 
 `docker-compose.yml` 当前保留开发友好的端口映射：

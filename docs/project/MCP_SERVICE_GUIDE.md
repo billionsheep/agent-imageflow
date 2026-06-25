@@ -24,6 +24,7 @@ docker compose exec -T api /app/mcp
 - `api` 和 `worker` 要同时存在。`create_image_task` 只负责入队，真正生成 mock 资产的是 `worker`。
 - `/app/mcp` 通过 stdin/stdout 收发换行分隔 JSON-RPC。
 - MCP 进程复用与 API 相同的环境变量、数据库、Redis、默认 scope 和本地存储。
+- 示例文件按“一行一条 JSON-RPC”保存；不要把同一条请求格式化成多行后直接 pipe 给 `/app/mcp`。
 
 如果只想确认 MCP 进程能启动，也可以单独执行：
 
@@ -124,7 +125,7 @@ docker compose run -T --rm api /app/mcp
 
 按 `asset_id` 返回交付信息。第一版最重要的是：
 
-- `original_url`
+- `download_url`：原图交付链接，也就是业务语义里的 original image URL
 - `thumbnail_url`
 - `metadata_url`
 
@@ -140,7 +141,7 @@ docker compose run -T --rm api /app/mcp
 4. `list_image_assets`
 5. `get_asset_delivery_info`
 
-其中第 2 步建议直接复用 `examples/mcp/create-pet-scene.json`。
+其中第 2 步建议直接复用 `examples/mcp/create-pet-scene.json`。该示例默认使用本地 seed scope `ws_default / prj_xhs_anime / cmp_7day_cover`，因此新 agent 不需要先创建 workspace/project/campaign。
 
 ## 最小任务示例
 
@@ -148,10 +149,11 @@ docker compose run -T --rm api /app/mcp
 
 这个示例体现了：
 
-- 固定 scope：`workspace/project/campaign`
+- 固定 scope：默认 seed 的 `workspace/project/campaign`
 - 业务追踪：`source/session_id/batch_id/story_id/scene_id/target_path`
-- Project Visual Context 引用：`character_ids`、`prompt_recipe_id`、`use_project_visual_context`
 - mock 生成：`provider=mock`
+
+为保证新 agent 在干净默认环境中可以直接跑通，示例默认不启用 Project Visual Context。业务 project 配好角色卡、参考图和 prompt recipe 后，再在任务参数中追加 `character_ids`、`reference_asset_ids`、`prompt_recipe_id` 和 `use_project_visual_context=true`。
 
 示例不包含：
 
@@ -217,6 +219,8 @@ docker compose ps
 MCP 第一轮不提供删除 workspace / project / campaign / asset 的工具。新 agent 只能通过 `reject_image_asset` 标记错图、通过 `select_image_asset` 确认好图、通过查询和 delivery 工具拿交付结果。
 
 真正的数据清理或试用重置走 Admin Web / REST / CLI 的受控 cleanup 流程：先 dry-run 预览候选，再用 dry-run token 或明确确认执行。不要把 Admin cookie、cleanup token、provider key 或真实 project key 写进 MCP 配置示例。
+
+若人类在 Web 中删除整个 workspace / project / campaign，平台会按 scope 生命周期做级联删除，包括子级、任务、资产、缩略图、metadata、原图和 selected / approved / published 结果；这仍然是 Admin 受控操作，不是 MCP 能力。
 
 ## 配置示例
 

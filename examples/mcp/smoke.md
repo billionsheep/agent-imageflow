@@ -29,6 +29,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}' 
 
 ## 2. create mock task
 
+`examples/mcp/create-pet-scene.json` 是单行 JSON-RPC；MCP stdio 按行解析请求。
+
 ```bash
 cat examples/mcp/create-pet-scene.json \
   | docker compose exec -T api /app/mcp
@@ -58,7 +60,7 @@ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":\"get-task\",\"method\":\"tools/call\
 ## 4. list assets
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":"list-assets","method":"tools/call","params":{"name":"list_image_assets","arguments":{"project_id":"prj_pet_account","campaign_id":"cmp_pet_story_batch_001","source":"codex","session_id":"pet_story_session_local_demo","batch_id":"pet_story_batch_local_demo","limit":10}}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":"list-assets","method":"tools/call","params":{"name":"list_image_assets","arguments":{"project_id":"prj_xhs_anime","campaign_id":"cmp_7day_cover","source":"codex","session_id":"pet_story_session_local_demo","batch_id":"pet_story_batch_local_demo","limit":10}}}' \
   | docker compose exec -T api /app/mcp
 ```
 
@@ -80,7 +82,7 @@ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":\"delivery\",\"method\":\"tools/call\
 
 期望：
 
-- 返回 `original_url`
+- 返回 `download_url`，它就是原图交付链接
 - 返回 `thumbnail_url`
 - 返回 `metadata_url`
 
@@ -109,3 +111,4 @@ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":\"select\",\"method\":\"tools/call\",
 - 不运行真实 provider
 - 不写入真实 project API key / provider key / Basic Auth
 - 不验证远程 HTTP MCP
+- 不通过 MCP 删除 workspace / project / campaign / asset

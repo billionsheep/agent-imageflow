@@ -23,6 +23,11 @@ type PostgresStore struct {
 	db *sql.DB
 }
 
+type scopedDeleteStatement struct {
+	SQL  string
+	Args []any
+}
+
 type RepairTaskCandidate struct {
 	Task         domain.Task `json:"task"`
 	IssueKind    string      `json:"issue_kind"`
@@ -383,22 +388,7 @@ func (s *PostgresStore) DeleteWorkspace(ctx context.Context, workspaceID string)
 		return ErrNotFound
 	}
 
-	var projectCount int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM project
-		WHERE workspace_id = $1
-	`, workspaceID).Scan(&projectCount); err != nil {
-		return err
-	}
-	if projectCount > 0 {
-		return fmt.Errorf("workspace %s is not empty", workspaceID)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM workspace
-		WHERE id = $1
-	`, workspaceID); err != nil {
+	if err := execScopedDeleteStatements(ctx, tx, workspaceCascadeDeleteStatements(workspaceID)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -427,22 +417,7 @@ func (s *PostgresStore) DeleteProject(ctx context.Context, workspaceID, projectI
 		return ErrNotFound
 	}
 
-	var campaignCount int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM campaign
-		WHERE workspace_id = $1 AND project_id = $2
-	`, workspaceID, projectID).Scan(&campaignCount); err != nil {
-		return err
-	}
-	if campaignCount > 0 {
-		return fmt.Errorf("project %s is not empty", projectID)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM project
-		WHERE workspace_id = $1 AND id = $2
-	`, workspaceID, projectID); err != nil {
+	if err := execScopedDeleteStatements(ctx, tx, projectCascadeDeleteStatements(workspaceID, projectID)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -471,37 +446,54 @@ func (s *PostgresStore) DeleteCampaign(ctx context.Context, workspaceID, project
 		return ErrNotFound
 	}
 
-	var taskCount int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM generation_task
-		WHERE workspace_id = $1 AND project_id = $2 AND campaign_id = $3
-	`, workspaceID, projectID, campaignID).Scan(&taskCount); err != nil {
-		return err
-	}
-	if taskCount > 0 {
-		return fmt.Errorf("campaign %s is not empty", campaignID)
-	}
-
-	var assetCount int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM asset
-		WHERE workspace_id = $1 AND project_id = $2 AND campaign_id = $3
-	`, workspaceID, projectID, campaignID).Scan(&assetCount); err != nil {
-		return err
-	}
-	if assetCount > 0 {
-		return fmt.Errorf("campaign %s is not empty", campaignID)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM campaign
-		WHERE workspace_id = $1 AND project_id = $2 AND id = $3
-	`, workspaceID, projectID, campaignID); err != nil {
+	if err := execScopedDeleteStatements(ctx, tx, campaignCascadeDeleteStatements(workspaceID, projectID, campaignID)); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func execScopedDeleteStatements(ctx context.Context, tx *sql.Tx, statements []scopedDeleteStatement) error {
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.SQL, statement.Args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func workspaceCascadeDeleteStatements(workspaceID string) []scopedDeleteStatement {
+	args := []any{workspaceID}
+	return append(scopedAssetCascadeDeleteStatements("a.workspace_id = $1", "gt.workspace_id = $1", args),
+		scopedDeleteStatement{SQL: `DELETE FROM campaign WHERE workspace_id = $1`, Args: args},
+		scopedDeleteStatement{SQL: `DELETE FROM project WHERE workspace_id = $1`, Args: args},
+		scopedDeleteStatement{SQL: `DELETE FROM workspace WHERE id = $1`, Args: args},
+	)
+}
+
+func projectCascadeDeleteStatements(workspaceID, projectID string) []scopedDeleteStatement {
+	args := []any{workspaceID, projectID}
+	return append(scopedAssetCascadeDeleteStatements("a.workspace_id = $1 AND a.project_id = $2", "gt.workspace_id = $1 AND gt.project_id = $2", args),
+		scopedDeleteStatement{SQL: `DELETE FROM campaign WHERE workspace_id = $1 AND project_id = $2`, Args: args},
+		scopedDeleteStatement{SQL: `DELETE FROM project WHERE workspace_id = $1 AND id = $2`, Args: args},
+	)
+}
+
+func campaignCascadeDeleteStatements(workspaceID, projectID, campaignID string) []scopedDeleteStatement {
+	args := []any{workspaceID, projectID, campaignID}
+	return append(scopedAssetCascadeDeleteStatements("a.workspace_id = $1 AND a.project_id = $2 AND a.campaign_id = $3", "gt.workspace_id = $1 AND gt.project_id = $2 AND gt.campaign_id = $3", args),
+		scopedDeleteStatement{SQL: `DELETE FROM campaign WHERE workspace_id = $1 AND project_id = $2 AND id = $3`, Args: args},
+	)
+}
+
+func scopedAssetCascadeDeleteStatements(assetPredicate, taskPredicate string, args []any) []scopedDeleteStatement {
+	return []scopedDeleteStatement{
+		{SQL: `DELETE FROM delivery_event de USING asset a WHERE de.asset_id = a.id AND ` + assetPredicate, Args: args},
+		{SQL: `DELETE FROM review_event re USING asset a WHERE re.asset_id = a.id AND ` + assetPredicate, Args: args},
+		{SQL: `DELETE FROM asset_version av USING asset a WHERE av.asset_id = a.id AND ` + assetPredicate, Args: args},
+		{SQL: `DELETE FROM asset a WHERE ` + assetPredicate, Args: args},
+		{SQL: `DELETE FROM task_attempt ta USING generation_task gt WHERE ta.task_id = gt.id AND ` + taskPredicate, Args: args},
+		{SQL: `DELETE FROM generation_task gt WHERE ` + taskPredicate, Args: args},
+	}
 }
 
 func (s *PostgresStore) GetProjectQualityProfile(ctx context.Context, workspaceID, projectID string) (domain.QualityProfile, error) {

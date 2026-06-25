@@ -104,6 +104,15 @@ function pushField(fields: OperatorReviewField[], key: string, label: string, va
   fields.push({ key, label, value: text })
 }
 
+export function getAssetReviewStatusLabel(status: string): string {
+  const normalized = status.trim().toLowerCase()
+  if (normalized === 'selected' || normalized === 'approved') return '已选'
+  if (normalized === 'rejected') return '已拒绝'
+  if (normalized === 'published') return '已发布'
+  if (normalized === 'failed') return '失败'
+  return '待选'
+}
+
 export function getAssetReviewTitle(asset: AgentImageflowAssetResponse): string {
   const metadataSummary = [
     'scene_summary',

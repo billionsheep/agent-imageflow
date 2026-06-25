@@ -38,6 +38,7 @@ import {
   formatStorageCleanupError,
   maskStorageCleanupToken,
 } from '../lib/storageCleanupPanel'
+import { buildCascadeScopeDeleteMessage } from '../lib/scopeManagerUsability'
 import type { AppSettings } from '../types'
 import { ArchiveIcon, CloseIcon, CollectionManageIcon, EditIcon, RefreshIcon, TrashIcon } from './icons'
 
@@ -931,11 +932,18 @@ export default function ScopeManagerModal() {
 
   const confirmDeleteWorkspace = () => {
     if (!selectedWorkspace) return
+    const stats = dashboardStats.workspaces[selectedWorkspace.workspace_id]
     setConfirmDialog({
       title: '删除 Workspace',
-      message: `确定要删除 workspace「${selectedWorkspace.name || selectedWorkspace.workspace_id}」吗？\n\n只有当 workspace 下没有 project 时才能删除。`,
+      message: buildCascadeScopeDeleteMessage('workspace', selectedWorkspace.name || selectedWorkspace.workspace_id, {
+        projectCount: stats?.projectCount,
+        campaignCount: stats?.campaignCount,
+        taskCount: stats?.taskCount,
+        assetCount: stats?.assetCount,
+        selectedCount: stats?.selectedCount,
+      }),
       tone: 'danger',
-      confirmText: '删除',
+      confirmText: '级联删除',
       action: () => {
         void runAction('workspace-delete', async () => {
           await deleteAgentImageflowWorkspace(baseUrl, selectedWorkspace.workspace_id, auth)
@@ -956,11 +964,17 @@ export default function ScopeManagerModal() {
 
   const confirmDeleteProject = () => {
     if (!selectedWorkspace || !selectedProject) return
+    const stats = dashboardStats.projects[selectedProject.project_id]
     setConfirmDialog({
       title: '删除 Project',
-      message: `确定要删除 project「${selectedProject.name || selectedProject.project_id}」吗？\n\n只有当 project 下没有 campaign 时才能删除。`,
+      message: buildCascadeScopeDeleteMessage('project', selectedProject.name || selectedProject.project_id, {
+        campaignCount: stats?.campaignCount,
+        taskCount: stats?.taskCount,
+        assetCount: stats?.assetCount,
+        selectedCount: stats?.selectedCount,
+      }),
       tone: 'danger',
-      confirmText: '删除',
+      confirmText: '级联删除',
       action: () => {
         void runAction('project-delete', async () => {
           await deleteAgentImageflowProject(baseUrl, {
@@ -986,11 +1000,16 @@ export default function ScopeManagerModal() {
 
   const confirmDeleteCampaign = () => {
     if (!selectedWorkspace || !selectedProject || !selectedCampaign) return
+    const stats = dashboardStats.campaigns[getCampaignKey(selectedCampaign.project_id, selectedCampaign.campaign_id)]
     setConfirmDialog({
       title: '删除 Campaign',
-      message: `确定要删除 campaign「${selectedCampaign.name || selectedCampaign.campaign_id}」吗？\n\n只有当 campaign 下没有任务或资产时才能删除。`,
+      message: buildCascadeScopeDeleteMessage('campaign', selectedCampaign.name || selectedCampaign.campaign_id, {
+        taskCount: stats?.taskCount,
+        assetCount: stats?.assetCount,
+        selectedCount: stats?.selectedCount,
+      }),
       tone: 'danger',
-      confirmText: '删除',
+      confirmText: '级联删除',
       action: () => {
         void runAction('campaign-delete', async () => {
           await deleteAgentImageflowCampaign(baseUrl, {
@@ -1102,11 +1121,11 @@ export default function ScopeManagerModal() {
     : '尚未设置当前托管 scope'
 
   return createPortal(
-    <div data-no-drag-select className="fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={close}>
+    <div data-no-drag-select className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4" onClick={close}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-overlay-in" />
       <div
         ref={modalRef}
-        className="relative z-10 flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
+        className="relative z-10 flex h-[88vh] max-h-[calc(100vh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 sm:max-h-[calc(100vh-2rem)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="border-b border-gray-200/70 px-6 py-5 dark:border-white/[0.08]">
@@ -1177,9 +1196,9 @@ export default function ScopeManagerModal() {
           </div>
         )}
 
-        <div className="flex-1 overflow-hidden px-6 py-4">
-          <div className="grid h-full grid-cols-1 gap-4 xl:grid-cols-3">
-            <div className="flex min-h-0 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+          <div className="grid min-h-full grid-cols-1 gap-4 xl:grid-cols-3">
+            <div className="flex min-h-[420px] flex-col xl:min-h-0">
               <ScopeListSection
                 title="Workspace"
                 description="实例级业务空间。"
@@ -1207,7 +1226,7 @@ export default function ScopeManagerModal() {
               />
             </div>
 
-            <div className="flex min-h-0 flex-col">
+            <div className="flex min-h-[420px] flex-col xl:min-h-0">
               <ScopeListSection
                 title="Project"
                 description="内容账号或业务项目。"
@@ -1237,7 +1256,7 @@ export default function ScopeManagerModal() {
               />
             </div>
 
-            <div className="flex min-h-0 flex-col">
+            <div className="flex min-h-[560px] flex-col xl:min-h-0">
               <ScopeListSection
                 title="Campaign"
                 description="任务与资产归属的实际投放批次。"

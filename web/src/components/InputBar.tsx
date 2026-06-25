@@ -776,7 +776,7 @@ export default function InputBar() {
     : settings.imageflowManagedMode
     ? '请先在设置或 Scope 管理中选择完整 scope'
     : '尚未完成 API 配置，请在右上角设置中进行'
-  const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...'
+  const promptPlaceholder = '描述你想生成的图片、画面或剧情...'
   const submitCurrentMode = useCallback(() => {
     if (appMode === 'agent') {
       void submitAgentMessage()

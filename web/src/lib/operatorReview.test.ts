@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getAssetReviewTitle,
   getAssetReviewSummary,
+  getAssetReviewStatusLabel,
   getAssetTechnicalFields,
   getLocalhostMismatchWarning,
   getProductionFiltersFromAsset,
@@ -45,6 +46,15 @@ function assetFixture(overrides: Partial<AgentImageflowAssetResponse> = {}): Age
 }
 
 describe('operator review helpers', () => {
+  it('maps technical asset statuses to human review labels', () => {
+    expect(getAssetReviewStatusLabel('generated')).toBe('待选')
+    expect(getAssetReviewStatusLabel('draft')).toBe('待选')
+    expect(getAssetReviewStatusLabel('selected')).toBe('已选')
+    expect(getAssetReviewStatusLabel('approved')).toBe('已选')
+    expect(getAssetReviewStatusLabel('rejected')).toBe('已拒绝')
+    expect(getAssetReviewStatusLabel('published')).toBe('已发布')
+  })
+
   it('builds a short story-first asset title from recipe-expanded prompts', () => {
     expect(getAssetReviewTitle(assetFixture({
       prompt: [

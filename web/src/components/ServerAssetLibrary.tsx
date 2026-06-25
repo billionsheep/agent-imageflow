@@ -27,6 +27,7 @@ import {
 import {
   getAssetReviewTitle,
   getAssetReviewSummary,
+  getAssetReviewStatusLabel,
   getAssetTechnicalFields,
   getLocalhostMismatchWarning,
   getProductionFiltersFromAsset,
@@ -60,6 +61,14 @@ const EMPTY_ASSET_FILTERS: AssetFilters = {
   batchId: '',
   keyword: '',
 }
+
+const STATUS_FILTERS = [
+  { value: '', label: '全部' },
+  { value: 'generated', label: '待选' },
+  { value: 'selected', label: '已选' },
+  { value: 'rejected', label: '已拒绝' },
+  { value: 'published', label: '已发布' },
+]
 
 function buildAuth(apiKey: string, basicUsername: string, basicPassword: string): AgentImageflowAuth {
   return {
@@ -191,7 +200,7 @@ const ServerAssetCard = memo(function ServerAssetCard({
   const thumbnailUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.thumbnail_url)
   const originalUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.download_url)
   const metadataUrl = resolveAgentImageflowDeliveryUrl(baseUrl, asset.delivery.metadata_url)
-  const displayedStatus = busy ? `${asset.status} · 保存中` : asset.status
+  const displayedStatus = busy ? `${getAssetReviewStatusLabel(asset.status)} · 保存中` : getAssetReviewStatusLabel(asset.status)
 
   return (
     <article className={cardClassName(asset.status, busy)}>
@@ -292,7 +301,7 @@ const ServerAssetCard = memo(function ServerAssetCard({
             disabled={busy}
             className="inline-flex h-8 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200"
           >
-            选中
+            选择
           </button>
           <button
             type="button"
@@ -385,6 +394,7 @@ export default function ServerAssetLibrary() {
   const [adminChecking, setAdminChecking] = useState(false)
   const [draftFilters, setDraftFilters] = useState<AssetFilters>(EMPTY_ASSET_FILTERS)
   const [filters, setFilters] = useState<AssetFilters>(EMPTY_ASSET_FILTERS)
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [runtimeStatus, setRuntimeStatus] = useState<AgentImageflowRuntimeStatusResponse | null>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [scopeLoading, setScopeLoading] = useState(false)
@@ -620,7 +630,7 @@ export default function ServerAssetLibrary() {
     })
     try {
       updateAsset(await selectAgentImageflowAsset(baseUrl, asset.asset_id, auth))
-      showToast('已标记为选中', 'success')
+      showToast('已选择', 'success')
     } catch (nextError) {
       const message = getReviewFriendlyErrorMessage(nextError)
       setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
@@ -643,7 +653,7 @@ export default function ServerAssetLibrary() {
     })
     try {
       updateAsset(await rejectAgentImageflowAsset(baseUrl, asset.asset_id, auth))
-      showToast('已标记为 rejected', 'success')
+      showToast('已拒绝', 'success')
     } catch (nextError) {
       const message = getReviewFriendlyErrorMessage(nextError)
       setActionErrors((current) => ({ ...current, [asset.asset_id]: message }))
@@ -742,6 +752,7 @@ export default function ServerAssetLibrary() {
   const selectedCount = displayAssets.filter((asset) => asset.status === 'selected').length
   const rejectedCount = displayAssets.filter((asset) => asset.status === 'rejected').length
   const filtersActive = Object.values(draftFilters).some((value) => value.trim())
+  const advancedFiltersActive = [draftFilters.provider, draftFilters.source, draftFilters.sessionId, draftFilters.batchId, draftFilters.keyword].some((value) => value.trim())
   const adminConfigured = adminSession?.configured !== false
   const adminAuthenticated = Boolean(adminSession?.authenticated)
   const currentWorkspace = workspaces.find((item) => item.workspace_id === scope.workspaceId)
@@ -916,27 +927,36 @@ export default function ServerAssetLibrary() {
         )}
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-        <label className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="mb-1 block uppercase">状态</span>
-          <select
-            value={draftFilters.status}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-gray-950/50 dark:text-gray-100 dark:focus:border-blue-500/60"
-          >
-            <option value="">全部</option>
-            <option value="generated">已生成</option>
-            <option value="selected">已选中</option>
-            <option value="rejected">已拒绝</option>
-            <option value="published">已发布</option>
-          </select>
-        </label>
-        <AssetFilterInput label="provider" value={draftFilters.provider} placeholder="mock" onChange={(value) => setTextFilter('provider', value)} />
-        <AssetFilterInput label="source" value={draftFilters.source} placeholder="mcp / web" onChange={(value) => setTextFilter('source', value)} />
-        <AssetFilterInput label="session" value={draftFilters.sessionId} placeholder="session_id" onChange={(value) => setTextFilter('sessionId', value)} />
-        <AssetFilterInput label="batch" value={draftFilters.batchId} placeholder="batch_id" onChange={(value) => setTextFilter('batchId', value)} />
-        <AssetFilterInput label="keyword" value={draftFilters.keyword} placeholder="prompt / id" onChange={(value) => setTextFilter('keyword', value)} />
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {STATUS_FILTERS.map((filter) => (
+            <button
+              key={filter.value || 'all'}
+              type="button"
+              onClick={() => setStatusFilter(filter.value)}
+              className={`h-8 rounded-lg border px-3 text-xs font-medium transition ${draftFilters.status === filter.value ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-400/40 dark:bg-blue-500/10 dark:text-blue-100' : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300'}`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAdvancedFilters((current) => !current)}
+          className={`h-8 rounded-lg border px-3 text-xs font-medium transition ${advancedFiltersActive ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-400/40 dark:bg-blue-500/10 dark:text-blue-100' : 'border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:text-blue-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300'}`}
+        >
+          {showAdvancedFilters ? '收起高级筛选' : advancedFiltersActive ? '高级筛选已启用' : '高级筛选'}
+        </button>
       </div>
+      {showAdvancedFilters && (
+        <div className="mt-3 grid gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3 sm:grid-cols-2 lg:grid-cols-5 dark:border-white/[0.08] dark:bg-white/[0.03]">
+          <AssetFilterInput label="provider" value={draftFilters.provider} placeholder="mock" onChange={(value) => setTextFilter('provider', value)} />
+          <AssetFilterInput label="source" value={draftFilters.source} placeholder="mcp / web" onChange={(value) => setTextFilter('source', value)} />
+          <AssetFilterInput label="session" value={draftFilters.sessionId} placeholder="session_id" onChange={(value) => setTextFilter('sessionId', value)} />
+          <AssetFilterInput label="batch" value={draftFilters.batchId} placeholder="batch_id" onChange={(value) => setTextFilter('batchId', value)} />
+          <AssetFilterInput label="keyword" value={draftFilters.keyword} placeholder="prompt / id" onChange={(value) => setTextFilter('keyword', value)} />
+        </div>
+      )}
       {filtersActive && (
         <div className="mt-2 flex justify-end">
           <button

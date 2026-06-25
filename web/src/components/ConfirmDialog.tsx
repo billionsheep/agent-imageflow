@@ -90,7 +90,7 @@ export default function ConfirmDialog() {
   return (
     <div
       data-no-drag-select
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[160] flex items-center justify-center p-4"
       onClick={handleClose}
     >
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />

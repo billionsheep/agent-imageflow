@@ -23,6 +23,7 @@ import {
   upsertCharacterProjectReference,
   upsertProjectReferenceBinding,
 } from '../lib/projectContextQuickBinding'
+import { getProjectVisualContextReadiness } from '../lib/projectContextPanel'
 import { ArchiveIcon, CloseIcon, PlusIcon, RefreshIcon } from './icons'
 
 type ProjectContextTab = 'characters' | 'references' | 'recipes'
@@ -324,6 +325,11 @@ export default function ProjectContextModal() {
       value: compactListPreview(activeRecipes.map((recipe) => recipe.name || recipe.id)),
     },
   ], [activeCharacters, activeReferences, activeRecipes])
+  const readiness = useMemo(() => getProjectVisualContextReadiness({
+    characters: normalizedContext.characters,
+    references: normalizedContext.references,
+    recipes: normalizedContext.prompt_recipes,
+  }), [normalizedContext.characters, normalizedContext.prompt_recipes, normalizedContext.references])
 
   const close = useCallback(() => setShowProjectContext(false), [setShowProjectContext])
   useCloseOnEscape(open, close)
@@ -593,8 +599,15 @@ export default function ProjectContextModal() {
               <SummaryPill label="角色" value={normalizedContext.characters.length} />
               <SummaryPill label="参考图" value={normalizedContext.references.length} />
               <SummaryPill label="配方" value={normalizedContext.prompt_recipes.length} />
+              <SummaryPill label="角色有图" value={`${readiness.characterWithImageCount}/${readiness.activeCharacterCount}`} />
+              <SummaryPill label="缺图角色" value={readiness.missingCharacterImageCount} />
               <SummaryPill label="更新" value={formatDate(context?.updated_at)} />
             </div>
+            {readiness.missingCharacterImageCount > 0 && (
+              <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                缺少角色参考图：{readiness.missingCharacterImageNames.slice(0, 4).join('、')}{readiness.missingCharacterImageNames.length > 4 ? ` 等 ${readiness.missingCharacterImageNames.length} 个` : ''}
+              </div>
+            )}
             {scopeReady && (
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 {overviewRows.map((row) => (
@@ -619,7 +632,7 @@ export default function ProjectContextModal() {
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-200/80 bg-white px-3 text-xs font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300"
             >
               <RefreshIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Reload
+              刷新
             </button>
             <button
               type="button"

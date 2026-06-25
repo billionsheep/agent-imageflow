@@ -251,3 +251,67 @@ func TestBuildCountSceneRegenerationsQueryCountsMetadataLineage(t *testing.T) {
 		t.Fatalf("unexpected count query args: %#v", built.Args)
 	}
 }
+
+func TestScopedCascadeDeleteStatementsOrderDependentTables(t *testing.T) {
+	tests := []struct {
+		name       string
+		statements []scopedDeleteStatement
+		wantOrder  []string
+	}{
+		{
+			name:       "campaign",
+			statements: campaignCascadeDeleteStatements("ws_1", "prj_1", "cmp_1"),
+			wantOrder: []string{
+				"DELETE FROM delivery_event",
+				"DELETE FROM review_event",
+				"DELETE FROM asset_version",
+				"DELETE FROM asset",
+				"DELETE FROM task_attempt",
+				"DELETE FROM generation_task",
+				"DELETE FROM campaign",
+			},
+		},
+		{
+			name:       "project",
+			statements: projectCascadeDeleteStatements("ws_1", "prj_1"),
+			wantOrder: []string{
+				"DELETE FROM delivery_event",
+				"DELETE FROM review_event",
+				"DELETE FROM asset_version",
+				"DELETE FROM asset",
+				"DELETE FROM task_attempt",
+				"DELETE FROM generation_task",
+				"DELETE FROM campaign",
+				"DELETE FROM project",
+			},
+		},
+		{
+			name:       "workspace",
+			statements: workspaceCascadeDeleteStatements("ws_1"),
+			wantOrder: []string{
+				"DELETE FROM delivery_event",
+				"DELETE FROM review_event",
+				"DELETE FROM asset_version",
+				"DELETE FROM asset",
+				"DELETE FROM task_attempt",
+				"DELETE FROM generation_task",
+				"DELETE FROM campaign",
+				"DELETE FROM project",
+				"DELETE FROM workspace",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.statements) != len(tt.wantOrder) {
+				t.Fatalf("expected %d statements, got %d", len(tt.wantOrder), len(tt.statements))
+			}
+			for index, fragment := range tt.wantOrder {
+				if !strings.HasPrefix(tt.statements[index].SQL, fragment) {
+					t.Fatalf("expected statement %d to start with %q, got:\n%s", index, fragment, tt.statements[index].SQL)
+				}
+			}
+		})
+	}
+}

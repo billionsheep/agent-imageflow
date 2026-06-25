@@ -5,6 +5,7 @@
 - Decision: 追加 `issues/next-phase-p1-scope-management-usability-followup.csv`。Scope 管理中的 workspace/project/campaign 删除后续应支持非空级联删除：删除 campaign 会删除其 task/attempt/asset/version/review/input-files/storage；删除 project/workspace 会递归删除所有下级 campaign/project。用户已确认该语义包含 selected/approved/published 资产。该能力仍只走 Admin Web/REST/CLI 受控链路，不向 MCP 暴露 workspace/project/campaign destructive tools。
 - Reason: 真实 Web 试用中，empty-only 删除要求用户先手动清理子级 project/campaign/task/asset，和“删除这个测试空间/业务空间”的直觉不一致，也不适合持续试用产生的数据清理。Storage cleanup 默认保护 selected/published/approved 适合资产级清理；但用户明确删除整个 scope 时，应该按 scope 生命周期处理。
 - Impact: 后续实现必须提供明确二次确认文案，说明会删除子级、任务、资产、文件和 selected/approved/published 结果；操作必须写 audit，并保持未授权不可删除。MCP Service Pack、RUNBOOK 和数据生命周期文档必须继续说明：agent 通过 MCP 不能硬删除空间，删除/重置走 Admin 受控入口。
+- Implementation update: 已实现 Admin 受控级联删除的后端与 Web 确认文案。Postgres 显式删除 scope 下 `delivery_event`、`review_event`、`asset_version`、`asset`、`task_attempt`、`generation_task` 及下级 scope 记录，Service 层继续删除对应 storage scope 目录；ConfirmDialog 层级、ScopeManager 滚动和 InputBar `@` 误导文案也已修复。MCP 仍保持 6 个非破坏性工具，删除/重置继续走 Admin Web/REST/CLI。
 
 ## 2026-06-23: V1 稳定性以服务器/NAS 演练证据作为验收门槛
 

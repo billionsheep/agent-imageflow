@@ -137,7 +137,7 @@ sequenceDiagram
 
   Caller->>API: get delivery info
   API->>DB: load asset + current ready version
-  API-->>Caller: original_url, thumbnail_url, metadata_url
+  API-->>Caller: download_url, thumbnail_url, metadata_url
 ```
 
 ## State Simulation
