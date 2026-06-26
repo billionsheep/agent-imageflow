@@ -204,7 +204,7 @@ issues/next-phase-p1-story-continuity-mvc.csv
 - 后端 `CreateTask` 已能解析 `metadata_json.story_context_v1`，展开 reference bindings，并在 task `structured_input_json`、provider parameters、batch summary 和 manifest 中输出 continuity 摘要。
 - Sequential Previous Panel Mode 已强制 `selection_mode=manual_optional`，且 panel 2/3 必须引用上一格 selected asset。
 - Web Production View 已显示 `panel_index`、`narrative_role`、`dialogue`、`previous_panel_asset_id`、resolved reference count、provider reference participation 和 continuity warnings。
-- mock 3 格 smoke 与真实 provider canary 仍可作为可选证据执行，但不应把当前实现或 mock 结果误判为视觉连续性已验收。
+- MCP/mock 3 格数据链路已完成，可证明 metadata/status/select/manifest 链路；真实 provider canary 仍需费用确认后执行，且不应把 mock 结果误判为视觉连续性已验收。
 
 上位路线文件：
 
