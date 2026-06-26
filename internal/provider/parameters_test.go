@@ -30,6 +30,15 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 		"provider_reference_participation": "resolved_input_files",
 		"provider_reference_sources":       []string{"project_visual_context"},
 		"provider_reference_mime_types":    []string{"image/png"},
+		"story_context_v1": map[string]any{
+			"story_id":        "pet_story",
+			"story_revision":  "rev_001",
+			"story_plan_hash": "sha256:story-plan",
+			"generation_mode": "sequential_previous_panel",
+			"resolved_reference_assets": []map[string]any{
+				{"role": "character_reference", "asset_id": "asset_milo_primary"},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("marshal structured input: %v", err)
@@ -62,5 +71,9 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 		parameters["reference_input_file_count"] != float64(1) ||
 		parameters["provider_reference_participation"] != "resolved_input_files" {
 		t.Fatalf("reference participation diagnostics missing from parameters: %#v", parameters)
+	}
+	storyContext := parameters["story_context_v1"].(map[string]any)
+	if storyContext["story_id"] != "pet_story" || storyContext["generation_mode"] != "sequential_previous_panel" {
+		t.Fatalf("story_context_v1 missing from parameters: %#v", parameters)
 	}
 }

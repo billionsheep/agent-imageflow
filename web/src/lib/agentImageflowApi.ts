@@ -662,6 +662,37 @@ export interface AgentImageflowBatchStorySummaryAsset {
   created_at?: string
 }
 
+export interface AgentImageflowBatchStoryResolvedReferenceAsset {
+  role?: string
+  asset_id?: string
+  source?: string
+}
+
+export interface AgentImageflowBatchStoryContinuityWarning {
+  code?: string
+  message?: string
+}
+
+export interface AgentImageflowBatchStoryContinuitySummary {
+  story_revision?: string
+  story_plan_hash?: string
+  generation_mode?: string
+  panel_index?: number
+  narrative_role?: string
+  previous_state?: string
+  trigger_event?: string
+  visible_action?: string
+  resulting_state?: string
+  dialogue?: string
+  dialogue_intent?: string
+  previous_panel_asset_id?: string
+  provider_reference_participation?: string
+  must_keep_props?: string[]
+  allowed_changes?: string[]
+  resolved_reference_assets?: AgentImageflowBatchStoryResolvedReferenceAsset[]
+  continuity_warnings?: AgentImageflowBatchStoryContinuityWarning[]
+}
+
 export interface AgentImageflowBatchStorySummaryScene {
   story_id: string
   scene_id: string
@@ -673,6 +704,7 @@ export interface AgentImageflowBatchStorySummaryScene {
   regenerated_from_task_id?: string
   regeneration_count?: number
   counts: AgentImageflowBatchStorySummarySceneCounts
+  continuity?: AgentImageflowBatchStoryContinuitySummary
   visual_context?: {
     character_ids?: string[]
     reference_asset_ids?: string[]
@@ -719,6 +751,7 @@ export interface AgentImageflowBatchManifestAsset {
   thumbnail_url?: string
   metadata_url?: string
   target_path?: string
+  continuity?: AgentImageflowBatchStoryContinuitySummary
   visual_context?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -728,6 +761,7 @@ export interface AgentImageflowBatchManifestScene {
   scene_id: string
   target_path?: string
   primary_selected_asset_id?: string
+  continuity?: AgentImageflowBatchStoryContinuitySummary
   visual_context?: Record<string, unknown>
   tasks?: AgentImageflowBatchManifestTask[]
   assets?: AgentImageflowBatchManifestAsset[]

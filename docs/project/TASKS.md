@@ -4,7 +4,7 @@
 
 - [ ] V1 服务器/NAS 部署演练剩余项：Volcengine 旧服务已完成 `main` 镜像更新、升级前 Postgres/storage/env/compose 备份、临时 HTTP health/Web smoke、MCP `tools/list` 和 mock benchmark smoke；仍需补 HTTPS/Caddy 正式同源入口、浏览器 Admin Recent Assets / delivery smoke、restore 演练和 `IMAGE_TAG` 回滚演练。
 - [ ] V1 真实试用观察：2026-06-25 本地已完成 1 张真实 reference canary 和 1 次 mock 萌宠角色一致性 smoke，当前建议下一步只在服务器/NAS 环境继续用低并发真实 provider 跑完整萌宠账号工作流，记录 Web 审图、Project Context、Production View、manifest/NAS 交付中的具体摩擦；默认不做 benchmark。
-- [ ] P1 Story Continuity MVC：新增 `issues/next-phase-p1-story-continuity-mvc.csv` 作为下一轮第一执行入口；目标是 3 格、无字、顺序生成、人工选图、真实参考图参与，先做 `story_context_v1`、preflight、resolved reference assets、Production View 最小展示和 manifest 摘要。
+- [ ] P1 Story Continuity MVC：`story_context_v1` contract、panel 因果字段、reference_bindings / resolved_reference_assets 分离、sequential preflight、Production View 最小连续性展示和 manifest continuity 摘要已完成；下一步只剩 mock 3 格数据链路 smoke 与费用确认后的 cap=1 真实 canary。
 - [ ] P1 Story Continuity / Comic Workflow：新增 `issues/next-phase-p1-story-continuity-comic-workflow.csv`，下一步用 Story Bible、Panel Plan、Reference Roles 和 Story Review 解决“多张图只是同风格散图，不是连续故事”的问题；第一版复用 metadata，不做漫画编辑器或 AI 自动视觉质检。
 - [ ] P1 Caption Edit Lineage：新增 `issues/next-phase-p1-caption-edit-lineage.csv`，把“基于固定 asset 加字 edit”升级为正式派生资产语义，记录 `derived_from_asset_id`、`derivation_type=caption_edit`、`caption_text` 和 `caption_style`；Web 加字入口和 batch caption 后续实现。
 - [ ] P1 收口剩余验收：`issues/next-phase-p1-runtime-auth-accessibility-lifecycle-closure.csv` 已完成 runtime/build 诊断、登录错误清晰度、Scope selector 可访问性、单 asset 归档/恢复和 archived 默认保护；本地 compose/browser/mock/1 图真实 reference canary 已通过，剩余是部署环境 HTTPS/同源 replay、Basic Auth 场景复核和服务器 smoke 记录。

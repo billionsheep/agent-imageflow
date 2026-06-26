@@ -33,6 +33,18 @@ func TestBuildBatchManifestFiltersAssetsAndCountsOutputShape(t *testing.T) {
 			PrimarySelectedAssetID: "asset_selected",
 			TargetPath:             "stories/story-1/scene-001.png",
 			RegenerationCount:      1,
+			Continuity: domain.BatchStoryContinuitySummary{
+				StoryRevision:                  "rev_001",
+				StoryPlanHash:                  "sha256:story-plan",
+				GenerationMode:                 "sequential_previous_panel",
+				PanelIndex:                     1,
+				NarrativeRole:                  "setup",
+				Dialogue:                       "才没有等你",
+				ProviderReferenceParticipation: "resolved_input_files",
+				ResolvedReferenceAssets: []domain.BatchStoryResolvedReferenceAsset{
+					{Role: "character_reference", AssetID: "asset_ref"},
+				},
+			},
 			VisualContext: domain.BatchStoryVisualContext{
 				CharacterIDs:      []string{"dog_mochi"},
 				ReferenceAssetIDs: []string{"asset_ref"},
@@ -72,6 +84,12 @@ func TestBuildBatchManifestFiltersAssetsAndCountsOutputShape(t *testing.T) {
 	}
 	if selectedManifest.Assets[0].VisualContext.PromptRecipeID != "pet_story_cover" {
 		t.Fatalf("asset visual context was not carried: %#v", selectedManifest.Assets[0].VisualContext)
+	}
+	if selectedManifest.Assets[0].Continuity.PanelIndex != 1 || selectedManifest.Assets[0].Continuity.StoryRevision != "rev_001" {
+		t.Fatalf("asset continuity summary was not carried: %#v", selectedManifest.Assets[0].Continuity)
+	}
+	if len(selectedManifest.Scenes[0].Continuity.ResolvedReferenceAssets) != 1 {
+		t.Fatalf("scene continuity resolved references missing: %#v", selectedManifest.Scenes[0].Continuity)
 	}
 
 	allWithoutRejected := buildBatchManifest(summary, domain.BatchManifestQuery{SelectedOnly: false, IncludeRejected: false})

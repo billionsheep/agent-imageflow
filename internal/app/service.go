@@ -245,6 +245,7 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 			AssetIDs:               []string{},
 			SelectedAssetIDs:       []string{},
 			TaskIDs:                []string{},
+			Continuity:             scene.Continuity,
 			VisualContext:          scene.VisualContext,
 		}
 		for _, task := range scene.Tasks {
@@ -285,6 +286,7 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 				MetadataURL:   asset.MetadataURL,
 				TargetPath:    firstNonEmpty(asset.TargetPath, scene.TargetPath),
 				CreatedAt:     asset.CreatedAt,
+				Continuity:    scene.Continuity,
 				VisualContext: scene.VisualContext,
 			}
 			manifest.Assets = append(manifest.Assets, manifestAsset)
@@ -912,6 +914,34 @@ func metadataJSONFromStructuredInput(raw json.RawMessage) json.RawMessage {
 	return metadata
 }
 
+func storyContextV1FromStructuredInput(raw json.RawMessage) json.RawMessage {
+	var structured map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &structured) != nil {
+		return nil
+	}
+	story := structured[storyContextV1MetadataKey]
+	if len(story) == 0 || !json.Valid(story) {
+		return nil
+	}
+	return story
+}
+
+func (s *Service) storyContinuityAssetSnapshot(ctx context.Context, assetID string) (storyContinuityAssetSnapshot, error) {
+	item, err := s.store.GetAssetWithVersion(ctx, strings.TrimSpace(assetID))
+	if err != nil {
+		return storyContinuityAssetSnapshot{}, err
+	}
+	return storyContinuityAssetSnapshot{
+		Scope: domain.Scope{
+			WorkspaceID: item.WorkspaceID,
+			ProjectID:   item.ProjectID,
+			CampaignID:  item.CampaignID,
+		},
+		AssetStatus:  item.Status,
+		MetadataJSON: domain.NormalizeMetadataJSON(metadataJSONFromStructuredInput(item.TaskStructuredInputJSON)),
+	}, nil
+}
+
 func (s *Service) assetURL(assetID, suffix string) string {
 	if suffix == "" {
 		return s.cfg.PublicBaseURL + "/api/assets/" + assetID
@@ -1134,8 +1164,27 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	req.Provider = strings.TrimSpace(req.Provider)
 	req.SelectionMode = strings.TrimSpace(req.SelectionMode)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	req.MetadataJSON = domain.NormalizeMetadataJSON(req.MetadataJSON)
 	if req.Title == "" {
 		req.Title = "Untitled image task"
+	}
+	storyContext, _, err := storyContextV1FromMetadata(req.MetadataJSON)
+	if err != nil {
+		return req, nil, "", err
+	}
+	if storyContext != nil {
+		visualContext, err := s.store.GetProjectVisualContext(ctx, scope.WorkspaceID, scope.ProjectID)
+		if err != nil {
+			return req, nil, "", err
+		}
+		visualContext, err = normalizeProjectVisualContext(visualContext, time.Now().UTC())
+		if err != nil {
+			return req, nil, "", err
+		}
+		req, err = applyStoryContextBindingsToRequest(req, visualContext, storyContext)
+		if err != nil {
+			return req, nil, "", err
+		}
 	}
 	visualContext, err := s.expandProjectVisualContext(ctx, scope, req)
 	if err != nil {
@@ -1196,7 +1245,25 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	if req.RequestedCount > 10 {
 		req.RequestedCount = 10
 	}
-	req.MetadataJSON = domain.NormalizeMetadataJSON(req.MetadataJSON)
+	if storyContext != nil {
+		updatedStory, updatedMetadata, err := prepareStoryContextV1ForTask(
+			scope,
+			req.MetadataJSON,
+			req,
+			resolvedInputFiles,
+			referenceDiagnostics,
+			func(assetID string) (storyContinuityAssetSnapshot, error) {
+				return s.storyContinuityAssetSnapshot(ctx, assetID)
+			},
+		)
+		if err != nil {
+			return req, nil, "", err
+		}
+		if updatedStory != nil {
+			storyContext = updatedStory
+		}
+		req.MetadataJSON = domain.NormalizeMetadataJSON(updatedMetadata)
+	}
 
 	structured, err := json.Marshal(map[string]any{
 		"workspace_id":                     scope.WorkspaceID,
@@ -1233,6 +1300,7 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 		"provider_profile":                 providerProfile,
 		"selection_mode":                   req.SelectionMode,
 		"review_required":                  req.ReviewRequired,
+		"story_context_v1":                 storyContext,
 		"metadata_json":                    json.RawMessage(req.MetadataJSON),
 	})
 	if err != nil {

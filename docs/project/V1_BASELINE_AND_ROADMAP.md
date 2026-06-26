@@ -83,8 +83,8 @@ V1 不做：
 3. Story Continuity / Comic Workflow
    - 第一执行入口改为 `issues/next-phase-p1-story-continuity-mvc.csv`。
    - 先做 3 格无字 Sequential Previous Panel Mode：第 1 格 selected 后才能生成第 2 格，第 2 格 selected 后才能生成第 3 格。
-   - 记录 `story_context_v1`、panel causality、reference_bindings、resolved_reference_assets、preflight 和 manifest 摘要。
-   - Mock 只验数据链路；视觉连续性必须通过 cap=1 的真实 provider 小样本和人工评分验证。
+   - 当前已实现 `story_context_v1`、panel causality、reference_bindings / resolved_reference_assets 分离、sequential preflight、Production View 最小连续性展示和 manifest 摘要。
+   - 下一步只剩 mock 3 格 smoke 回填与费用确认后的 cap=1 真实 provider 小样本和人工评分。
    - `issues/next-phase-p1-story-continuity-comic-workflow.csv` 作为上位路线保留，待 MVC 通过后再拆 Story Review 等扩展。
 
 4. Caption / Edit Lineage
@@ -197,6 +197,13 @@ issues/next-phase-p1-story-continuity-mvc.csv
 - 增加 preflight，避免上一格 selected asset 缺失时静默退化为纯文生图。
 - 第一轮复用 Production View / Technical details 和 manifest，不新建完整 Story Review 页面。
 - 真实 provider canary 限定 cap=1、每格最多 2 候选、总图量最多 8 张。
+
+当前实现状态：
+
+- 后端 `CreateTask` 已能解析 `metadata_json.story_context_v1`，展开 reference bindings，并在 task `structured_input_json`、provider parameters、batch summary 和 manifest 中输出 continuity 摘要。
+- Sequential Previous Panel Mode 已强制 `selection_mode=manual_optional`，且 panel 2/3 必须引用上一格 selected asset。
+- Web Production View 已显示 `panel_index`、`narrative_role`、`dialogue`、`previous_panel_asset_id`、resolved reference count、provider reference participation 和 continuity warnings。
+- mock 3 格 smoke 与真实 provider canary 仍待执行，不应把当前实现误判为视觉连续性已验收。
 
 上位路线文件：
 

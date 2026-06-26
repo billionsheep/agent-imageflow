@@ -15,6 +15,7 @@ type taskStructuredProviderInput struct {
 	GenerationConfig               json.RawMessage               `json:"generation_config"`
 	ProviderProfile                domain.ProjectProviderProfile `json:"provider_profile"`
 	VisualContext                  *domain.VisualContextSnapshot `json:"visual_context_snapshot"`
+	StoryContextV1                 *domain.StoryContextV1        `json:"story_context_v1"`
 	ReferenceAssetCount            int                           `json:"reference_asset_count"`
 	ReferenceInputFileCount        int                           `json:"reference_input_file_count"`
 	ProviderReferenceParticipation string                        `json:"provider_reference_participation"`
@@ -97,6 +98,9 @@ func taskProviderParameters(task domain.Task, base map[string]any) []byte {
 	}
 	if input.VisualContext != nil {
 		parameters["visual_context_snapshot"] = input.VisualContext
+	}
+	if input.StoryContextV1 != nil {
+		parameters["story_context_v1"] = input.StoryContextV1
 	}
 	if input.ReferenceAssetCount > 0 {
 		parameters["reference_asset_count"] = input.ReferenceAssetCount

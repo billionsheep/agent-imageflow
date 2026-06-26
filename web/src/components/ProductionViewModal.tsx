@@ -213,6 +213,9 @@ function SceneCard({
   const regenerateDisabled = regeneratePending || !scene.latest_task_id
   const regenerateReason = regenerationReasons[sceneKey] ?? ''
   const regenerateResult = regenerationResults[sceneKey]
+  const continuity = scene.continuity
+  const continuityResolvedCount = continuity?.resolved_reference_assets?.length ?? 0
+  const continuityWarnings = continuity?.continuity_warnings?.map((warning) => warning.message || warning.code).filter(Boolean).join(' · ')
 
   return (
     <article className="overflow-hidden rounded-lg border border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-950/40">
@@ -266,6 +269,25 @@ function SceneCard({
             <Field label="尝试" value={scene.counts.attempt_count} />
             <Field label="拒绝" value={scene.counts.rejected_asset_count} />
           </div>
+
+          {continuity && (
+            <div className="grid gap-2 rounded-lg border border-amber-200/80 bg-amber-50/70 p-2 dark:border-amber-400/20 dark:bg-amber-500/10 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Panel" value={continuity.panel_index} />
+              <Field label="Role" value={continuity.narrative_role} />
+              <Field label="对白" value={continuity.dialogue} />
+              <Field label="上一格资产" value={continuity.previous_panel_asset_id} />
+              <Field label="参考参与" value={continuity.provider_reference_participation} />
+              <Field label="已解析参考" value={continuityResolvedCount} />
+              <Field label="Story Rev" value={continuity.story_revision} />
+              <Field label="Plan Hash" value={continuity.story_plan_hash} />
+            </div>
+          )}
+
+          {continuityWarnings && (
+            <div className="break-words rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+              {continuityWarnings}
+            </div>
+          )}
 
           {scene.visual_context && (
             <div className="grid gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2 dark:border-white/[0.08] dark:bg-white/[0.03] sm:grid-cols-3">

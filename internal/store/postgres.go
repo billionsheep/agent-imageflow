@@ -1396,6 +1396,7 @@ func (s *PostgresStore) GetBatchStorySummary(ctx context.Context, query domain.B
 				SceneOrder:    deriveSceneOrder(row.SceneID, row.SceneOrder),
 				TargetPath:    strings.TrimSpace(row.TaskTargetPath),
 				Status:        "empty",
+				Continuity:    extractBatchStoryContinuitySummary(row.StructuredInputJSON),
 				VisualContext: extractBatchStoryVisualContext(row.StructuredInputJSON),
 				Tasks:         []domain.BatchStorySummaryTask{},
 				Assets:        []domain.BatchStorySummaryAsset{},
@@ -1434,6 +1435,9 @@ func (s *PostgresStore) GetBatchStorySummary(ctx context.Context, query domain.B
 			}
 			if scene.TargetPath == "" && strings.TrimSpace(row.TaskTargetPath) != "" {
 				scene.TargetPath = strings.TrimSpace(row.TaskTargetPath)
+			}
+			if isBatchStoryContinuitySummaryEmpty(scene.Continuity) {
+				scene.Continuity = extractBatchStoryContinuitySummary(row.StructuredInputJSON)
 			}
 			if isBatchStoryVisualContextEmpty(scene.VisualContext) {
 				scene.VisualContext = extractBatchStoryVisualContext(row.StructuredInputJSON)
@@ -1734,6 +1738,169 @@ func extractBatchStoryVisualContext(raw json.RawMessage) domain.BatchStoryVisual
 		ReferenceAssetIDs: trimStringSlice(payload.ReferenceAssetIDs),
 		PromptRecipeID:    strings.TrimSpace(payload.PromptRecipeID),
 	}
+}
+
+func extractBatchStoryContinuitySummary(raw json.RawMessage) domain.BatchStoryContinuitySummary {
+	var payload struct {
+		ProviderReferenceParticipation string          `json:"provider_reference_participation"`
+		MetadataJSON                   json.RawMessage `json:"metadata_json"`
+		StoryContextV1                 json.RawMessage `json:"story_context_v1"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &payload) != nil {
+		return domain.BatchStoryContinuitySummary{}
+	}
+
+	metadata := map[string]any{}
+	if len(payload.MetadataJSON) > 0 {
+		_ = json.Unmarshal(payload.MetadataJSON, &metadata)
+	}
+
+	storyRaw := payload.StoryContextV1
+	if len(storyRaw) == 0 && metadata["story_context_v1"] != nil {
+		if serialized, err := json.Marshal(metadata["story_context_v1"]); err == nil {
+			storyRaw = serialized
+		}
+	}
+
+	var story domain.StoryContextV1
+	if len(storyRaw) > 0 {
+		_ = json.Unmarshal(storyRaw, &story)
+	}
+
+	panel := batchStoryPanelPlanEntry(story, metadata)
+	summary := domain.BatchStoryContinuitySummary{
+		StoryRevision:                  strings.TrimSpace(story.StoryRevision),
+		StoryPlanHash:                  strings.TrimSpace(story.StoryPlanHash),
+		GenerationMode:                 firstNonEmpty(strings.TrimSpace(story.GenerationMode), strings.TrimSpace(story.ContinuityPolicy.Mode), mapStringValue(metadata["generation_mode"])),
+		PanelIndex:                     batchStoryPanelIndex(panel, metadata),
+		NarrativeRole:                  firstNonEmpty(strings.TrimSpace(panel.NarrativeRole), mapStringValue(metadata["narrative_role"])),
+		PreviousState:                  firstNonEmpty(strings.TrimSpace(panel.PreviousState), mapStringValue(metadata["previous_state"])),
+		TriggerEvent:                   firstNonEmpty(strings.TrimSpace(panel.TriggerEvent), mapStringValue(metadata["trigger_event"])),
+		VisibleAction:                  firstNonEmpty(strings.TrimSpace(panel.VisibleAction), mapStringValue(metadata["visible_action"])),
+		ResultingState:                 firstNonEmpty(strings.TrimSpace(panel.ResultingState), mapStringValue(metadata["resulting_state"])),
+		Dialogue:                       firstNonEmpty(strings.TrimSpace(panel.Dialogue), mapStringValue(metadata["dialogue"])),
+		DialogueIntent:                 firstNonEmpty(strings.TrimSpace(panel.DialogueIntent), mapStringValue(metadata["dialogue_intent"])),
+		PreviousPanelAssetID:           mapStringValue(metadata["previous_panel_asset_id"]),
+		ProviderReferenceParticipation: firstNonEmpty(strings.TrimSpace(payload.ProviderReferenceParticipation), mapStringValue(metadata["provider_reference_participation"])),
+		MustKeepProps:                  batchStoryStringSlice(panel.MustKeepProps),
+		AllowedChanges:                 batchStoryStringSlice(panel.AllowedChanges),
+		ResolvedReferenceAssets:        batchStoryResolvedReferenceAssets(story.ResolvedReferenceAssets),
+		ContinuityWarnings:             batchStoryContinuityWarnings(story.ContinuityWarnings),
+	}
+	return summary
+}
+
+func batchStoryPanelPlanEntry(story domain.StoryContextV1, metadata map[string]any) domain.StoryPanelPlanEntry {
+	sceneID := mapStringValue(metadata["scene_id"])
+	panelIndex := mapIntValue(metadata["panel_index"])
+	if sceneID != "" {
+		for _, panel := range story.PanelPlan {
+			if strings.TrimSpace(panel.SceneID) == sceneID {
+				return panel
+			}
+		}
+	}
+	if panelIndex > 0 {
+		for _, panel := range story.PanelPlan {
+			if panel.PanelIndex == panelIndex {
+				return panel
+			}
+		}
+	}
+	return domain.StoryPanelPlanEntry{}
+}
+
+func batchStoryPanelIndex(panel domain.StoryPanelPlanEntry, metadata map[string]any) int {
+	if panel.PanelIndex > 0 {
+		return panel.PanelIndex
+	}
+	return mapIntValue(metadata["panel_index"])
+}
+
+func batchStoryResolvedReferenceAssets(items []domain.StoryResolvedReferenceAsset) []domain.BatchStoryResolvedReferenceAsset {
+	if len(items) == 0 {
+		return nil
+	}
+	output := make([]domain.BatchStoryResolvedReferenceAsset, 0, len(items))
+	for _, item := range items {
+		assetID := strings.TrimSpace(item.AssetID)
+		if assetID == "" {
+			continue
+		}
+		output = append(output, domain.BatchStoryResolvedReferenceAsset{
+			Role:    strings.TrimSpace(item.Role),
+			AssetID: assetID,
+			Source:  strings.TrimSpace(item.Source),
+		})
+	}
+	if len(output) == 0 {
+		return nil
+	}
+	return output
+}
+
+func batchStoryContinuityWarnings(items []domain.StoryContinuityWarning) []domain.BatchStoryContinuityWarning {
+	if len(items) == 0 {
+		return nil
+	}
+	output := make([]domain.BatchStoryContinuityWarning, 0, len(items))
+	for _, item := range items {
+		code := strings.TrimSpace(item.Code)
+		message := strings.TrimSpace(item.Message)
+		if code == "" && message == "" {
+			continue
+		}
+		output = append(output, domain.BatchStoryContinuityWarning{
+			Code:    code,
+			Message: message,
+		})
+	}
+	if len(output) == 0 {
+		return nil
+	}
+	return output
+}
+
+func batchStoryStringSlice(values []string) []string {
+	cleaned := trimStringSlice(values)
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
+func mapStringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func mapIntValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func isBatchStoryContinuitySummaryEmpty(value domain.BatchStoryContinuitySummary) bool {
+	return value.PanelIndex == 0 &&
+		strings.TrimSpace(value.NarrativeRole) == "" &&
+		strings.TrimSpace(value.Dialogue) == "" &&
+		strings.TrimSpace(value.PreviousPanelAssetID) == "" &&
+		len(value.ResolvedReferenceAssets) == 0 &&
+		len(value.ContinuityWarnings) == 0
 }
 
 func trimStringSlice(values []string) []string {

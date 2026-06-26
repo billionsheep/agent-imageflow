@@ -34,6 +34,9 @@ const (
 	SelectionAuto           = "auto"
 	SelectionBestOf         = "best_of"
 
+	StoryGenerationModeSequentialPreviousPanel = "sequential_previous_panel"
+	StoryGenerationModeParallelMinimalProps    = "parallel_minimal_props"
+
 	BestOfStrategyLocalMetadata = "local_metadata_v1"
 	BestOfStrategyHTTPJudge     = "http_judge_v1"
 
@@ -340,6 +343,94 @@ type BatchStoryVisualContext struct {
 	PromptRecipeID    string   `json:"prompt_recipe_id,omitempty"`
 }
 
+type StoryReferenceBindings map[string][]string
+
+type StoryPanelPlanEntry struct {
+	PanelIndex     int                 `json:"panel_index,omitempty"`
+	SceneID        string              `json:"scene_id,omitempty"`
+	NarrativeRole  string              `json:"narrative_role,omitempty"`
+	PreviousState  string              `json:"previous_state,omitempty"`
+	TriggerEvent   string              `json:"trigger_event,omitempty"`
+	VisibleAction  string              `json:"visible_action,omitempty"`
+	ResultingState string              `json:"resulting_state,omitempty"`
+	Dialogue       string              `json:"dialogue,omitempty"`
+	DialogueIntent string              `json:"dialogue_intent,omitempty"`
+	Camera         string              `json:"camera,omitempty"`
+	MustKeepProps  []string            `json:"must_keep_props,omitempty"`
+	AllowedChanges []string            `json:"allowed_changes,omitempty"`
+	ReferenceRoles map[string][]string `json:"reference_roles,omitempty"`
+	TargetPath     string              `json:"target_path,omitempty"`
+}
+
+type StoryResolvedReferenceAsset struct {
+	Role        string `json:"role,omitempty"`
+	AssetID     string `json:"asset_id,omitempty"`
+	Source      string `json:"source,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+	CampaignID  string `json:"campaign_id,omitempty"`
+}
+
+type StoryContinuityWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type StoryContinuityPolicy struct {
+	Mode                              string `json:"mode,omitempty"`
+	RequirePreviousSelectedAsset      bool   `json:"require_previous_selected_asset,omitempty"`
+	MaxPanels                         int    `json:"max_panels,omitempty"`
+	MaxCandidatesPerPanel             int    `json:"max_candidates_per_panel,omitempty"`
+	ProviderConcurrency               int    `json:"provider_concurrency,omitempty"`
+	MaxTotalImagesIncludingRegenerate int    `json:"max_total_images_including_regenerate,omitempty"`
+	CaptionEnabled                    bool   `json:"caption_enabled,omitempty"`
+}
+
+type StoryContextV1 struct {
+	SchemaVersion           string                        `json:"schema_version,omitempty"`
+	StoryID                 string                        `json:"story_id,omitempty"`
+	StoryRevision           string                        `json:"story_revision,omitempty"`
+	StoryPlanHash           string                        `json:"story_plan_hash,omitempty"`
+	GenerationMode          string                        `json:"generation_mode,omitempty"`
+	StoryBible              map[string]any                `json:"story_bible,omitempty"`
+	PanelPlan               []StoryPanelPlanEntry         `json:"panel_plan,omitempty"`
+	ReferenceBindings       StoryReferenceBindings        `json:"reference_bindings,omitempty"`
+	ResolvedReferenceAssets []StoryResolvedReferenceAsset `json:"resolved_reference_assets,omitempty"`
+	ContinuityWarnings      []StoryContinuityWarning      `json:"continuity_warnings,omitempty"`
+	ContinuityPolicy        StoryContinuityPolicy         `json:"continuity_policy,omitempty"`
+}
+
+type BatchStoryResolvedReferenceAsset struct {
+	Role    string `json:"role,omitempty"`
+	AssetID string `json:"asset_id,omitempty"`
+	Source  string `json:"source,omitempty"`
+}
+
+type BatchStoryContinuityWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type BatchStoryContinuitySummary struct {
+	StoryRevision                  string                             `json:"story_revision,omitempty"`
+	StoryPlanHash                  string                             `json:"story_plan_hash,omitempty"`
+	GenerationMode                 string                             `json:"generation_mode,omitempty"`
+	PanelIndex                     int                                `json:"panel_index,omitempty"`
+	NarrativeRole                  string                             `json:"narrative_role,omitempty"`
+	PreviousState                  string                             `json:"previous_state,omitempty"`
+	TriggerEvent                   string                             `json:"trigger_event,omitempty"`
+	VisibleAction                  string                             `json:"visible_action,omitempty"`
+	ResultingState                 string                             `json:"resulting_state,omitempty"`
+	Dialogue                       string                             `json:"dialogue,omitempty"`
+	DialogueIntent                 string                             `json:"dialogue_intent,omitempty"`
+	PreviousPanelAssetID           string                             `json:"previous_panel_asset_id,omitempty"`
+	ProviderReferenceParticipation string                             `json:"provider_reference_participation,omitempty"`
+	MustKeepProps                  []string                           `json:"must_keep_props,omitempty"`
+	AllowedChanges                 []string                           `json:"allowed_changes,omitempty"`
+	ResolvedReferenceAssets        []BatchStoryResolvedReferenceAsset `json:"resolved_reference_assets,omitempty"`
+	ContinuityWarnings             []BatchStoryContinuityWarning      `json:"continuity_warnings,omitempty"`
+}
+
 type BatchStorySummaryTask struct {
 	TaskID                string    `json:"task_id"`
 	Status                string    `json:"status"`
@@ -370,19 +461,20 @@ type BatchStorySummaryAsset struct {
 }
 
 type BatchStorySummaryScene struct {
-	StoryID                string                   `json:"story_id"`
-	SceneID                string                   `json:"scene_id"`
-	SceneOrder             int                      `json:"scene_order,omitempty"`
-	TargetPath             string                   `json:"target_path,omitempty"`
-	Status                 string                   `json:"status"`
-	LatestTaskID           string                   `json:"latest_task_id,omitempty"`
-	PrimarySelectedAssetID string                   `json:"primary_selected_asset_id,omitempty"`
-	RegeneratedFromTaskID  string                   `json:"regenerated_from_task_id,omitempty"`
-	RegenerationCount      int                      `json:"regeneration_count"`
-	Counts                 BatchStorySceneCounts    `json:"counts"`
-	VisualContext          BatchStoryVisualContext  `json:"visual_context,omitempty"`
-	Tasks                  []BatchStorySummaryTask  `json:"tasks"`
-	Assets                 []BatchStorySummaryAsset `json:"assets"`
+	StoryID                string                      `json:"story_id"`
+	SceneID                string                      `json:"scene_id"`
+	SceneOrder             int                         `json:"scene_order,omitempty"`
+	TargetPath             string                      `json:"target_path,omitempty"`
+	Status                 string                      `json:"status"`
+	LatestTaskID           string                      `json:"latest_task_id,omitempty"`
+	PrimarySelectedAssetID string                      `json:"primary_selected_asset_id,omitempty"`
+	RegeneratedFromTaskID  string                      `json:"regenerated_from_task_id,omitempty"`
+	RegenerationCount      int                         `json:"regeneration_count"`
+	Counts                 BatchStorySceneCounts       `json:"counts"`
+	Continuity             BatchStoryContinuitySummary `json:"continuity,omitempty"`
+	VisualContext          BatchStoryVisualContext     `json:"visual_context,omitempty"`
+	Tasks                  []BatchStorySummaryTask     `json:"tasks"`
+	Assets                 []BatchStorySummaryAsset    `json:"assets"`
 }
 
 type BatchStorySummaryResponse struct {
@@ -424,34 +516,36 @@ type BatchManifestTask struct {
 }
 
 type BatchManifestAsset struct {
-	AssetID       string                  `json:"asset_id"`
-	TaskID        string                  `json:"task_id"`
-	StoryID       string                  `json:"story_id,omitempty"`
-	SceneID       string                  `json:"scene_id,omitempty"`
-	Status        string                  `json:"status"`
-	Provider      string                  `json:"provider,omitempty"`
-	Model         string                  `json:"model,omitempty"`
-	Prompt        string                  `json:"prompt,omitempty"`
-	DownloadURL   string                  `json:"download_url"`
-	ThumbnailURL  string                  `json:"thumbnail_url,omitempty"`
-	MetadataURL   string                  `json:"metadata_url,omitempty"`
-	TargetPath    string                  `json:"target_path,omitempty"`
-	CreatedAt     time.Time               `json:"created_at"`
-	VisualContext BatchStoryVisualContext `json:"visual_context,omitempty"`
+	AssetID       string                      `json:"asset_id"`
+	TaskID        string                      `json:"task_id"`
+	StoryID       string                      `json:"story_id,omitempty"`
+	SceneID       string                      `json:"scene_id,omitempty"`
+	Status        string                      `json:"status"`
+	Provider      string                      `json:"provider,omitempty"`
+	Model         string                      `json:"model,omitempty"`
+	Prompt        string                      `json:"prompt,omitempty"`
+	DownloadURL   string                      `json:"download_url"`
+	ThumbnailURL  string                      `json:"thumbnail_url,omitempty"`
+	MetadataURL   string                      `json:"metadata_url,omitempty"`
+	TargetPath    string                      `json:"target_path,omitempty"`
+	CreatedAt     time.Time                   `json:"created_at"`
+	Continuity    BatchStoryContinuitySummary `json:"continuity,omitempty"`
+	VisualContext BatchStoryVisualContext     `json:"visual_context,omitempty"`
 }
 
 type BatchManifestScene struct {
-	StoryID                string                  `json:"story_id"`
-	SceneID                string                  `json:"scene_id"`
-	Status                 string                  `json:"status"`
-	TargetPath             string                  `json:"target_path,omitempty"`
-	LatestTaskID           string                  `json:"latest_task_id,omitempty"`
-	PrimarySelectedAssetID string                  `json:"primary_selected_asset_id,omitempty"`
-	RegenerationCount      int                     `json:"regeneration_count"`
-	AssetIDs               []string                `json:"asset_ids"`
-	SelectedAssetIDs       []string                `json:"selected_asset_ids"`
-	TaskIDs                []string                `json:"task_ids"`
-	VisualContext          BatchStoryVisualContext `json:"visual_context,omitempty"`
+	StoryID                string                      `json:"story_id"`
+	SceneID                string                      `json:"scene_id"`
+	Status                 string                      `json:"status"`
+	TargetPath             string                      `json:"target_path,omitempty"`
+	LatestTaskID           string                      `json:"latest_task_id,omitempty"`
+	PrimarySelectedAssetID string                      `json:"primary_selected_asset_id,omitempty"`
+	RegenerationCount      int                         `json:"regeneration_count"`
+	AssetIDs               []string                    `json:"asset_ids"`
+	SelectedAssetIDs       []string                    `json:"selected_asset_ids"`
+	TaskIDs                []string                    `json:"task_ids"`
+	Continuity             BatchStoryContinuitySummary `json:"continuity,omitempty"`
+	VisualContext          BatchStoryVisualContext     `json:"visual_context,omitempty"`
 }
 
 type BatchManifestResponse struct {

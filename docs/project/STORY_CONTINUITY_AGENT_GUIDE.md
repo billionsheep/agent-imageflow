@@ -75,6 +75,12 @@ Story Continuity Agent 不应该拥有：
 
 `reference_bindings` 是计划想使用的参考；`resolved_reference_assets` 是平台实际解析到、属于当前 project 且可送入 provider 的资产。只有后者存在，才能把任务称为 reference-assisted continuity。
 
+当前平台第一轮实现约定：
+
+- 从 `create_image_task.arguments.metadata_json.story_context_v1` 读取该 contract。
+- Sequential Previous Panel Mode 会强制 `selection_mode=manual_optional`。
+- 创建任务后，平台会把当前格的 `panel_index`、因果字段、`previous_panel_asset_id` 和 `provider_reference_participation` 回写到 metadata 根节点，供 summary / manifest / Production View 直接读取。
+
 ## Panel Plan 最小字段
 
 示例见 `examples/mcp/create-panel-plan.json`。第一版建议每格字段：
@@ -118,6 +124,8 @@ Story Continuity Agent 不应该拥有：
 - provider 支持所需参考图数量。
 - `panel_index > 1` 时，上一格必须已经有 selected asset。
 - 参考图解析失败时，不应静默退化为纯文生图；必须阻止任务或写入降级 warning。
+
+第一轮实现里，panel 2 / 3 若缺少上一格 selected asset，会直接在 `CreateTask` preflight 失败，而不是继续创建一个看似成功的 mock/文生图任务。
 
 ## 生成策略
 

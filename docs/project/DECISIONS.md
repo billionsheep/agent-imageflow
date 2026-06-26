@@ -367,3 +367,9 @@
 - Decision: 外部评审后，Story Continuity 第一轮不执行原大范围 CSV，而是新增 `issues/next-phase-p1-story-continuity-mvc.csv`：3 格、无字、顺序生成、人工选图、真实参考图参与。第一轮只做 `story_context_v1`、panel 因果字段、reference_bindings/resolved_reference_assets 分离、sequential preflight、Production View 最小展示、manifest 摘要、mock 数据链路 smoke 和 cap=1 的真实 provider 小样本 canary。
 - Reason: 原 Story Continuity、Caption Lineage 和 Pet Trial 计划交叉且过大；mock smoke 只能验证数据链路，不能证明视觉连续性；Story Review 新页面、Web 加字入口、批量 caption、ZIP 和自动视觉质检会把第一轮拖成漫画编辑器/交付系统。把第一轮压成 3 格无字顺序生成，可以最快验证“上一格 selected asset 参与”是否真的提升连续性。
 - Impact: `issues/next-phase-p1-story-continuity-comic-workflow.csv` 保留为上位路线；`issues/next-phase-p1-caption-edit-lineage.csv` 保留但 Web 加字和批量 caption 后置；新增 `examples/mcp/create-story-context-v1.json` 和 `docs/project/STORY_CONTINUITY_MVC_HANDOFF_PROMPT.md`。真实 provider 首轮总图量上限为 8 张，provider cap=1；MCP 仍不新增 destructive tools。
+
+## 2026-06-25: Story Continuity MVC 继续复用 metadata 和现有批次视图，不新增表或独立 Story Review 页面
+
+- Decision: 第一轮 Story Continuity MVC 继续复用现有 `CreateTask -> structured_input_json -> Batch Summary / Manifest -> Production View` 链路，不新增数据库表、不新增复杂 Story Review 页面。`story_context_v1` 作为 task metadata/structured input contract，panel 因果字段写回 metadata 根节点供现有 scene grouping、manifest 和 asset metadata 复用。
+- Reason: 当前平台已经具备 Project Visual Context、scene regenerate、batch summary、manifest 和 Production View；连续故事的最小验证缺的不是新存储层，而是“顺序 preflight + 可追踪 continuity metadata + 现有界面的最小可见性”。沿用现有链路可以最小改动完成 3 格闭环，同时避免把第一轮拖成新的审核产品。
+- Impact: `CreateTask` 现在会解析 `metadata_json.story_context_v1`、展开 `reference_bindings`、填充 `resolved_reference_assets`、验证 previous-panel selected asset，并把 continuity 摘要输出到 provider parameters、batch summary、manifest 和 Production View。后续若需要完整 Story Review、批量 caption 或更复杂的连续性质检，必须另开切片。

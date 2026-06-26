@@ -249,6 +249,74 @@ describe('agentImageflowApi', () => {
     expect(normalizeAgentImageflowAssetStatus('deprecated')).toBe('archived')
   })
 
+  it('keeps story continuity summary fields on normalized batch summaries', () => {
+    const response = normalizeAgentImageflowBatchStorySummaryResponse({
+      generated_at: '2026-06-25T12:00:00Z',
+      project_id: 'prj_demo',
+      campaign_id: 'cmp_demo',
+      counts: {
+        story_count: 1,
+        scene_count: 1,
+        scene_with_selected_count: 1,
+        scene_missing_selected_count: 0,
+        task_count: 1,
+        queued_count: 0,
+        running_count: 0,
+        succeeded_count: 1,
+        partial_count: 0,
+        failed_count: 0,
+        retrying_count: 0,
+        asset_count: 1,
+        generated_asset_count: 0,
+        selected_asset_count: 1,
+        rejected_asset_count: 0,
+        attempt_count: 1,
+        excluded_setup_task_count: 0,
+      },
+      stories: [{ story_id: 'pet_story', scene_count: 1, selected_scene_count: 1, scenes: ['scene_001'] }],
+      scenes: [{
+        story_id: 'pet_story',
+        scene_id: 'scene_001',
+        status: 'completed',
+        counts: {
+          task_count: 1,
+          succeeded_count: 1,
+          failed_count: 0,
+          asset_count: 1,
+          selected_asset_count: 1,
+          rejected_asset_count: 0,
+          attempt_count: 1,
+        },
+        continuity: {
+          story_revision: 'rev_001',
+          story_plan_hash: 'sha256:story-plan',
+          generation_mode: 'sequential_previous_panel',
+          panel_index: 1,
+          narrative_role: 'setup',
+          dialogue: '才没有等你',
+          previous_panel_asset_id: '',
+          provider_reference_participation: 'resolved_input_files',
+          resolved_reference_assets: [
+            { role: 'character_reference', asset_id: 'asset_milo_primary' },
+          ],
+        },
+        tasks: [],
+        assets: [{
+          asset_id: 'asset_selected',
+          task_id: 'task_001',
+          status: 'approved',
+          download_url: '/api/assets/asset_selected/original',
+          thumbnail_url: '/api/assets/asset_selected/thumbnail',
+          metadata_url: '/api/assets/asset_selected/metadata',
+        }],
+      }],
+    })
+
+    expect(response.scenes[0].assets[0].status).toBe('selected')
+    expect(response.scenes[0].continuity?.panel_index).toBe(1)
+    expect(response.scenes[0].continuity?.resolved_reference_assets?.[0]?.asset_id).toBe('asset_milo_primary')
+  })
+
   it('builds auth headers for managed mode requests', () => {
     expect(buildAgentImageflowHeaders({
       apiKey: 'project-secret',
