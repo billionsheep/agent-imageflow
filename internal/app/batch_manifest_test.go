@@ -60,7 +60,14 @@ func TestBuildBatchManifestFiltersAssetsAndCountsOutputShape(t *testing.T) {
 			}},
 			Assets: []domain.BatchStorySummaryAsset{
 				{AssetID: "asset_generated", TaskID: "task_latest", Status: "generated", DownloadURL: "/api/assets/asset_generated/original", ThumbnailURL: "/api/assets/asset_generated/thumbnail", MetadataURL: "/api/assets/asset_generated/metadata", TargetPath: "stories/story-1/scene-001.png", CreatedAt: createdAt},
-				{AssetID: "asset_selected", TaskID: "task_latest", Status: "selected", DownloadURL: "/api/assets/asset_selected/original", ThumbnailURL: "/api/assets/asset_selected/thumbnail", MetadataURL: "/api/assets/asset_selected/metadata", TargetPath: "stories/story-1/scene-001.png", CreatedAt: createdAt.Add(time.Second)},
+				{AssetID: "asset_selected", TaskID: "task_latest", Status: "selected", DownloadURL: "/api/assets/asset_selected/original", ThumbnailURL: "/api/assets/asset_selected/thumbnail", MetadataURL: "/api/assets/asset_selected/metadata", TargetPath: "stories/story-1/scene-001.png", CreatedAt: createdAt.Add(time.Second), CaptionLineage: &domain.CaptionLineageSummary{
+					DerivedFromAssetID: "asset_original",
+					DerivationType:     "caption_edit",
+					CaptionText:        "今天也要可爱",
+					CaptionStyle:       "rounded speech bubble, handwritten",
+					SourceTaskID:       "task_original",
+					SourceSceneID:      "scene_001",
+				}},
 				{AssetID: "asset_rejected", TaskID: "task_latest", Status: "rejected", DownloadURL: "/api/assets/asset_rejected/original", ThumbnailURL: "/api/assets/asset_rejected/thumbnail", MetadataURL: "/api/assets/asset_rejected/metadata", TargetPath: "stories/story-1/scene-001.png", CreatedAt: createdAt.Add(2 * time.Second)},
 			},
 		}},
@@ -90,6 +97,16 @@ func TestBuildBatchManifestFiltersAssetsAndCountsOutputShape(t *testing.T) {
 	}
 	if len(selectedManifest.Scenes[0].Continuity.ResolvedReferenceAssets) != 1 {
 		t.Fatalf("scene continuity resolved references missing: %#v", selectedManifest.Scenes[0].Continuity)
+	}
+	lineage := selectedManifest.Assets[0].CaptionLineage
+	if lineage == nil ||
+		lineage.DerivedFromAssetID != "asset_original" ||
+		lineage.DerivationType != "caption_edit" ||
+		lineage.CaptionText != "今天也要可爱" ||
+		lineage.CaptionStyle != "rounded speech bubble, handwritten" ||
+		lineage.SourceTaskID != "task_original" ||
+		lineage.SourceSceneID != "scene_001" {
+		t.Fatalf("asset caption lineage was not carried: %#v", selectedManifest.Assets[0])
 	}
 
 	allWithoutRejected := buildBatchManifest(summary, domain.BatchManifestQuery{SelectedOnly: false, IncludeRejected: false})

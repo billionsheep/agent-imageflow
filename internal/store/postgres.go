@@ -1446,17 +1446,18 @@ func (s *PostgresStore) GetBatchStorySummary(ctx context.Context, query domain.B
 		if row.AssetID.Valid {
 			status := publicAssetStatus(row.AssetStatus.String)
 			asset := domain.BatchStorySummaryAsset{
-				AssetID:      row.AssetID.String,
-				TaskID:       row.TaskID,
-				Status:       status,
-				Provider:     strings.TrimSpace(row.AssetProvider),
-				Model:        strings.TrimSpace(row.AssetModel),
-				Prompt:       strings.TrimSpace(row.AssetPrompt),
-				DownloadURL:  "/api/assets/" + row.AssetID.String + "/original",
-				ThumbnailURL: "/api/assets/" + row.AssetID.String + "/thumbnail",
-				MetadataURL:  "/api/assets/" + row.AssetID.String + "/metadata",
-				TargetPath:   firstNonEmpty(scene.TargetPath, strings.TrimSpace(row.TaskTargetPath)),
-				CreatedAt:    row.AssetCreatedAt.Time,
+				AssetID:        row.AssetID.String,
+				TaskID:         row.TaskID,
+				Status:         status,
+				Provider:       strings.TrimSpace(row.AssetProvider),
+				Model:          strings.TrimSpace(row.AssetModel),
+				Prompt:         strings.TrimSpace(row.AssetPrompt),
+				DownloadURL:    "/api/assets/" + row.AssetID.String + "/original",
+				ThumbnailURL:   "/api/assets/" + row.AssetID.String + "/thumbnail",
+				MetadataURL:    "/api/assets/" + row.AssetID.String + "/metadata",
+				TargetPath:     firstNonEmpty(scene.TargetPath, strings.TrimSpace(row.TaskTargetPath)),
+				CaptionLineage: domain.CaptionLineageFromStructuredInput(row.StructuredInputJSON),
+				CreatedAt:      row.AssetCreatedAt.Time,
 			}
 			scene.Assets = append(scene.Assets, asset)
 			addBatchStorySummaryAssetCounts(&response.Counts, &scene.Counts, asset)

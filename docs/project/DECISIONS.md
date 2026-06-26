@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-26: Caption edit lineage 第一版复用 metadata_json 并输出 caption_lineage 摘要
+
+- Decision: Caption/Edit Lineage 的 MCP-first 最小切片不新增数据库表或迁移，复用 `metadata_json` 输入字段 `derived_from_asset_id`、`derivation_type`、`caption_text`、`caption_style`、`source_task_id` 和 `source_scene_id`，在创建任务时提取为 `structured_input_json.caption_lineage`，并透传到 provider parameters 与 batch manifest asset 的 `caption_lineage`。
+- Reason: 当前目标是让 MCP agent 通过已有 asset 做 provider edit 加字时，结果资产能被 manifest/delivery summary 追溯到原图和对白；现有 task structured input、asset parameters 和 manifest 链路已经足够承载最小派生语义，新增 schema 会扩大范围。
+- Impact: `examples/mcp/create-caption-edit-task.json` 作为新 agent 示例，默认 `provider=mock` 且不包含真实 key。Web 一键加字、批量 caption UI、caption renderer、真实 provider canary 和复杂 lineage 视图仍需另开切片；MCP 继续不新增删除或 destructive tools。
+
 ## 2026-06-25: 单资产清理采用 Admin 归档/恢复，默认不物理删除 archived
 
 - Decision: 单 asset 第一轮采用 Admin-only `archive/restore` 语义：归档写入现有 `deprecated` 存储状态，对外显示为 `archived`；恢复回 `generated`。`storage cleanup` 默认不再包含 archived/deprecated，只有显式 `--deprecated` 或 `include_deprecated=true` 才会物理清理归档资产。MCP 继续不提供删除、清库、workspace/project/campaign/asset destructive tools。

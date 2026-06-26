@@ -77,3 +77,35 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 		t.Fatalf("story_context_v1 missing from parameters: %#v", parameters)
 	}
 }
+
+func TestTaskProviderParametersIncludesCaptionLineageSummary(t *testing.T) {
+	structured, err := json.Marshal(map[string]any{
+		"metadata_json": map[string]any{
+			"derived_from_asset_id": "asset_original",
+			"derivation_type":       "caption_edit",
+			"caption_text":          "今天也要可爱",
+			"caption_style":         "rounded speech bubble, handwritten",
+			"source_task_id":        "task_original",
+			"source_scene_id":       "scene_001",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal structured input: %v", err)
+	}
+
+	raw := taskProviderParameters(domain.Task{StructuredInputJSON: structured}, map[string]any{"slot": 0})
+	var parameters map[string]any
+	if err := json.Unmarshal(raw, &parameters); err != nil {
+		t.Fatalf("parameters JSON invalid: %v", err)
+	}
+
+	lineage := parameters["caption_lineage"].(map[string]any)
+	if lineage["derived_from_asset_id"] != "asset_original" ||
+		lineage["derivation_type"] != "caption_edit" ||
+		lineage["caption_text"] != "今天也要可爱" ||
+		lineage["caption_style"] != "rounded speech bubble, handwritten" ||
+		lineage["source_task_id"] != "task_original" ||
+		lineage["source_scene_id"] != "scene_001" {
+		t.Fatalf("caption lineage missing from provider parameters: %#v", parameters)
+	}
+}

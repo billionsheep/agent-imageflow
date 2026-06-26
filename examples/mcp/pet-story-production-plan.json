@@ -1,0 +1,232 @@
+{
+  "schema_version": "1.0",
+  "document_type": "pet_story_production_plan",
+  "purpose": "Example plan for an external Story Continuity Agent. Replace placeholder ids before real execution. No keys or secrets are included.",
+  "workspace_id": "ws_default",
+  "project_id": "prj_pet_account_example",
+  "campaign_id": "cmp_pet_story_trial_example",
+  "source_agent": "story-continuity-agent",
+  "session_id": "pet_story_trial_session_example",
+  "batch_id": "pet_story_trial_batch_example",
+  "story_context_v1": {
+    "schema_version": "1.0",
+    "story_id": "pet_blanket_fort_story",
+    "story_revision": "rev_001",
+    "story_plan_hash": "sha256:replace_with_real_plan_hash",
+    "generation_mode": "sequential_previous_panel",
+    "story_bible": {
+      "title": "小白和鸡毛的毯子堡垒",
+      "premise": "小白嘴硬地说自己没有等鸡毛，但鸡毛带着牛奶出现后，两只小狗一起完成毯子堡垒。",
+      "fixed_environment": "同一个暖粉色客厅，同一张粉色双人沙发，左侧小圆桌，桌上粉色马克杯，右侧黄色抱枕，背景有月亮挂灯。",
+      "characters": [
+        {
+          "character_id": "dog_xiaobai",
+          "role": "main_character",
+          "appearance_lock": "白色小狗，圆脸，短耳朵，表情嘴硬但害羞。",
+          "reference_binding_id": "asset_replace_xiaobai_primary"
+        },
+        {
+          "character_id": "dog_jimao",
+          "role": "main_character",
+          "appearance_lock": "浅棕色小狗，卷毛，温柔表情，尾巴蓬松。",
+          "reference_binding_id": "asset_replace_jimao_primary"
+        }
+      ],
+      "continuity_props": [
+        "粉色双人沙发",
+        "左侧小圆桌",
+        "粉色马克杯",
+        "黄色抱枕",
+        "月亮挂灯",
+        "浅粉毯子堡垒",
+        "热牛奶"
+      ],
+      "style_rules": [
+        "可爱手绘感",
+        "暖色柔光",
+        "弱背景",
+        "角色和核心道具优先",
+        "无字图，后续 caption/edit lineage 再处理文字"
+      ],
+      "negative_continuity": [
+        "不要改变狗的颜色和体型",
+        "不要切换到户外或其他房间",
+        "不要新增无关角色",
+        "不要直接生成文字或水印"
+      ],
+      "delivery_notes": "交付 selected panels 的 original、thumbnail、metadata 和 manifest；target_path 仅作为交付建议路径。"
+    },
+    "panel_plan": [
+      {
+        "panel_index": 1,
+        "scene_id": "scene_001",
+        "narrative_role": "setup",
+        "previous_state": "小白独自坐在粉色沙发左侧，门口方向留出空间。",
+        "trigger_event": "鸡毛还没有出现，小白想隐藏自己正在等待的心情。",
+        "visible_action": "小白抱着书假装专心，但眼睛看向门口。",
+        "resulting_state": "观众知道小白其实在等鸡毛。",
+        "dialogue": "才没有等你",
+        "dialogue_intent": "嘴硬地否认等待，为第二格鸡毛出现做铺垫。",
+        "camera": "medium shot, front three-quarter view",
+        "must_keep_props": [
+          "粉色沙发",
+          "粉色马克杯",
+          "浅粉毯子堡垒",
+          "月亮挂灯"
+        ],
+        "allowed_changes": [
+          "小白表情",
+          "书本角度"
+        ],
+        "reference_roles": {
+          "character_reference": [
+            "dog_xiaobai"
+          ],
+          "environment_reference": [
+            "warm_pink_living_room"
+          ]
+        },
+        "target_path": "stories/pet_blanket_fort_story/scene_001.png"
+      },
+      {
+        "panel_index": 2,
+        "scene_id": "scene_002",
+        "narrative_role": "arrival",
+        "previous_state": "小白坐在沙发左侧，门口方向留出空间。",
+        "trigger_event": "鸡毛回应小白的等待，带着牛奶出现。",
+        "visible_action": "鸡毛从右侧出现，端着一杯热牛奶，小白偷偷抬头。",
+        "resulting_state": "两只小狗进入同一空间，牛奶成为共享道具。",
+        "dialogue": "牛奶来啦",
+        "dialogue_intent": "温柔回应小白，推进两只角色靠近。",
+        "camera": "medium shot, same sofa and table framing as panel 1",
+        "must_keep_props": [
+          "粉色沙发",
+          "粉色马克杯",
+          "浅粉毯子堡垒",
+          "月亮挂灯"
+        ],
+        "allowed_changes": [
+          "鸡毛进入画面",
+          "新增一杯热牛奶"
+        ],
+        "reference_roles": {
+          "character_reference": [
+            "dog_xiaobai",
+            "dog_jimao"
+          ],
+          "environment_reference": [
+            "warm_pink_living_room"
+          ],
+          "previous_panel_reference": [
+            "scene_001_selected_asset"
+          ]
+        },
+        "target_path": "stories/pet_blanket_fort_story/scene_002.png"
+      },
+      {
+        "panel_index": 3,
+        "scene_id": "scene_003",
+        "narrative_role": "closeness",
+        "previous_state": "鸡毛已经坐到沙发右侧，牛奶在小圆桌上。",
+        "trigger_event": "鸡毛坐下后，小白终于愿意靠近。",
+        "visible_action": "小白往鸡毛身边挪一点，鸡毛用尾巴轻轻圈住小白。",
+        "resulting_state": "两只小狗靠在一起，关系从等待转为贴近。",
+        "dialogue": "靠近一点点",
+        "dialogue_intent": "小白表达想靠近但仍然害羞。",
+        "camera": "medium close shot, keep same sofa orientation",
+        "must_keep_props": [
+          "粉色沙发",
+          "粉色马克杯",
+          "浅粉毯子堡垒",
+          "热牛奶"
+        ],
+        "allowed_changes": [
+          "两只小狗靠近",
+          "尾巴动作"
+        ],
+        "reference_roles": {
+          "character_reference": [
+            "dog_xiaobai",
+            "dog_jimao"
+          ],
+          "environment_reference": [
+            "warm_pink_living_room"
+          ],
+          "previous_panel_reference": [
+            "scene_002_selected_asset"
+          ]
+        },
+        "target_path": "stories/pet_blanket_fort_story/scene_003.png"
+      },
+      {
+        "panel_index": 4,
+        "scene_id": "scene_004",
+        "narrative_role": "payoff",
+        "previous_state": "两只小狗靠在一起，牛奶在小圆桌上，毯子堡垒还没完全搭好。",
+        "trigger_event": "小白终于承认想和鸡毛一起完成堡垒。",
+        "visible_action": "两只小狗一起把浅粉毯子搭起来，黄色抱枕被放到入口处。",
+        "resulting_state": "毯子堡垒完成，故事以温暖陪伴收束。",
+        "dialogue": "一起躲一会儿",
+        "dialogue_intent": "把嘴硬转成真实邀请，形成完整情绪闭环。",
+        "camera": "wide medium shot, show completed blanket fort on the same sofa",
+        "must_keep_props": [
+          "粉色沙发",
+          "粉色马克杯",
+          "黄色抱枕",
+          "月亮挂灯",
+          "浅粉毯子堡垒",
+          "热牛奶"
+        ],
+        "allowed_changes": [
+          "毯子堡垒完成",
+          "两只小狗姿势更放松"
+        ],
+        "reference_roles": {
+          "character_reference": [
+            "dog_xiaobai",
+            "dog_jimao"
+          ],
+          "environment_reference": [
+            "warm_pink_living_room"
+          ],
+          "previous_panel_reference": [
+            "scene_003_selected_asset"
+          ]
+        },
+        "target_path": "stories/pet_blanket_fort_story/scene_004.png"
+      }
+    ],
+    "reference_bindings": {
+      "character_reference": [
+        "asset_replace_xiaobai_primary",
+        "asset_replace_jimao_primary"
+      ],
+      "environment_reference": [
+        "asset_replace_warm_pink_living_room"
+      ],
+      "style_reference": [
+        "asset_replace_soft_kawaii_style"
+      ],
+      "previous_panel_reference": []
+    },
+    "resolved_reference_assets": [],
+    "continuity_policy": {
+      "mode": "sequential_previous_panel",
+      "require_previous_selected_asset": true,
+      "max_panels": 6,
+      "max_candidates_per_panel": 2,
+      "provider_concurrency": 1,
+      "max_total_images_including_regenerate": 12,
+      "caption_enabled": false,
+      "review_required": true,
+      "selection_mode": "manual_optional"
+    }
+  },
+  "mcp_execution_notes": {
+    "create_panel_1": "Call create_image_task with panel_index=1 and empty previous_panel_reference.",
+    "select_panel_1": "Call list_image_assets, then select_image_asset for one scene_001 asset.",
+    "create_panel_2_plus": "Before each later panel, replace previous_panel_reference with the previous panel selected asset_id.",
+    "delivery": "After all selected panels exist, call get_asset_delivery_info per selected asset or export selected manifest through the platform.",
+    "web_boundary": "Use Web only for review, select/reject, Production View and manifest inspection; do not use Web as the main story authoring surface."
+  }
+}

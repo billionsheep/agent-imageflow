@@ -343,6 +343,105 @@ type BatchStoryVisualContext struct {
 	PromptRecipeID    string   `json:"prompt_recipe_id,omitempty"`
 }
 
+type CaptionLineageSummary struct {
+	DerivedFromAssetID string `json:"derived_from_asset_id,omitempty"`
+	DerivationType     string `json:"derivation_type,omitempty"`
+	CaptionText        string `json:"caption_text,omitempty"`
+	CaptionStyle       string `json:"caption_style,omitempty"`
+	SourceTaskID       string `json:"source_task_id,omitempty"`
+	SourceSceneID      string `json:"source_scene_id,omitempty"`
+}
+
+func (c CaptionLineageSummary) Empty() bool {
+	return strings.TrimSpace(c.DerivedFromAssetID) == "" &&
+		strings.TrimSpace(c.DerivationType) == "" &&
+		strings.TrimSpace(c.CaptionText) == "" &&
+		strings.TrimSpace(c.CaptionStyle) == "" &&
+		strings.TrimSpace(c.SourceTaskID) == "" &&
+		strings.TrimSpace(c.SourceSceneID) == ""
+}
+
+func CaptionLineageFromMetadataJSON(raw json.RawMessage) *CaptionLineageSummary {
+	if len(raw) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if json.Unmarshal(raw, &metadata) != nil {
+		return nil
+	}
+	lineage := captionLineageFromMap(metadata)
+	if nested, ok := metadata["caption_lineage"]; ok {
+		if nestedMap, ok := nested.(map[string]any); ok {
+			nestedLineage := captionLineageFromMap(nestedMap)
+			lineage = mergeCaptionLineage(nestedLineage, lineage)
+		}
+	}
+	if lineage.Empty() {
+		return nil
+	}
+	return &lineage
+}
+
+func CaptionLineageFromStructuredInput(raw json.RawMessage) *CaptionLineageSummary {
+	if len(raw) == 0 {
+		return nil
+	}
+	var payload struct {
+		CaptionLineage *CaptionLineageSummary `json:"caption_lineage"`
+		MetadataJSON   json.RawMessage        `json:"metadata_json"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+	if payload.CaptionLineage != nil && !payload.CaptionLineage.Empty() {
+		return payload.CaptionLineage
+	}
+	return CaptionLineageFromMetadataJSON(payload.MetadataJSON)
+}
+
+func captionLineageFromMap(values map[string]any) CaptionLineageSummary {
+	return CaptionLineageSummary{
+		DerivedFromAssetID: strings.TrimSpace(stringFromAny(values["derived_from_asset_id"])),
+		DerivationType:     strings.TrimSpace(stringFromAny(values["derivation_type"])),
+		CaptionText:        strings.TrimSpace(stringFromAny(values["caption_text"])),
+		CaptionStyle:       strings.TrimSpace(stringFromAny(values["caption_style"])),
+		SourceTaskID:       strings.TrimSpace(stringFromAny(values["source_task_id"])),
+		SourceSceneID:      strings.TrimSpace(stringFromAny(values["source_scene_id"])),
+	}
+}
+
+func mergeCaptionLineage(base, override CaptionLineageSummary) CaptionLineageSummary {
+	if strings.TrimSpace(override.DerivedFromAssetID) != "" {
+		base.DerivedFromAssetID = override.DerivedFromAssetID
+	}
+	if strings.TrimSpace(override.DerivationType) != "" {
+		base.DerivationType = override.DerivationType
+	}
+	if strings.TrimSpace(override.CaptionText) != "" {
+		base.CaptionText = override.CaptionText
+	}
+	if strings.TrimSpace(override.CaptionStyle) != "" {
+		base.CaptionStyle = override.CaptionStyle
+	}
+	if strings.TrimSpace(override.SourceTaskID) != "" {
+		base.SourceTaskID = override.SourceTaskID
+	}
+	if strings.TrimSpace(override.SourceSceneID) != "" {
+		base.SourceSceneID = override.SourceSceneID
+	}
+	return base
+}
+
+func stringFromAny(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
+}
+
 type StoryReferenceBindings map[string][]string
 
 type StoryPanelPlanEntry struct {
@@ -447,17 +546,18 @@ type BatchStorySummaryTask struct {
 }
 
 type BatchStorySummaryAsset struct {
-	AssetID      string    `json:"asset_id"`
-	TaskID       string    `json:"task_id"`
-	Status       string    `json:"status"`
-	Provider     string    `json:"provider,omitempty"`
-	Model        string    `json:"model,omitempty"`
-	Prompt       string    `json:"prompt,omitempty"`
-	DownloadURL  string    `json:"download_url"`
-	ThumbnailURL string    `json:"thumbnail_url"`
-	MetadataURL  string    `json:"metadata_url"`
-	TargetPath   string    `json:"target_path,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	AssetID        string                 `json:"asset_id"`
+	TaskID         string                 `json:"task_id"`
+	Status         string                 `json:"status"`
+	Provider       string                 `json:"provider,omitempty"`
+	Model          string                 `json:"model,omitempty"`
+	Prompt         string                 `json:"prompt,omitempty"`
+	DownloadURL    string                 `json:"download_url"`
+	ThumbnailURL   string                 `json:"thumbnail_url"`
+	MetadataURL    string                 `json:"metadata_url"`
+	TargetPath     string                 `json:"target_path,omitempty"`
+	CaptionLineage *CaptionLineageSummary `json:"caption_lineage,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
 }
 
 type BatchStorySummaryScene struct {
@@ -516,21 +616,22 @@ type BatchManifestTask struct {
 }
 
 type BatchManifestAsset struct {
-	AssetID       string                      `json:"asset_id"`
-	TaskID        string                      `json:"task_id"`
-	StoryID       string                      `json:"story_id,omitempty"`
-	SceneID       string                      `json:"scene_id,omitempty"`
-	Status        string                      `json:"status"`
-	Provider      string                      `json:"provider,omitempty"`
-	Model         string                      `json:"model,omitempty"`
-	Prompt        string                      `json:"prompt,omitempty"`
-	DownloadURL   string                      `json:"download_url"`
-	ThumbnailURL  string                      `json:"thumbnail_url,omitempty"`
-	MetadataURL   string                      `json:"metadata_url,omitempty"`
-	TargetPath    string                      `json:"target_path,omitempty"`
-	CreatedAt     time.Time                   `json:"created_at"`
-	Continuity    BatchStoryContinuitySummary `json:"continuity,omitempty"`
-	VisualContext BatchStoryVisualContext     `json:"visual_context,omitempty"`
+	AssetID        string                      `json:"asset_id"`
+	TaskID         string                      `json:"task_id"`
+	StoryID        string                      `json:"story_id,omitempty"`
+	SceneID        string                      `json:"scene_id,omitempty"`
+	Status         string                      `json:"status"`
+	Provider       string                      `json:"provider,omitempty"`
+	Model          string                      `json:"model,omitempty"`
+	Prompt         string                      `json:"prompt,omitempty"`
+	DownloadURL    string                      `json:"download_url"`
+	ThumbnailURL   string                      `json:"thumbnail_url,omitempty"`
+	MetadataURL    string                      `json:"metadata_url,omitempty"`
+	TargetPath     string                      `json:"target_path,omitempty"`
+	CaptionLineage *CaptionLineageSummary      `json:"caption_lineage,omitempty"`
+	CreatedAt      time.Time                   `json:"created_at"`
+	Continuity     BatchStoryContinuitySummary `json:"continuity,omitempty"`
+	VisualContext  BatchStoryVisualContext     `json:"visual_context,omitempty"`
 }
 
 type BatchManifestScene struct {

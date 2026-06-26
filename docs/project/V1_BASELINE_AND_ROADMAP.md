@@ -4,7 +4,7 @@
 
 当前 V1 baseline 已以 `v0.1.0` tag 推送。后续工作按版本化维护推进：`v0.1.x` 优先修部署、鉴权、Web 体验和运维可靠性；`v0.2.x` 再强化 IP 工作流、Settings 信息架构和真实业务批量生产体验。
 
-2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Review、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。外部评审后已修订第一执行切片：先做 `issues/next-phase-p1-story-continuity-mvc.csv`，限定为 3 格、无字、顺序生成、人工选图、真实参考图参与；原 Story / Caption 大计划后置。
+2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。外部评审后已完成 Story Continuity MVC 平台侧收敛；当前下一步不再把每个 smoke 当产品需求，而是按 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 执行 MCP-first 真实萌宠故事生产试用。
 
 ## V1 Baseline
 
@@ -74,23 +74,23 @@ V1 不做：
    - 继续补 HTTPS/Caddy 正式同源入口、浏览器 Admin、Recent Assets 缩略图、original/metadata delivery smoke。
    - 演练一次 restore 和 `IMAGE_TAG` 回滚。
 
-2. 真实试用观察
-   - 用低并发真实 provider 跑小批量萌宠故事图。
-   - 观察 Web 审图是否仍有闪烁、卡顿、字段噪音或操作路径太长。
-   - 记录具体 URL host、Admin 登录态、scope、filter、batch/session/story/scene 和复现步骤。
-   - 当前入口为 `issues/next-phase-p1-pet-account-real-workflow-trial.csv`。
+2. 真实业务生产试用
+   - 当前入口为 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 和 `issues/next-phase-p1-pet-account-real-workflow-trial.csv`。
+   - 准备真实 project/campaign、角色参考、环境或风格参考、prompt recipe 和非敏感 provider/model 摘要。
+   - 由外部 Story Continuity Agent 产出 3-6 格 Story Bible、Panel Plan 和 `story_context_v1`。
+   - Agent 通过 MCP 顺序创建 panel task、查询状态、select/reject、拿 delivery info；Web 只作为审图/管理/manifest 控制台。
+   - 观察平台资产模型、agent 编排、provider 参考参与、Web 审图和 manifest/NAS 交付摩擦。
+   - mock 3 格数据链路、1 图真实 provider canary、delivery spot check 和 Web 截图只作为可选证据；不把它们自动升级为产品需求。
 
 3. Story Continuity / Comic Workflow
-   - 第一执行入口改为 `issues/next-phase-p1-story-continuity-mvc.csv`。
-   - 先做 3 格无字 Sequential Previous Panel Mode：第 1 格 selected 后才能生成第 2 格，第 2 格 selected 后才能生成第 3 格。
-   - 当前已实现 `story_context_v1`、panel causality、reference_bindings / resolved_reference_assets 分离、sequential preflight、Production View 最小连续性展示和 manifest 摘要。
-   - 下一步只剩 mock 3 格 smoke 回填与费用确认后的 cap=1 真实 provider 小样本和人工评分。
-   - `issues/next-phase-p1-story-continuity-comic-workflow.csv` 作为上位路线保留，待 MVC 通过后再拆 Story Review 等扩展。
+   - `issues/next-phase-p1-story-continuity-mvc.csv` 仍记录平台侧 MVC 状态：`story_context_v1`、panel causality、reference_bindings / resolved_reference_assets 分离、sequential preflight、Production View 最小连续性展示和 manifest 摘要已完成。
+   - 后续 Story Continuity 能力优先服务真实萌宠生产试用；mock smoke 只证明数据链路，不证明视觉连续性。
+   - `issues/next-phase-p1-story-continuity-comic-workflow.csv` 作为上位路线保留，待真实试用总结后再决定是否拆 Story Review 等扩展。
 
 4. Caption / Edit Lineage
-   - 把基于固定 asset 加字 edit 的结果定义为派生资产。
-   - 记录 `derived_from_asset_id`、`derivation_type=caption_edit`、`caption_text`、`caption_style` 和 source task。
-   - 当前入口为 `issues/next-phase-p1-caption-edit-lineage.csv`，但 Web 加字入口、批量 caption 和 renderer 预留后置到 Story Continuity MVC 之后。
+   - MCP-first 最小切片已完成：基于固定 asset 加字 edit 的结果可通过 `caption_lineage` 表达派生资产摘要。
+   - 记录 `derived_from_asset_id`、`derivation_type=caption_edit`、`caption_text`、`caption_style`、`source_task_id` 和 `source_scene_id`。
+   - 当前入口为 `issues/next-phase-p1-caption-edit-lineage.csv`；Web 加字入口、批量 caption 和 renderer 预留仍后置到 Story Continuity MVC 之后。
 
 5. MCP Service Pack smoke
    - 接入 guide、MCP config 示例、萌宠 scene 示例和 smoke 说明已落地。
@@ -173,14 +173,15 @@ issues/next-phase-p1-pet-account-real-workflow-trial.csv
 
 目标：
 
-- 用真实萌宠账号工作流跑 1 个 project、1 个 campaign、2-3 个 story scenes。
-- 验证 agent 写故事 -> MCP/REST 生图 -> Web 审图 -> Production View select/reject -> JSON manifest/NAS 交付。
-- 只做低频真实 provider canary，不做 benchmark。
+- 用真实萌宠账号工作流跑 1 个 project、1 个 campaign、3-6 个 story panels。
+- 验证 Story Continuity Agent 写 Story Bible / Panel Plan / `story_context_v1` -> MCP 顺序生图 -> Web Production View select/reject -> JSON manifest/NAS 交付。
+- 只做低频真实 provider canary，不做 benchmark；mock 和 canary 只作为证据，不作为产品需求本身。
 
 当前状态：
 
-- CSV 已新增。
-- 本任务用于真实业务观察，不直接实现新功能；观察结果应归类到 Story Continuity、Caption Lineage、Settings IA、Safe Delete 或 provider follow-up。
+- CSV 已从验收清单收敛为必须生产步骤 + 可选证据记录。
+- 新增 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 和 `examples/mcp/pet-story-production-plan.json`。
+- 本任务用于真实业务生产试用，不直接实现新功能；观察结果应归类到 Story Continuity、Caption Lineage、Settings IA、Safe Delete、provider follow-up 或部署/NAS 运维。
 
 ### P1 Story: Story Continuity / Comic Workflow
 
@@ -203,7 +204,7 @@ issues/next-phase-p1-story-continuity-mvc.csv
 - 后端 `CreateTask` 已能解析 `metadata_json.story_context_v1`，展开 reference bindings，并在 task `structured_input_json`、provider parameters、batch summary 和 manifest 中输出 continuity 摘要。
 - Sequential Previous Panel Mode 已强制 `selection_mode=manual_optional`，且 panel 2/3 必须引用上一格 selected asset。
 - Web Production View 已显示 `panel_index`、`narrative_role`、`dialogue`、`previous_panel_asset_id`、resolved reference count、provider reference participation 和 continuity warnings。
-- mock 3 格 smoke 与真实 provider canary 仍待执行，不应把当前实现误判为视觉连续性已验收。
+- mock 3 格 smoke 与真实 provider canary 仍可作为可选证据执行，但不应把当前实现或 mock 结果误判为视觉连续性已验收。
 
 上位路线文件：
 
@@ -252,6 +253,12 @@ issues/next-phase-p1-caption-edit-lineage.csv
 - 记录 `derived_from_asset_id`、`derivation_type`、`caption_text`、`caption_style` 和 source task。
 - Web 后续提供“基于此图加字”入口；Story 工作流后续支持 selected panels 批量加字。
 - 第一版保留 future caption renderer slot，区分风格化 AI edit 和稳定确定性贴字。
+
+当前状态：
+
+- MCP-first 最小 contract 已完成：`metadata_json` 中的 caption lineage 会写入 `structured_input_json.caption_lineage`，provider parameters 输出 `caption_lineage`，batch manifest asset 透传 `caption_lineage`。
+- 已新增 `examples/mcp/create-caption-edit-task.json`，示例使用原 `asset_id`、`role=edit_target` 和 `provider=mock`，不包含真实 key。
+- 未实现 Web 一键加字、批量 caption UI、renderer 或真实 provider canary。
 
 ### P1 Agent Onboarding: MCP Service Pack
 

@@ -16,6 +16,8 @@ type taskStructuredProviderInput struct {
 	ProviderProfile                domain.ProjectProviderProfile `json:"provider_profile"`
 	VisualContext                  *domain.VisualContextSnapshot `json:"visual_context_snapshot"`
 	StoryContextV1                 *domain.StoryContextV1        `json:"story_context_v1"`
+	CaptionLineage                 *domain.CaptionLineageSummary `json:"caption_lineage"`
+	MetadataJSON                   json.RawMessage               `json:"metadata_json"`
 	ReferenceAssetCount            int                           `json:"reference_asset_count"`
 	ReferenceInputFileCount        int                           `json:"reference_input_file_count"`
 	ProviderReferenceParticipation string                        `json:"provider_reference_participation"`
@@ -101,6 +103,13 @@ func taskProviderParameters(task domain.Task, base map[string]any) []byte {
 	}
 	if input.StoryContextV1 != nil {
 		parameters["story_context_v1"] = input.StoryContextV1
+	}
+	captionLineage := input.CaptionLineage
+	if captionLineage == nil {
+		captionLineage = domain.CaptionLineageFromMetadataJSON(input.MetadataJSON)
+	}
+	if captionLineage != nil && !captionLineage.Empty() {
+		parameters["caption_lineage"] = captionLineage
 	}
 	if input.ReferenceAssetCount > 0 {
 		parameters["reference_asset_count"] = input.ReferenceAssetCount

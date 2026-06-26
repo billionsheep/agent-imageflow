@@ -273,21 +273,22 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 				continue
 			}
 			manifestAsset := domain.BatchManifestAsset{
-				AssetID:       asset.AssetID,
-				TaskID:        asset.TaskID,
-				StoryID:       scene.StoryID,
-				SceneID:       scene.SceneID,
-				Status:        asset.Status,
-				Provider:      asset.Provider,
-				Model:         asset.Model,
-				Prompt:        asset.Prompt,
-				DownloadURL:   asset.DownloadURL,
-				ThumbnailURL:  asset.ThumbnailURL,
-				MetadataURL:   asset.MetadataURL,
-				TargetPath:    firstNonEmpty(asset.TargetPath, scene.TargetPath),
-				CreatedAt:     asset.CreatedAt,
-				Continuity:    scene.Continuity,
-				VisualContext: scene.VisualContext,
+				AssetID:        asset.AssetID,
+				TaskID:         asset.TaskID,
+				StoryID:        scene.StoryID,
+				SceneID:        scene.SceneID,
+				Status:         asset.Status,
+				Provider:       asset.Provider,
+				Model:          asset.Model,
+				Prompt:         asset.Prompt,
+				DownloadURL:    asset.DownloadURL,
+				ThumbnailURL:   asset.ThumbnailURL,
+				MetadataURL:    asset.MetadataURL,
+				TargetPath:     firstNonEmpty(asset.TargetPath, scene.TargetPath),
+				CaptionLineage: asset.CaptionLineage,
+				CreatedAt:      asset.CreatedAt,
+				Continuity:     scene.Continuity,
+				VisualContext:  scene.VisualContext,
 			}
 			manifest.Assets = append(manifest.Assets, manifestAsset)
 			manifestScene.AssetIDs = append(manifestScene.AssetIDs, asset.AssetID)
@@ -1265,7 +1266,7 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 		req.MetadataJSON = domain.NormalizeMetadataJSON(updatedMetadata)
 	}
 
-	structured, err := json.Marshal(map[string]any{
+	structuredPayload := map[string]any{
 		"workspace_id":                     scope.WorkspaceID,
 		"project_id":                       scope.ProjectID,
 		"campaign_id":                      scope.CampaignID,
@@ -1302,7 +1303,11 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 		"review_required":                  req.ReviewRequired,
 		"story_context_v1":                 storyContext,
 		"metadata_json":                    json.RawMessage(req.MetadataJSON),
-	})
+	}
+	if captionLineage := domain.CaptionLineageFromMetadataJSON(req.MetadataJSON); captionLineage != nil {
+		structuredPayload["caption_lineage"] = captionLineage
+	}
+	structured, err := json.Marshal(structuredPayload)
 	if err != nil {
 		return req, nil, "", err
 	}
