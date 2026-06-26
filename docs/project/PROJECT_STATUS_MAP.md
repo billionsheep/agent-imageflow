@@ -30,6 +30,8 @@ V1 文档入口已收敛：新会话和新 agent 默认从 `docs/project/README.
 
 下一阶段产品计划已从“补 smoke 验收”收敛为真实业务生产试用：`docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 是当前萌宠故事生产入口，`issues/next-phase-p1-pet-account-real-workflow-trial.csv` 只保留少量必须生产步骤和可选证据记录。外部 Story Continuity Agent 负责 Story Bible、Panel Plan、`story_context_v1`、reference choices 和 MCP 顺序编排；Agent ImageFlow 负责生成、追踪、Web 审图、select/reject、manifest 和 NAS/URL 交付。`issues/next-phase-p1-story-continuity-mvc.csv` 的平台侧能力已基本落地，MCP/mock 3 格数据链路已跑通；费用确认后的真实 canary 现在只是生产试用的业务证据，不再作为产品需求清单继续扩张。`issues/next-phase-p1-story-continuity-comic-workflow.csv` 作为上位路线保留；`issues/next-phase-p1-caption-edit-lineage.csv` 已完成 MCP-first 最小派生语义：固定 asset 加字 edit 可通过 `caption_lineage` 在 structured input、provider parameters 和 manifest 中追溯原图与对白，但 Web 加字入口和批量 caption 后置。平台继续作为图片资产事实源，不扩成漫画编辑器或运营后台。
 
+2026-06-26 的真实业务试跑进一步把下一版本收敛为 `v0.2 MCP Production Hardening`：默认执行入口是 `docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 和 `issues/next-phase-v0-2-mcp-production-hardening.csv`。下一步优先补 agent-friendly context setup 和 reference diagnostics，再补 caption 说话人/气泡锚点、panel 状态转场、caption 派生交付和 NAS 交付治理。NAS 适配定为 P1：不阻断当前生成链路，但会影响长期自托管、备份、只读访问和 manifest 交付；第一版不做内置 WebDAV/SMB server，也不让物理文件夹取代 DB/metadata 事实源。
+
 ## 当前脑图
 
 ```mermaid

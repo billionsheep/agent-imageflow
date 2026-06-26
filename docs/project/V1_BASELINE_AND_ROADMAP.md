@@ -6,6 +6,8 @@
 
 2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。外部评审后已完成 Story Continuity MVC 平台侧收敛；当前下一步不再把每个 smoke 当产品需求，而是按 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 执行 MCP-first 真实萌宠故事生产试用。
 
+2026-06-26 后的 v0.2 默认方向是 MCP Production Hardening：`docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 与 `issues/next-phase-v0-2-mcp-production-hardening.csv` 已作为下一版本执行入口。核心不是扩 Web 创作界面，而是把 agent 接入、上下文准备、reference 诊断、caption/panel 结构语义、caption 派生交付和 NAS 治理补成可维护的生产能力。
+
 ## V1 Baseline
 
 V1 的产品定义：
@@ -64,6 +66,13 @@ V1 不做：
 ## Immediate Remaining Tasks
 
 这些是 V1 之后最应该先做的运维/验收任务。
+
+0. V0.2 MCP Production Hardening
+   - 当前入口为 `docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 和 `issues/next-phase-v0-2-mcp-production-hardening.csv`。
+   - P0：agent-friendly project/campaign/context setup，Project Visual Context reference diagnostics。
+   - P1：caption speaker/bubble anchor，panel state transition，caption derivative delivery，NAS storage adaptation and delivery governance。
+   - P2：provider partial success semantics，single asset readable summary，local Web review packaged environment。
+   - 默认不运行真实 provider；业务回归试用需用户确认费用和图量。
 
 1. 服务器/NAS 部署复验
    - 使用 `docs/project/SERVER_DEPLOYMENT_GUIDE.md`。

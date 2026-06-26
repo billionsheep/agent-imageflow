@@ -2,9 +2,10 @@
 
 ## Todo
 
+- [ ] V0.2 MCP Production Hardening：新增 `issues/next-phase-v0-2-mcp-production-hardening.csv` 和 `docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 作为下一版本默认执行入口。第一优先补 agent-friendly project/campaign/context setup 与 Project Visual Context reference diagnostics；随后补 caption 说话人/气泡锚点、panel 状态转场、caption 派生交付语义和 NAS 交付治理。Web 继续作为审图/诊断控制台，不扩成漫画编辑器。
 - [ ] V1 服务器/NAS 部署演练剩余项：Volcengine 旧服务已完成 `main` 镜像更新、升级前 Postgres/storage/env/compose 备份、临时 HTTP health/Web smoke、MCP `tools/list` 和 mock benchmark smoke；仍需补 HTTPS/Caddy 正式同源入口、浏览器 Admin Recent Assets / delivery smoke、restore 演练和 `IMAGE_TAG` 回滚演练。
-- [ ] V1 真实业务生产试用：下一步从 smoke 证据收敛到 MCP-first 萌宠故事生产流程，按 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 准备真实 project/campaign/context，由外部 Story Continuity Agent 通过 MCP 产出 3-6 格故事资产，平台负责生成、追踪、Web 审图和 manifest/NAS 交付；默认不做 benchmark。
-- [ ] P1 Story Continuity MVC：`story_context_v1` contract、panel 因果字段、reference_bindings / resolved_reference_assets 分离、sequential preflight、Production View 最小连续性展示和 manifest continuity 摘要已完成；MCP/mock 3 格数据链路已跑通。下一步服务真实生产试用，真实 provider 小样本 canary 只在费用确认后作为业务证据执行，不再拆成产品需求。
+- [ ] V1 萌宠连续故事下一阶段验证：本地 MCP-first 5 格长链与 6 幅“明确情侣向雨天共伞”真实试跑已完成，并分别输出 `docs/project/pet-story-longchain-stage-gate-report-2026-06-26.md` 与 `docs/project/pet-story-rainy-umbrella-cp-stage-gate-report-2026-06-26.md`。下一步只继续验证环境 reference 单变量收益、selected manifest delivery block 完整性和已登录 Web 审图 replay；默认仍不做 benchmark。
+- [x] P1 Story Continuity MVC：`story_context_v1` contract、panel 因果字段、reference_bindings / resolved_reference_assets 分离、sequential preflight、Production View 最小连续性展示和 manifest continuity 摘要已完成；MCP/mock 3 格数据链路已跑通，并已完成一次本地 5 格真实 provider 低并发业务试跑，形成阶段门报告。后续长链稳定性与环境 reference 增强作为下一阶段业务验证，不再拆成新的平台产品需求。
 - [ ] P1 Story Continuity / Comic Workflow：新增 `issues/next-phase-p1-story-continuity-comic-workflow.csv`，下一步用 Story Bible、Panel Plan、Reference Roles 和 Story Review 解决“多张图只是同风格散图，不是连续故事”的问题；第一版复用 metadata，不做漫画编辑器或 AI 自动视觉质检。
 - [ ] P1 Caption Edit Lineage：`issues/next-phase-p1-caption-edit-lineage.csv` 已完成 MCP-first 最小切片：`caption_lineage` 摘要可从 `metadata_json` 进入 structured input、provider parameters 和 batch manifest，新增 `examples/mcp/create-caption-edit-task.json`；Web 加字入口、batch caption UI、renderer 和真实 provider canary 后续实现。
 - [ ] P1 收口剩余验收：`issues/next-phase-p1-runtime-auth-accessibility-lifecycle-closure.csv` 已完成 runtime/build 诊断、登录错误清晰度、Scope selector 可访问性、单 asset 归档/恢复和 archived 默认保护；本地 compose/browser/mock/1 图真实 reference canary 已通过，剩余是部署环境 HTTPS/同源 replay、Basic Auth 场景复核和服务器 smoke 记录。
@@ -17,6 +18,7 @@
 - [x] P1 Scope Management Usability Follow-up：按 `issues/next-phase-p1-scope-management-usability-followup.csv` 处理真实试用反馈；scope 删除已从 empty-only 改为 Admin 受控级联删除，覆盖子 project/campaign/task/asset/version/review/delivery 记录，并继续由 Service 层清理 storage scope 目录；确认弹窗层级、Scope 管理滚动和输入框 `@` 误导文案已修复；MCP 仍不开放 destructive tools。验证已覆盖 Go/Web/Build/Compose、MCP mock smoke 和 browser campaign cascade delete smoke。
 - [ ] 嵌入式架构图只按图片资产流继续试用；若需要 Mermaid/D2/SVG 可编辑源，再单独确认 Diagram source track。
 - [x] 完成真实萌宠账号业务推进的 MCP-first 工作流收敛：新增 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 和 `examples/mcp/pet-story-production-plan.json`，把 `issues/next-phase-p1-pet-account-real-workflow-trial.csv` 从验收清单改为少量真实生产步骤 + 可选证据记录；明确 Web 是审图/管理控制台，不是主创作入口。本轮只改文档/示例/CSV，不改 Go/TS 业务代码，不运行 provider，不连接服务器，不读取或打印 key/secret/cookie/session。
+- [x] 完成本地 5 格萌宠长链真实业务试跑与 PM 阶段门报告：使用 `prj_xiaobai_jimao_ref_20260623094956` 下真实角色参考、MCP 顺序生成 `pet_cupcake_star_finish_story` 的 5 格故事，完成 `task_b540b5b4a62533d27f23 -> task_8ff539f8fa8ab3e9246f` 顺序链路、5 张 selected assets、selected manifest / delivery 校验，并新增 `docs/project/pet-story-longchain-stage-gate-report-2026-06-26.md`。本轮不改 Go/TS 业务代码，不读取或打印 key/secret/cookie/session。
 
 ## Doing
 

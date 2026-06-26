@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-26: V0.2 收敛为 MCP Production Hardening，NAS 适配定为 P1
+
+- Decision: 下一版本默认执行入口为 `docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 和 `issues/next-phase-v0-2-mcp-production-hardening.csv`。v0.2 不扩成 Web 漫画编辑器或运营后台，而是补 MCP-first 生产硬化：agent-friendly project/campaign/context setup、Project Visual Context reference diagnostics、caption speaker/bubble anchor、panel state transition、caption derivative delivery、provider partial success semantics、NAS storage/delivery governance 和单资产可读摘要。
+- Reason: 2026-06-26 的真实业务试跑证明短链萌宠文案卡和低并发连续故事可用，但暴露了准备路径依赖 Admin/DB、reference 配置弱导致角色漂移、caption 气泡缺少说话人锚点、previous panel 过度保形不善于推进表演、caption 派生图需再次 select、manifest delivery block 不完整、NAS 人工翻 asset_id 目录不舒服等问题。继续扩 Web 创作入口会偏离“图片资产生产能力平台”的定义。
+- Impact: P0 先处理 agent 自助准备和 reference 诊断；P1 处理 caption/panel 生产语义、caption 交付和 NAS 治理；P2 处理 partial success、metadata 可读性和本地 Web review 封装。MCP 继续不开放 destructive tools；删除、归档、恢复和 cleanup 仍走 Admin Web/REST/CLI。NAS 第一版采用 storage root bind mount + manifest/target_path + 只读 SMB/WebDAV/Finder 指南，不内置 WebDAV/SMB server，也不让物理文件夹成为业务事实源。
+
 ## 2026-06-26: Caption edit lineage 第一版复用 metadata_json 并输出 caption_lineage 摘要
 
 - Decision: Caption/Edit Lineage 的 MCP-first 最小切片不新增数据库表或迁移，复用 `metadata_json` 输入字段 `derived_from_asset_id`、`derivation_type`、`caption_text`、`caption_style`、`source_task_id` 和 `source_scene_id`，在创建任务时提取为 `structured_input_json.caption_lineage`，并透传到 provider parameters 与 batch manifest asset 的 `caption_lineage`。

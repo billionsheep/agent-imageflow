@@ -4,6 +4,7 @@
 
 ## Active
 
+- `next-phase-v0-2-mcp-production-hardening.csv`：下一版本默认执行入口，聚焦 MCP-first 生产强化：agent 自助准备上下文、reference 诊断、caption 说话人/气泡锚点、panel 状态转场、caption 派生交付、NAS 交付治理和少量 Web 审图配套。
 - `next-phase-p1-server-deployment-rehearsal.csv`：服务器/NAS 部署演练，当前第一优先。
 - `next-phase-p1-pet-account-real-workflow-trial.csv`：服务器/NAS 或本地低并发萌宠账号真实业务试用，记录角色一致性、场景漂移、Web 审图和 manifest/NAS 交付摩擦。
 - `next-phase-p1-story-continuity-mvc.csv`：第一优先的连续故事最小闭环，限定为 3 格、无字、顺序生成、人工选图、真实参考图参与；当前后端 contract / preflight、Production View 最小展示和 manifest 摘要已落地，剩余是 mock 3 格 smoke 与费用确认后的真实 canary。
