@@ -981,7 +981,7 @@ Batch manifest 使用注意：
 - `target_path` 采用 asset 优先、scene 兜底；manifest 继续只输出公开 delivery URL、thumbnail URL、metadata URL 和逻辑交付路径，不输出 `local_path`、宿主机绝对路径、provider key、project API key、cookie 或 session token。
 - Manifest 只包含公开 delivery URL、metadata URL、target_path、scene/story/task id 和 visual context 摘要；不得加入 `local_path`、provider key、project API key、cookie 或 session token。
 - ZIP、多文件下载和服务端打包能力已在 P1-BSE-010 决定后置；未另行确认前不实现。
-- 已新增 batch-first NAS readable mirror：运维可把 final/selected originals、thumbnails 和 `manifest.final.json` materialize 到 `workspaces/<workspace>/projects/<project>/batches/<batch>`，方便人工通过 Finder/NAS 按一组图复盘，而无需翻 `asset_id` 目录。
+- 已新增 batch-first NAS readable mirror：运维可把 final/selected originals、thumbnails 和 `manifest.final.json` materialize 到 `workspaces/<workspace>/projects/<project>/campaigns/<campaign>/[sessions/<session>/]batches/<batch>`，方便人工通过 Finder/NAS 按一组图复盘，而无需翻 `asset_id` 目录。
 
 常用查询方式：
 

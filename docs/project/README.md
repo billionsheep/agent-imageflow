@@ -6,7 +6,7 @@
 
 Agent ImageFlow 是服务器托管的图片资产生产平台。外部 agent、脚本、Web、CLI 或 REST 可以创建图片任务；服务端负责 provider 调用、资产落盘、缩略图、metadata、审核状态、交付 URL 和基础治理。
 
-当前版本已收口到 `v0.2.0`：MCP-first production hardening、Story Continuity MVC 第一轮、caption 派生交付语义和 final-delivery-oriented manifest 都已进入正式发布面。后续工作进入版本化维护：优先服务器部署演练、MCP-first 真实业务生产试用、final delivery / NAS 可读交付层和运维安全增强。
+当前版本已收口到 `v0.2.1`：MCP-first production hardening、Story Continuity MVC 第一轮、caption 派生交付语义、final-delivery-oriented manifest 和 batch-first NAS readable mirror 都已进入正式发布面。后续工作进入版本化维护：优先服务器部署演练、MCP-first 真实业务生产试用、final delivery / NAS 可读交付层和运维安全增强。
 
 下一阶段新增的产品方向是 Story Continuity：连续叙事、分镜和重试策略由额外 agent 承担，Agent ImageFlow 继续负责图片资产生产、参考图、派生关系、审图和交付事实源。真实萌宠账号生产试用入口见 `PET_STORY_PRODUCTION_WORKFLOW.md`，新 agent 接入见 `STORY_CONTINUITY_AGENT_GUIDE.md`。
 

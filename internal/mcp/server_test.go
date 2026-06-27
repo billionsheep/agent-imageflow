@@ -74,7 +74,7 @@ func TestInitializeUsesConfiguredServerVersion(t *testing.T) {
 		WorkspaceID: "ws_default",
 		ProjectID:   "prj_xhs_anime",
 		CampaignID:  "cmp_7day_cover",
-		Version:     "0.2.0",
+		Version:     "0.2.1",
 	})
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test"}}}`,
@@ -91,7 +91,7 @@ func TestInitializeUsesConfiguredServerVersion(t *testing.T) {
 	}
 	initialize := responses[0]["result"].(map[string]any)
 	serverInfo := initialize["serverInfo"].(map[string]any)
-	if serverInfo["version"] != "0.2.0" {
+	if serverInfo["version"] != "0.2.1" {
 		t.Fatalf("unexpected server version: %#v", serverInfo["version"])
 	}
 }

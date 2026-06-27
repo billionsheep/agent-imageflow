@@ -26,10 +26,12 @@
 <mirror-root>/
   workspaces/<workspace_id>/
     projects/<project_id>/
-      batches/<batch_id>/
-        manifest.final.json
-        final/<target_path or fallback>
-        thumbnails/<target_path>.webp
+      campaigns/<campaign_id>/
+        sessions/<session_id>/   # 仅当 batch manifest 带 session_id 时出现
+          batches/<batch_id>/
+            manifest.final.json
+            final/<target_path or fallback>
+            thumbnails/<target_path>.webp
 ```
 
 - 只复制 `delivery_role=final_delivery` 的 originals 和现有 thumbnails。

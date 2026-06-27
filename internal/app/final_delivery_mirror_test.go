@@ -88,7 +88,7 @@ func TestMaterializeFinalDeliveryMirrorWritesBatchReadableLayout(t *testing.T) {
 		t.Fatalf("materializeFinalDeliveryMirror: %v", err)
 	}
 
-	wantRelative := filepath.ToSlash(filepath.Join("workspaces", "ws_demo", "projects", "prj_demo", "batches", "batch_demo"))
+	wantRelative := filepath.ToSlash(filepath.Join("workspaces", "ws_demo", "projects", "prj_demo", "campaigns", "cmp_demo", "sessions", "session_demo", "batches", "batch_demo"))
 	if got := filepath.ToSlash(result.MirrorRelativePath); got != wantRelative {
 		t.Fatalf("mirror relative path = %q, want %q", got, wantRelative)
 	}
@@ -200,6 +200,49 @@ func TestMaterializeFinalDeliveryMirrorRejectsTargetPathTraversal(t *testing.T) 
 	})
 	if err == nil {
 		t.Fatal("expected target path traversal error")
+	}
+	if !strings.Contains(err.Error(), "target_path") {
+		t.Fatalf("expected target_path error, got %v", err)
+	}
+}
+
+func TestMaterializeFinalDeliveryMirrorRejectsFallbackTraversal(t *testing.T) {
+	root := t.TempDir()
+	sourceDir := t.TempDir()
+	original := writeTestFile(t, filepath.Join(sourceDir, "asset_scene.png"), "scene-original")
+	thumbnail := writeTestFile(t, filepath.Join(sourceDir, "asset_scene.webp"), "scene-thumb")
+
+	manifest := domain.BatchManifestResponse{
+		BatchID:      "batch_demo",
+		ManifestView: domain.BatchManifestViewFinalDelivery,
+		SelectedOnly: true,
+		FinalDelivery: &domain.BatchFinalDeliveryManifest{
+			Counts: domain.BatchFinalDeliveryCounts{
+				SceneCount:      1,
+				FinalAssetCount: 1,
+			},
+			FinalAssets: []domain.BatchFinalDeliveryAsset{{
+				AssetID: "asset_scene",
+				SceneID: "../escape",
+			}},
+		},
+	}
+
+	_, err := materializeFinalDeliveryMirror(root, domain.Scope{
+		WorkspaceID: "ws_demo",
+		ProjectID:   "prj_demo",
+		CampaignID:  "cmp_demo",
+	}, manifest, func(assetID string) (domain.AssetWithVersion, error) {
+		return domain.AssetWithVersion{
+			Asset: domain.Asset{ID: assetID},
+			Version: domain.AssetVersion{
+				FilePath:      original,
+				ThumbnailPath: thumbnail,
+			},
+		}, nil
+	})
+	if err == nil {
+		t.Fatal("expected fallback traversal error")
 	}
 	if !strings.Contains(err.Error(), "target_path") {
 		t.Fatalf("expected target_path error, got %v", err)

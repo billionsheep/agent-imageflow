@@ -4,7 +4,7 @@
 
 ## Active
 
-- `next-phase-p1-final-delivery-nas-readable-export.csv`：面向人工复盘、再次查找和 NAS 浏览的交付层切片；保持 canonical storage 不变。当前第一轮 `P1-DLV-001/002/003/008` 已完成，已在现有 `batch-manifest` 上补出 `view=final_delivery` 与 final-delivery-oriented manifest；导出包、NAS readable mirror、project delivery defaults 和治理联动仍待后续。
+- `next-phase-p1-final-delivery-nas-readable-export.csv`：面向人工复盘、再次查找和 NAS 浏览的交付层切片；保持 canonical storage 不变。当前 `P1-DLV-001/002/003/005/008` 已完成，已具备 `view=final_delivery` manifest 和 batch-first NAS readable mirror；剩余是导出包、project delivery defaults 和治理联动。
 - `next-phase-p1-server-deployment-rehearsal.csv`：服务器/NAS 部署演练，当前第一优先。
 - `next-phase-p1-pet-account-real-workflow-trial.csv`：服务器/NAS 或本地低并发萌宠账号真实业务试用，记录角色一致性、场景漂移、Web 审图和 manifest/NAS 交付摩擦。
 - `next-phase-p1-story-continuity-mvc.csv`：第一优先的连续故事最小闭环，限定为 3 格、无字、顺序生成、人工选图、真实参考图参与；当前后端 contract / preflight、Production View 最小展示和 manifest 摘要已落地，剩余是 mock 3 格 smoke 与费用确认后的真实 canary。

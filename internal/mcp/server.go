@@ -144,7 +144,7 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 func serverVersion(version string) string {
 	version = strings.TrimSpace(version)
 	if version == "" {
-		return "0.2.0"
+		return "0.2.1"
 	}
 	return version
 }

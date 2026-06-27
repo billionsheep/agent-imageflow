@@ -82,7 +82,19 @@ func materializeFinalDeliveryMirror(root string, scope domain.Scope, manifest do
 		return domain.BatchFinalDeliveryMirrorResponse{}, fmt.Errorf("final_delivery manifest is required")
 	}
 
-	mirrorRelativePath := filepath.Join("workspaces", scope.WorkspaceID, "projects", scope.ProjectID, "batches", batchID)
+	mirrorRelativePath := filepath.Join(
+		"workspaces",
+		scope.WorkspaceID,
+		"projects",
+		scope.ProjectID,
+		"campaigns",
+		scope.CampaignID,
+	)
+	sessionID := strings.TrimSpace(manifest.SessionID)
+	if sessionID != "" {
+		mirrorRelativePath = filepath.Join(mirrorRelativePath, "sessions", sessionID)
+	}
+	mirrorRelativePath = filepath.Join(mirrorRelativePath, "batches", batchID)
 	batchDir := filepath.Join(root, mirrorRelativePath)
 	parentDir := filepath.Dir(batchDir)
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
@@ -173,7 +185,14 @@ func finalDeliveryMirrorTargetPaths(asset domain.BatchFinalDeliveryAsset, source
 	if storyID != "" {
 		fallback = path.Join("stories", storyID, fallback)
 	}
-	return fallback, replaceExtension(fallback, ".webp"), nil
+	cleaned, ok, err := sanitizeMirrorRelativePath(fallback)
+	if err != nil {
+		return "", "", err
+	}
+	if !ok {
+		return "", "", fmt.Errorf("target_path fallback is empty")
+	}
+	return cleaned, replaceExtension(cleaned, ".webp"), nil
 }
 
 func sanitizeMirrorRelativePath(value string) (string, bool, error) {

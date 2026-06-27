@@ -94,7 +94,7 @@ FINAL_DELIVERY_MIRROR_ROOT=/data/agent-imageflow/final-delivery-mirror
 - 人工/NAS 浏览建议只读；复制交付件时从共享目录复制出去，不在平台管理目录内移动、重命名或删除文件。
 - 如果 NAS 提供 SMB/WebDAV/Finder，只把它当成浏览/复制/备份入口，不在 Agent ImageFlow 应用内实现 WebDAV/SMB server。
 - 服务容器账号需要对 storage root 可写；人工浏览账号默认只读；恢复演练完成后再重新开放共享给人工浏览。
-- 如果需要给人工一个按批次可读的目录，而不是 canonical `asset_id` 目录，使用 final-delivery readable mirror：平台会把 `manifest.final.json`、final originals 和 thumbnails materialize 到 `workspaces/<workspace>/projects/<project>/batches/<batch>`。
+- 如果需要给人工一个按批次可读的目录，而不是 canonical `asset_id` 目录，使用 final-delivery readable mirror：平台会把 `manifest.final.json`、final originals 和 thumbnails materialize 到 `workspaces/<workspace>/projects/<project>/campaigns/<campaign>/[sessions/<session>/]batches/<batch>`。
 
 ## 登录 GHCR
 

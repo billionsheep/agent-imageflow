@@ -2,13 +2,13 @@
 
 本文档记录 Agent ImageFlow 当前第一版基线、可验收范围、剩余任务和未来方向。它用于后续部署、试用和新一轮 CSV 拆分，不替代 `TASKS.md` 或 `PROJECT_STATUS_MAP.md`。
 
-`v0.1.0` 仍保留为首个 V1 baseline tag；当前代码与文档已经收口到 `v0.2.0`，作为最新 MCP-first production hardening 发布版本。后续工作按版本化维护推进：`v0.2.x` 之后优先补服务器部署演练、final delivery / NAS 可读交付层和真实业务生产试用，再决定 `v0.3.x` 是否继续强化 IP 工作流或 Settings 信息架构。
+`v0.1.0` 仍保留为首个 V1 baseline tag；当前代码与文档已经收口到 `v0.2.1`，作为最新 MCP-first production hardening 发布版本。后续工作按版本化维护推进：`v0.2.x` 之后优先补服务器部署演练、final delivery / NAS 可读交付层和真实业务生产试用，再决定 `v0.3.x` 是否继续强化 IP 工作流或 Settings 信息架构。
 
 2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。外部评审后已完成 Story Continuity MVC 平台侧收敛；当前下一步不再把每个 smoke 当产品需求，而是按 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 执行 MCP-first 真实萌宠故事生产试用。
 
 2026-06-26 后的 v0.2 默认方向是 MCP Production Hardening：`docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 与 `issues/next-phase-v0-2-mcp-production-hardening.csv` 已作为下一版本执行入口。核心不是扩 Web 创作界面，而是把 agent 接入、上下文准备、reference 诊断、caption/panel 结构语义、caption 派生交付和 NAS 治理补成可维护的生产能力。
 
-2026-06-27 新增的产品判断是：人工复盘、再次寻找和 NAS 浏览比 agent 取图更痛。当前已完成 `issues/next-phase-p1-final-delivery-nas-readable-export.csv` 第一轮 `P1-DLV-001/002/003/008`：继续复用现有 `batch-manifest`，补出 `view=final_delivery`、`manifest_view` 和 `final_delivery` block，让人工可按 `story/scene/batch` 直接看最终交付图；后续 `P1-DLV-004/005/006/007` 仍只保留为 story/batch export pack、NAS readable mirror、project delivery defaults 和治理联动方案，canonical storage 继续保持不变。
+2026-06-27 新增的产品判断是：人工复盘、再次寻找和 NAS 浏览比 agent 取图更痛。当前已完成 `issues/next-phase-p1-final-delivery-nas-readable-export.csv` 第一轮 `P1-DLV-001/002/003/005/008`：继续复用现有 `batch-manifest`，补出 `view=final_delivery`、`manifest_view` 和 `final_delivery` block，让人工可按 `story/scene/batch` 直接看最终交付图；同时落地 batch-first NAS readable mirror，让运维可把 `manifest.final.json`、final originals 和 thumbnails materialize 到 `STORAGE_ROOT/final-delivery-mirror/workspaces/<workspace>/projects/<project>/campaigns/<campaign>/[sessions/<session>/]batches/<batch>`。后续 `P1-DLV-004/006/007` 仍只保留为 story/batch export pack、project delivery defaults 和治理联动方案，canonical storage 继续保持不变。
 
 ## V1 Baseline
 
@@ -137,7 +137,7 @@ V1 不做：
 
 9. 发布版本策略
    - `v0.1.0` 保留为首个 V1 baseline tag。
-   - 当前发版目标为 `v0.2.0`：Git tag 为 `v0.2.0`，GHCR 镜像发布 `v0.2.0` 与 `sha-<commit>`。
+- 当前发版目标为 `v0.2.1`：Git tag 为 `v0.2.1`，GHCR 镜像发布 `v0.2.1` 与 `sha-<commit>`。
    - 服务器升级、HTTPS 同源 smoke 和 IMAGE_TAG 回滚仍独立于本地代码发版执行。
 
 10. 备份与恢复演练
