@@ -10,6 +10,7 @@ Agent ImageFlow 负责：
 - 调 provider 生成或编辑图片。
 - 保存 original、thumbnail、metadata 和 delivery URL。
 - 记录 Project Visual Context、reference participation、select/reject、manifest 和 audit。
+- 在创建前先看 Project Visual Context 的 `reference_diagnostics`，不要等“狗变熊”之后才反推参考图配置问题。
 
 Story Continuity Agent 负责：
 
@@ -37,7 +38,7 @@ Story Continuity Agent 不应该拥有：
 5. 创建第二格任务时，必须把第一格 selected asset 作为 `previous_panel_reference`。
 6. 创建第三格任务时，必须把第二格 selected asset 作为 `previous_panel_reference`。
 7. 如需重生图，只重生单格，不覆盖旧 task、旧 asset 或其他格 selected 状态。
-8. 第一轮不加字；加字作为 Caption/Edit Lineage 后续切片。
+8. 第一轮不加字；如确实要做 caption edit，先选定 base selected asset，再把 `speaker_character_id`、`bubble_anchor`、`tail_direction`、`caption_intent`、`auto_select_derivative` 和 `avoid_covering_subjects` 写进 `metadata_json.caption_lineage`。
 9. 用 `get_asset_delivery_info` 或 batch manifest 交付最终资产。
 
 轻连续试用可以使用 **Parallel Minimal Props Mode**：两个角色、少量道具、弱背景、问答递进，并发生成。它适合快速产出，但不能证明上一格参考参与，也不能替代强连续验收。
@@ -75,6 +76,8 @@ Story Continuity Agent 不应该拥有：
 
 `reference_bindings` 是计划想使用的参考；`resolved_reference_assets` 是平台实际解析到、属于当前 project 且可送入 provider 的资产。只有后者存在，才能把任务称为 reference-assisted continuity。
 
+此外，project 级 visual context 现在会返回 `reference_diagnostics`，任务 metadata / manifest 也会保留 `project_visual_context_diagnostics` / `visual_context.reference_diagnostics`。外部 Story Continuity Agent 应先把这些 readiness 信号看完，再决定是否继续用当前 project 生产，还是先补角色主图、环境参考或 recipe negative prompt。
+
 当前平台第一轮实现约定：
 
 - 从 `create_image_task.arguments.metadata_json.story_context_v1` 读取该 contract。
@@ -94,13 +97,26 @@ Story Continuity Agent 不应该拥有：
 - `resulting_state`
 - `dialogue`
 - `dialogue_intent`
+- `emotion_before`
+- `emotion_after`
+- `pose_change`
+- `relationship_shift`
 - `camera`
 - `must_keep_props`
 - `allowed_changes`
+- `must_change`
+- `must_not_keep`
+- `state_transition_notes`
 - `reference_roles`
 - `target_path`
 
 原则：Panel Plan 描述“这一格为什么和上一格连起来”，不要只写一句情绪文案。
+
+额外建议：
+
+- `must_keep_props` / `allowed_changes` 负责“保留哪些事实”
+- `must_change` / `must_not_keep` 负责“这一格必须推进什么，不能把上一格什么东西原样冻结下来”
+- `emotion_before/after`、`pose_change` 和 `relationship_shift` 尽量描述观众一眼能看懂的变化，不要写成抽象散文
 
 ## Reference Roles
 
@@ -113,6 +129,20 @@ Story Continuity Agent 不应该拥有：
 - `edit_target`：要被编辑的原图，例如加字时的输入 asset。
 
 如果当前 MCP schema 还没有独立 role 字段，可以先把 role 写入 `story_context_v1.reference_bindings`，并在 prompt 中明确说明。但验收时必须检查 `story_context_v1.resolved_reference_assets`，避免把文字说明误判成真实参考图参与。
+
+## Caption Edit 提示
+
+如果某一格需要从无字 base 图派生带字版本，建议保持原 `scene_id` 不变，把交付差异表达在：
+
+- `metadata_json.target_path`
+- `metadata_json.caption_lineage.derivation_type=caption_edit`
+- `metadata_json.caption_lineage.speaker_character_id`
+- `metadata_json.caption_lineage.bubble_anchor`
+- `metadata_json.caption_lineage.tail_direction`
+- `metadata_json.caption_lineage.caption_intent`
+- `metadata_json.caption_lineage.auto_select_derivative`
+
+这样 summary / manifest 能把它识别为“同 scene 的 caption 派生资产”，而不是新的故事 scene。
 
 ## Preflight
 

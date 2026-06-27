@@ -21,6 +21,21 @@ docker compose exec -T api /app/vag project context set \
 
 - `pet_story_cover`
 
+保存后可以顺手读取一次 project visual context，确认 `reference_diagnostics`：
+
+```bash
+curl http://localhost:8081/api/workspaces/ws_default/projects/prj_xhs_anime/visual-context
+```
+
+现在响应除了 `visual_context` 本体，还会返回只读 `reference_diagnostics`，帮助你提前识别：
+
+- `image_backed`
+- `text_constrained`
+- `missing_environment_reference`
+- `weak_species_lock`
+
+如果这里已经显示 `text_constrained` 或 `missing_environment_reference`，不要把后续真实 provider 漂移误判成“纯 provider 随机问题”。
+
 ## 2. CLI 创建多 scene 任务
 
 ```bash

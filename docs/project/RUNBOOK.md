@@ -250,6 +250,39 @@ git status --short
 - Local branch: `main`
 - Initial commit 已推送，`main` 跟踪 `origin/main`。
 
+## Local packaged review 标准路径
+
+`V02-MCPH-010` 第一版把“本地审图复放”固定成一条标准命令链，不再默认依赖 Vite dev/HMR 或临时手工猜步骤：
+
+```bash
+# 1. 起 API / worker（默认只跑 mock）
+docker compose up -d postgres redis api worker
+curl -sf http://127.0.0.1:8081/healthz
+
+# 2. 起 Web packaged review
+npm --prefix web run build
+npm --prefix web run preview -- --host 127.0.0.1 --port 4173
+curl -sf http://127.0.0.1:4173/
+```
+
+Admin 临时账号边界：
+
+- 只通过本地环境变量、受控 `.env` 或部署环境注入 `ADMIN_USERNAME` / `ADMIN_PASSWORD`。
+- 不把真实账号、密码、cookie、session 写进脚本、文档、示例 JSON 或聊天记录。
+- 本地 preview 推荐始终用同一个 host 打开 Web 和 API，例如统一使用 `127.0.0.1`，避免 Admin cookie 因 `localhost` / `127.0.0.1` 分裂。
+
+Replay 指南：
+
+1. 打开 `http://127.0.0.1:4173` 并完成 Admin 登录。
+2. 先用 REST 或 CLI 确认目标批次：
+   - `GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-summary?session_id=<session_id>&batch_id=<batch_id>&story_id=<story_id>&limit=100`
+   - `GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest?session_id=<session_id>&batch_id=<batch_id>&story_id=<story_id>&selected_only=true`
+   - `GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest?session_id=<session_id>&batch_id=<batch_id>&story_id=<story_id>&selected_only=true&view=final_delivery`
+3. 在 Web Recent Assets 中填同一组 `session_id` / `batch_id` / `story_id` 过滤条件，确认 selected assets 与 manifest 对齐。
+4. 从任一资产卡进入 Production View，核对 scene continuity、selected 状态、`delivery_role`、`asset_summary` 和 manifest replay；如需给 PM/运营/NAS 复盘，优先再导出一次 `Final delivery manifest`。
+
+这条路径的目标是“让新会话稳定复放审图证据”，不是新增 Web 创作入口，也不是把 story/batch 发布组织内建到平台存储结构里。
+
 ## Local Run Target
 
 服务端当前可通过 Docker Compose 启动：
@@ -942,9 +975,18 @@ Scene regenerate 使用/维护注意：
 Batch manifest 使用注意：
 
 - 至少传 `session_id` 或 `batch_id`。
+- `view=engineering` 为默认值；`view=final_delivery` 会在兼容保留旧顶层 `counts/tasks/assets/scenes/stories` 的同时，额外返回 `manifest_view=final_delivery` 和 `final_delivery` block，适合人工按 `story/scene/batch` 复盘最终交付图。
 - `selected_only=true` 只导出 selected assets；`selected_only=false` 默认导出 generated + selected；`include_rejected=true` 才导出 rejected assets。
+- `final_delivery.final_assets` 的判定规则固定为 scene 内 `delivery_role=final_delivery` 的资产；如果 caption derivative 已被 selected 或 auto-selected，最终交付会指向派生图，否则仍指向 base selected。
+- `target_path` 采用 asset 优先、scene 兜底；manifest 继续只输出公开 delivery URL、thumbnail URL、metadata URL 和逻辑交付路径，不输出 `local_path`、宿主机绝对路径、provider key、project API key、cookie 或 session token。
 - Manifest 只包含公开 delivery URL、metadata URL、target_path、scene/story/task id 和 visual context 摘要；不得加入 `local_path`、provider key、project API key、cookie 或 session token。
 - ZIP、多文件下载和服务端打包能力已在 P1-BSE-010 决定后置；未另行确认前不实现。
+
+常用查询方式：
+
+- REST 工程视图：`GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest?session_id=<session_id>&batch_id=<batch_id>&selected_only=true`
+- REST final delivery 视图：`GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest?session_id=<session_id>&batch_id=<batch_id>&selected_only=true&view=final_delivery`
+- CLI final delivery 视图：`vag batch manifest --project-id <project_id> --campaign-id <campaign_id> --session-id <session_id> --batch-id <batch_id> --selected-only --view final_delivery`
 
 ### NAS / Docker / WebDAV / SMB access guide
 
@@ -984,11 +1026,34 @@ NAS / Finder / WebDAV / SMB read-only file access
 - 恢复时先恢复数据库和 storage root，再用 storage-integrity 或 repair verify 类命令做只读校验。
 - 如果 NAS 提供快照，建议在数据库 dump 前后记录时间点，并让 storage root 快照与 dump 时间尽量一致。
 
+Restore drill 最小步骤：
+
+1. 停止 `api` / `worker`，必要时也停止 `web`，避免恢复中继续写入。
+2. 恢复同一时间窗的 Postgres dump 与 storage root / NAS 快照。
+3. 重新启动 `postgres`、`redis`、`api`、`worker`，确认 `/healthz` 正常。
+4. 运行 `storage-integrity` 或 `vag repair verify-asset <asset_id>`，抽查 1-3 个 selected assets。
+5. 重新获取一次 `selected_only` manifest，确认 `delivery_url` / `thumbnail_url` / `metadata_url` 仍可访问。
+6. 最后再用 Web Recent Assets / Production View 做人工 replay，不要把“能翻到文件”当成恢复完成的唯一标准。
+
 Manifest 与文件系统路径：
 
 - `target_path` 是交付逻辑路径，用于下游组织文件名或目录，不等于宿主机绝对路径。
 - `delivery_url` / `thumbnail_url` / `metadata_url` 是平台交付入口，适合 agent、Web 和外部系统读取。
 - 文件系统实际路径由 Docker volume / NAS mount 决定，不写入 manifest；不同机器恢复后路径可以不同，只要 storage root 内容和 DB metadata 一致即可。
+
+Manifest -> NAS 复制交付最小流程：
+
+1. 人工复盘/NAS 复制时优先取 `selected_only=true&view=final_delivery` 的 batch manifest，确认最终交付使用的是哪组 asset、`delivery_role` 是什么、每个 scene/story 对应哪个 `target_path`；如果需要更完整工程事实，再补看默认 `engineering` 视图。
+2. 如果只需要平台交付链接，直接把 `delivery_url` / `thumbnail_url` / `metadata_url` 交给下游，不必翻物理目录。
+3. 如果需要人工从 NAS/共享目录复制交付件，先在只读共享里按 manifest 的 `target_path` 组织目标副本目录，再把实际文件复制到共享外的新目录或外部交付目录。
+4. 不要试图通过改平台内部 `asset_id` 目录名来表达 story、scene 或发布分组；这类业务语义只由 manifest / metadata 表达。
+
+NAS 只读共享 checklist：
+
+- 平台服务账号：对 `AGENT_IMAGEFLOW_STORAGE_ROOT` 保持读写。
+- 人工浏览/交付账号：默认只读；需要复制时，复制到共享外的新目录，不回写平台管理目录。
+- 备份任务账号：可读 storage root，并在 dump/快照窗口内执行一致性备份。
+- 恢复演练后重新挂载共享时，先做 `storage-integrity` 或 `repair verify-asset` 校验，再开放给人工浏览。
 
 避免变成复杂 DAM：
 

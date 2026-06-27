@@ -2,11 +2,13 @@
 
 本文档记录 Agent ImageFlow 当前第一版基线、可验收范围、剩余任务和未来方向。它用于后续部署、试用和新一轮 CSV 拆分，不替代 `TASKS.md` 或 `PROJECT_STATUS_MAP.md`。
 
-当前 V1 baseline 已以 `v0.1.0` tag 推送。后续工作按版本化维护推进：`v0.1.x` 优先修部署、鉴权、Web 体验和运维可靠性；`v0.2.x` 再强化 IP 工作流、Settings 信息架构和真实业务批量生产体验。
+`v0.1.0` 仍保留为首个 V1 baseline tag；当前代码与文档已经收口到 `v0.2.0`，作为最新 MCP-first production hardening 发布版本。后续工作按版本化维护推进：`v0.2.x` 之后优先补服务器部署演练、final delivery / NAS 可读交付层和真实业务生产试用，再决定 `v0.3.x` 是否继续强化 IP 工作流或 Settings 信息架构。
 
 2026-06-25 后新增的产品判断：连续漫画不是简单多次单图生成。下一阶段应把“固定角色 + 固定场景 + 连续故事 + 加字派生”拆成 Story Bible、Panel Plan、reference roles、Story Continuity Agent 和 Caption/Edit Lineage；平台不承担创作脑，不扩成漫画编辑器或运营后台。外部评审后已完成 Story Continuity MVC 平台侧收敛；当前下一步不再把每个 smoke 当产品需求，而是按 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 执行 MCP-first 真实萌宠故事生产试用。
 
 2026-06-26 后的 v0.2 默认方向是 MCP Production Hardening：`docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 与 `issues/next-phase-v0-2-mcp-production-hardening.csv` 已作为下一版本执行入口。核心不是扩 Web 创作界面，而是把 agent 接入、上下文准备、reference 诊断、caption/panel 结构语义、caption 派生交付和 NAS 治理补成可维护的生产能力。
+
+2026-06-27 新增的产品判断是：人工复盘、再次寻找和 NAS 浏览比 agent 取图更痛。当前已完成 `issues/next-phase-p1-final-delivery-nas-readable-export.csv` 第一轮 `P1-DLV-001/002/003/008`：继续复用现有 `batch-manifest`，补出 `view=final_delivery`、`manifest_view` 和 `final_delivery` block，让人工可按 `story/scene/batch` 直接看最终交付图；后续 `P1-DLV-004/005/006/007` 仍只保留为 story/batch export pack、NAS readable mirror、project delivery defaults 和治理联动方案，canonical storage 继续保持不变。
 
 ## V1 Baseline
 
@@ -23,7 +25,7 @@ V1 已具备：
 - 资产治理：select/reject、best-of、auto reject、thumbnail、metadata、repair/reconcile、storage governance、integrity view。
 - 可见性：Web Recent Assets、服务端资产库、筛选、分页、lazy loading、Admin session、跨 scope 最近资产。
 - Project Visual Context：project 级角色卡、reference binding、prompt recipe、quality defaults 和 task/asset 快照。
-- Batch / Story / Scene：batch summary、Production View、scene asset actions、scene regenerate、JSON manifest。
+- Batch / Story / Scene：batch summary、Production View、scene asset actions、scene regenerate、engineering/final-delivery 双视图 JSON manifest。
 - Web 审图体验：长 ID 和工程字段默认折叠，卡片优先显示图片、剧情/画面摘要、story/scene/source/created/target 和状态。
 - Web 控制台入口：未登录时只显示 Admin 登录页；登录后进入完整服务器托管控制台，使用服务器配置的 provider 能力，资产库不再二次登录。
 - 部署发布：GitHub Actions 构建 GHCR 私有 API/Web 镜像，服务器用 `docker-compose.prod.yml` 拉取镜像运行。
@@ -67,9 +69,17 @@ V1 不做：
 
 这些是 V1 之后最应该先做的运维/验收任务。
 
-0. V0.2 MCP Production Hardening
+0. V0.2 MCP Production Hardening（已完成）
    - 当前入口为 `docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 和 `issues/next-phase-v0-2-mcp-production-hardening.csv`。
-   - P0：agent-friendly project/campaign/context setup，Project Visual Context reference diagnostics。
+   - `V02-MCPH-002 Agent-friendly project/campaign/context setup API contract` 已完成：服务端通过 `AGENT_SETUP_TOKEN` / `X-Agent-Setup-Token` 放开非 destructive bootstrap 路由，`vag` 也可通过 `AGENT_IMAGEFLOW_SETUP_TOKEN` 自动转发。
+   - `V02-MCPH-003 Project Visual Context reference diagnostics` 已完成：GET project visual context 会返回 `reference_diagnostics`，task metadata / structured input 会保留 `project_visual_context_diagnostics`，batch summary / manifest 的 `visual_context.reference_diagnostics` 可追溯，Web `ProjectContextModal` 也已新增只读诊断卡。
+   - `V02-MCPH-004 Caption speaker / bubble anchor semantics` 已完成：`metadata_json.caption_lineage` 现可显式表达 `speaker_character_id`、`bubble_anchor`、`tail_direction`、`caption_intent` 和 `avoid_covering_subjects`；服务端会归一化到 `structured_input_json.caption_lineage`，并把这些语义追加为 provider 可见的 caption prompt 约束。
+   - `V02-MCPH-005 Panel state transition and performance progression semantics` 已完成：`story_context_v1.panel_plan` 现在支持 `emotion_before`、`emotion_after`、`pose_change`、`relationship_shift`、`must_change`、`must_not_keep` 和 `state_transition_notes`；服务端会把这些状态推进语义回写到 metadata，并追加成 provider 可见的 `State transition requirements` prompt 约束，summary/manifest continuity 与 Web Production View 也能直接读到。
+   - `V02-MCPH-006 Caption derivative delivery semantics` 已完成：`caption_lineage` 现支持 `auto_select_derivative`，服务端会在 `manual_optional` caption derivative task 中按该标志自动选中第一张派生图；`batch summary` / `batch manifest` 现已输出只读 `delivery_role`，并在 `selected_only` manifest 中把 `base_original`、`caption_derivative` 和 `final_delivery` 区分清楚。
+   - `V02-MCPH-007 Provider partial success product semantics` 已完成：task、batch summary、manifest 与 Web 技术详情现在统一输出 `requested_count`、`delivered_count`、`partial_success_reason` 和 `provider_error_summary`，调用方不再把 provider 少回候选误判为平台全失败。
+   - `V02-MCPH-009 Single asset readable production summary` 已完成：单资产 `asset` / `metadata` 响应新增只读 `asset_summary`，Web 审图标题、概览和技术详情已直接消费该摘要。
+   - `V02-MCPH-008 NAS storage adaptation and delivery governance` 与 `V02-MCPH-010 Local Web review packaged environment` 已完成第一版文档/运维收口：自托管部署固定以 storage root bind mount + Postgres/storage 一致备份为边界；本地 packaged review 固定走 `docker compose` + `npm --prefix web run preview` 标准路径。
+   - 2026-06-27 已完成 `V02-MCPH-011 Controlled pet business regression trial`：在本地低并发真实 provider 下完成 2 格情侣文案卡、3 格低背景连续故事和少量 caption derivative 试跑，reference diagnostics、speaker/bubble anchor、panel state transition、caption derivative final delivery、final-delivery manifest 和 delivery URL 均通过；`v0.2.0` 功能范围已闭环。
    - P1：caption speaker/bubble anchor，panel state transition，caption derivative delivery，NAS storage adaptation and delivery governance。
    - P2：provider partial success semantics，single asset readable summary，local Web review packaged environment。
    - 默认不运行真实 provider；业务回归试用需用户确认费用和图量。
@@ -125,10 +135,10 @@ V1 不做：
    - 单 asset archive/restore 已补到 Admin REST/Web/CLI；archived 默认不进 cleanup。
    - 下一步补 task/input-file reset、完整 browser smoke 和生产备份演练；MCP 第一轮不删除 workspace/project/campaign/asset。
 
-9. 发布版本策略确认
-   - 当前 `main` 和 `sha-<commit>` 镜像可用。
-   - 是否创建 `v0.1.0` tag 作为正式第一版，需要单独确认。
-   - 若创建 tag，会触发 GHCR `v0.1.0` 镜像发布。
+9. 发布版本策略
+   - `v0.1.0` 保留为首个 V1 baseline tag。
+   - 当前发版目标为 `v0.2.0`：Git tag 为 `v0.2.0`，GHCR 镜像发布 `v0.2.0` 与 `sha-<commit>`。
+   - 服务器升级、HTTPS 同源 smoke 和 IMAGE_TAG 回滚仍独立于本地代码发版执行。
 
 10. 备份与恢复演练
    - Postgres dump。
@@ -191,6 +201,27 @@ issues/next-phase-p1-pet-account-real-workflow-trial.csv
 - CSV 已从验收清单收敛为必须生产步骤 + 可选证据记录。
 - 新增 `docs/project/PET_STORY_PRODUCTION_WORKFLOW.md` 和 `examples/mcp/pet-story-production-plan.json`。
 - 本任务用于真实业务生产试用，不直接实现新功能；观察结果应归类到 Story Continuity、Caption Lineage、Settings IA、Safe Delete、provider follow-up 或部署/NAS 运维。
+
+### P1 Delivery: Final Delivery / NAS Readable Export
+
+执行入口：
+
+```text
+issues/next-phase-p1-final-delivery-nas-readable-export.csv
+```
+
+当前状态：
+
+- 第一轮 `P1-DLV-001/002/003/008` 已完成：`GET /batch-manifest`、`vag batch manifest` 和 Web Production View 已支持 `view=engineering|final_delivery`。
+- `view=final_delivery` 会在兼容保留旧顶层 `counts/tasks/assets/scenes/stories` 的同时，追加 `final_delivery.counts/stories/scenes/final_assets`，方便人工按 story/scene/batch 查看最终交付图。
+- `final_delivery.final_assets` 统一以 scene 内 `delivery_role=final_delivery` 的资产为准，并把 caption 派生关系扁平为 `derived_from_asset_id` / `derivation_type`；响应继续不暴露 `local_path`、cookie、session 或 secret-like 字段。
+
+剩余待做：
+
+- `P1-DLV-004` story/batch export pack。
+- `P1-DLV-005` NAS readable mirror。
+- `P1-DLV-006` project delivery defaults。
+- `P1-DLV-007` export/mirror 与 archive/restore/cleanup/restore drill 的治理联动。
 
 ### P1 Story: Story Continuity / Comic Workflow
 

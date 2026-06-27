@@ -14,7 +14,7 @@
 - `slice-024` 到 `slice-029`：Storage Governance、资产生产就绪、Web 性能、并发与控制台可见性。
 - `slice-030` 到 `slice-039`：Project Production Context、Web UX Smoothness 和萌宠故事 mock 回归。
 - `slice-040` 到 `slice-050`：Batch / Story / Scene、Production View、regenerate、manifest 和 NAS 文件访问边界。
-- `slice-051` 到 `slice-053`：Web Operator Review Console、Deployment Release Pipeline 和 Server Deployment Rehearsal。
+- `slice-051` 到 `slice-066`：Web Operator Review Console、Deployment Release Pipeline、Server Deployment Rehearsal、Caption/Edit Lineage、Final Delivery manifest 第一轮 contract，以及 v0.2 MCP Production Hardening 全部切片（agent setup、reference diagnostics、caption speaker/bubble semantics、panel state transition semantics、caption derivative delivery semantics、provider partial success、single asset readable summary、NAS delivery governance、本地 packaged review、受控真实萌宠业务回归）。
 
 ## 维护规则
 

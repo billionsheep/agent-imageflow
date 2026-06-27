@@ -19,6 +19,7 @@ V1 之后的产品升级分两条线推进：
 - `issues/next-phase-p1-pet-account-real-workflow-trial.csv`：低并发真实萌宠账号试用，记录平台、agent、provider 和 Web 体验问题。
 - `issues/next-phase-p1-story-continuity-comic-workflow.csv`：Story Bible、Panel Plan、reference roles、Story Review 和连续故事生产工作流。
 - `issues/next-phase-p1-caption-edit-lineage.csv`：固定 asset 加字 edit 的派生资产谱系、Web 加字入口和批量 caption 工作流。
+- `issues/next-phase-p1-final-delivery-nas-readable-export.csv`：不改内部 canonical storage，只补 final delivery 语义、按 story/batch 导出和 NAS 可读 mirror，解决人工复盘、再次查找和只读 NAS 浏览困难。
 - `docs/project/STORY_CONTINUITY_AGENT_GUIDE.md`：指导额外 agent 承担连续叙事、分镜、reference choices 和重试策略；平台继续作为图片资产事实源。
 
 边界继续保持：不做小红书发布、内容日历、账号运营后台、通用 DAM、漫画编辑器、图层编辑器、SaaS 注册计费或每用户 provider key。MCP 继续不开放 workspace/project/campaign/asset destructive tools。

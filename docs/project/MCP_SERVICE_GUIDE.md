@@ -36,7 +36,7 @@ docker compose run -T --rm api /app/mcp
 
 ## 鉴权边界
 
-先记住一句话：MCP `stdio`、HTTP Basic Auth、Project API Key、Web Admin Login 是四条不同边界。
+先记住一句话：MCP `stdio`、HTTP Basic Auth、Project API Key、Agent Setup Token、Web Admin Login 是五条不同边界。
 
 ### 1. MCP `stdio`
 
@@ -56,15 +56,127 @@ docker compose run -T --rm api /app/mcp
 - 典型场景：`curl /api/tasks/...`、`curl /api/projects/.../assets`。
 - 本地 `stdio` MCP 本身不消费这把 key，但如果你后续要用 HTTP 查补充信息，就可能需要它。
 
-### 4. Admin Login
+### 4. Agent Setup Token
+
+- 用于 agent/bootstrap 的非 destructive REST 准备路径。
+- 服务端通过环境变量 `AGENT_SETUP_TOKEN` 启用；请求头名是 `X-Agent-Setup-Token`。
+- 当前只允许：
+  - `GET/POST /api/workspaces`
+  - `GET/POST /api/workspaces/{workspace_id}/projects`
+  - `GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/campaigns`
+  - `GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/visual-context`
+- 明确不允许：
+  - `POST /api/tasks`
+  - asset select/reject/delivery
+  - archive/restore
+  - cleanup
+  - delete
+- `vag` 如果检测到环境变量 `AGENT_IMAGEFLOW_SETUP_TOKEN`，会自动转发这个 header。
+- 这条路径的目标是让新 agent 能准备 project/campaign/context，而不是替代 project API key 或 Admin session。
+
+### 5. Admin Login
 
 - 只用于 Web 控制台的人类登录态。
 - 不给 MCP、CLI、mock 示例使用。
 
-### 5. Provider Key
+### 6. Provider Key
 
 - 只属于服务端环境变量或受控部署配置。
 - 本指南默认不用真实 provider，也不读取、不打印、不写入任何真实 provider key。
+
+## Agent-Friendly Bootstrap
+
+如果新 agent 还没有现成的 `project/campaign/visual context`，不要先去找 Admin cookie，也不要直连 DB。当前推荐路径是：
+
+1. 用 `X-Agent-Setup-Token` 走非 destructive REST bootstrap。
+2. 或者在 CLI 环境里设置 `AGENT_IMAGEFLOW_SETUP_TOKEN`，让 `vag` 自动转发 header。
+3. bootstrap 完成后，再用现有 MCP 6 工具做任务创建、查任务、列资产、select/reject 和 delivery。
+
+示例文件：
+
+- `examples/tasks/agent-setup-bootstrap-usage.md`
+
+这个边界很重要：setup token 只负责“准备上下文”，不负责“生产任务”或“清理数据”。
+
+## Project Visual Context Diagnostics
+
+Project Visual Context 现在除了 `visual_context` 本体，还会在读取时返回只读 `reference_diagnostics` 摘要，用来提前判断：
+
+- `image_backed`
+- `text_constrained`
+- `missing_environment_reference`
+- `weak_species_lock`
+
+同时会附带角色有图数量、缺图角色、environment reference 数、species drift negative prompt 覆盖、identity signal 和 provider reference participation risk。
+
+当任务使用 project visual context 时：
+
+- task metadata 会保留 `project_visual_context_diagnostics`
+- `structured_input_json` 会保留同名摘要
+- batch summary / manifest 会在 `visual_context.reference_diagnostics` 中继续透传
+
+因此新 agent 不需要靠真实 provider 先试一次，才能知道当前 project context 是否偏弱。
+
+## Caption Lineage Speaker / Bubble Semantics
+
+Caption edit 现在推荐把派生语义统一写进 `metadata_json.caption_lineage`，而不是散落在 metadata 根节点。第一版支持：
+
+- `derived_from_asset_id`
+- `derivation_type`
+- `caption_text`
+- `caption_style`
+- `source_task_id`
+- `source_scene_id`
+- `speaker_character_id`
+- `bubble_anchor`
+- `tail_direction`
+- `caption_intent`
+- `auto_select_derivative`
+- `avoid_covering_subjects`
+
+服务端会做三件事：
+
+- 归一化 `metadata_json.caption_lineage`，兼容旧的根字段输入
+- 把归一化结果写入 `structured_input_json.caption_lineage`
+- 把气泡/说话人语义追加成 provider 可见的 prompt 约束，并在 provider parameters、batch summary / manifest asset 上继续透传 `caption_lineage`
+
+建议：
+
+- `speaker_character_id` 复用 project visual context 的角色 id
+- delivery 变体尽量保留原 `scene_id`，不要为了 caption edit 新开一个 scene
+- `bubble_anchor`、`tail_direction` 先使用近似方向语义，例如 `top_right`、`above_speaker`、`toward_left`
+- 如果希望 caption 派生图在完成后直接成为最终交付图，可把 `auto_select_derivative=true` 放进 `metadata_json.caption_lineage`；第一版会在 `manual_optional` caption derivative task 中自动选中第一张派生图，但不会改写 base asset 的事实状态
+
+caption derivative delivery 第一版的只读交付语义如下：
+
+- `delivery_role=base_original`：原图事实仍保留，但当前不是最终交付图
+- `delivery_role=caption_derivative`：这是 caption 派生候选，但还没有成为最终交付图
+- `delivery_role=final_delivery`：这是 `selected_only` manifest 应优先交付的结果，可能是 base selected，也可能是被选中的 caption derivative
+
+因此：
+
+- `selected_only` manifest 面向交付，会优先保留 scene 内的 `final_delivery`
+- `all-assets` manifest 面向复盘，会继续同时保留 base + derivative 事实
+
+## Story Panel State Transition Semantics
+
+连续故事任务现在推荐在 `metadata_json.story_context_v1.panel_plan[]` 中补充状态推进字段：
+
+- `emotion_before`
+- `emotion_after`
+- `pose_change`
+- `relationship_shift`
+- `must_change`
+- `must_not_keep`
+- `state_transition_notes`
+
+服务端会做三件事：
+
+- 把这些字段回写到 task metadata，方便 summary / manifest / Web 审图直接读取
+- 在创建任务时追加成 provider 可见的 `State transition requirements` prompt 约束
+- 让 batch summary / manifest continuity 能同时表达“保留项”和“必须推进项”
+
+这层语义的目标是帮助 agent 少走“上一格形保住了，但表演没推进”的弯路。平台不会替调用方生成剧情，只负责保存、透传和约束提示。
 
 ## 当前 6 个工具
 
@@ -87,16 +199,29 @@ docker compose run -T --rm api /app/mcp
 - `metadata_json.story_id`
 - `metadata_json.scene_id`
 - `metadata_json.target_path`
+- `metadata_json.caption_lineage`
 
 ### `get_image_task`
 
 按 `task_id` 查询任务状态。最常看：
 
 - `status`
+- `requested_count`
+- `delivered_count`
+- `partial_success_reason`
+- `provider_error_summary`
 - `error`
 - `assets`
 
 任务刚创建时通常先看到 `queued` 或 `running`，等 `worker` 完成后再变成 `completed`。
+
+如果真实 provider 少回候选，第一版产品语义是：
+
+- `completed`：`delivered_count == requested_count`
+- `partially_completed`：`0 < delivered_count < requested_count`
+- `failed`：`delivered_count == 0`
+
+`partially_completed` 不会阻断已经生成的 asset 交付；它的作用是提醒调用方“provider 本次少回了一部分候选”，不要误判成平台完全失败。
 
 ### `list_image_assets`
 
@@ -130,6 +255,28 @@ docker compose run -T --rm api /app/mcp
 - `metadata_url`
 
 如果调用方只需要可交付结果，这通常是最后一步。
+
+## 单资产可读摘要
+
+REST / Web 的单资产详情现在额外提供只读 `asset_summary`，收敛：
+
+- `story_id` / `scene_id` / `panel_index`
+- `dialogue` / `caption_text`
+- `derived_from_asset_id` / `derivation_type`
+- `previous_panel_asset_id`
+- `provider_reference_participation`
+- `provider` / `model`
+- `asset_status`
+- `delivery_role`
+
+建议把它当成 PM / 运营 / 调用方复盘时的第一阅读层，而不是自己去翻深层 `metadata_json`。
+
+边界：
+
+- `asset_summary` 和 `provider_error_summary` 都不应包含 `local_path`、cookie、token、provider key、project key 或任何 secret-like 字段。
+- `delivery_role` 是只读交付语义，不是新的 asset status。
+- 需要完整 scene 复盘时，用 `batch-summary` / `batch-manifest`；需要看单图是什么、从哪来、是不是最终交付时，看 `asset_summary` 即可。
+- 需要做本地 Web 审图 replay 或 NAS/self-host 交付治理时，不要在 MCP 示例里继续猜路径；直接看 `RUNBOOK.md` 的 packaged review / NAS 指南和 `SERVER_DEPLOYMENT_GUIDE.md` 的部署步骤。
 
 ## 最小 mock 生图流程
 
@@ -246,10 +393,11 @@ MCP 第一轮不提供删除 workspace / project / campaign / asset 的工具，
 
 - 配置模板：`examples/mcp/agent-imageflow.local.json`
 - 最小 `tools/call` 示例：`examples/mcp/create-pet-scene.json`
+- agent bootstrap 示例：`examples/tasks/agent-setup-bootstrap-usage.md`
 - 人工 smoke 手册：`examples/mcp/smoke.md`
 
 ## 当前状态
 
-本轮已补齐 guide 和 examples，并完成 JSON parse / 静态校验。
+本轮已补齐 guide、examples 和 agent-friendly bootstrap contract：服务端新增 `AGENT_SETUP_TOKEN` / `X-Agent-Setup-Token` 非 destructive 准备路径，`vag` 支持 `AGENT_IMAGEFLOW_SETUP_TOKEN` 自动转发，MCP 工具仍固定为 6 个安全工具。
 
-当前仍建议把 MCP mock smoke 作为人工步骤执行一次后，再把该切片标记为 done。
+当前仍建议把 MCP mock smoke 作为人工步骤执行一次；但 `V02-MCPH-002` 自身的 Go contract tests 已完成，不需要依赖真实 provider。

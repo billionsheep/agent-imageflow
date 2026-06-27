@@ -81,6 +81,13 @@ AGENT_IMAGEFLOW_POSTGRES_DATA=/volume1/agent-imageflow/postgres
 AGENT_IMAGEFLOW_REDIS_DATA=/volume1/agent-imageflow/redis
 ```
 
+第一版 NAS 治理边界：
+
+- DB / metadata / manifest 是事实源；不要把物理目录名当成 project、campaign、story、scene 或 asset 状态。
+- 人工/NAS 浏览建议只读；复制交付件时从共享目录复制出去，不在平台管理目录内移动、重命名或删除文件。
+- 如果 NAS 提供 SMB/WebDAV/Finder，只把它当成浏览/复制/备份入口，不在 Agent ImageFlow 应用内实现 WebDAV/SMB server。
+- 服务容器账号需要对 storage root 可写；人工浏览账号默认只读；恢复演练完成后再重新开放共享给人工浏览。
+
 ## 登录 GHCR
 
 在服务器上执行：
@@ -181,6 +188,16 @@ Web 验收：
 5. 确认任务完成后有 original、thumbnail、metadata URL。
 6. 确认 Production View / Recent Assets 能看到该资产。
 
+本地 packaged review / replay 建议遵循 `RUNBOOK.md` 中的标准路径：`docker compose up -d postgres redis api worker` + `npm --prefix web run build` + `npm --prefix web run preview -- --host 127.0.0.1 --port 4173`。生产/验收环境同样推荐保持 Web 与 API 走同一个公开 origin，再按 `session_id` / `batch_id` / `story_id` 复放 Recent Assets 与 Production View。
+
+恢复演练最小步骤：
+
+1. 停止 `api` / `worker`。
+2. 恢复同一时间窗的 Postgres dump 与 `AGENT_IMAGEFLOW_STORAGE_ROOT` / NAS 快照。
+3. 重新 `up -d` 并检查 `/healthz`。
+4. 运行 `storage-integrity` 或抽查 `repair verify-asset`。
+5. 用 `selected_only` manifest + Recent Assets / Production View 复放至少一个已知 batch/story，确认 delivery URL 与审图链路都恢复。
+
 真实 provider canary 只在你明确接受费用时执行：
 
 - `DEFAULT_PROVIDER` 切到对应 provider，或单次任务指定 provider。
@@ -197,7 +214,7 @@ Web 验收：
 
 - 服务器类型：NAS / Linux VM / 内网 Docker 主机。
 - 部署目录，例如 `/opt/agent-imageflow`。
-- `IMAGE_TAG`，例如 `main`、`v0.1.0` 或 `sha-xxxxxxx`。
+- `IMAGE_TAG`，例如 `main`、`v0.2.0` 或 `sha-xxxxxxx`。
 - `PUBLIC_BASE_URL` 的域名，不包含任何账号、密码或 token。
 - GHCR pull 结果：成功/失败和非敏感错误摘要。
 - `docker compose ... ps` 的服务状态摘要。

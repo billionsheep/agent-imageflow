@@ -40,6 +40,10 @@
         "resulting_state": "观众知道小白其实在等鸡毛。",
         "dialogue": "才没有等你",
         "dialogue_intent": "嘴硬地否认等待，为第二格鸡毛出现做铺垫。",
+        "emotion_before": "嘴硬但期待",
+        "emotion_after": "偷偷开心",
+        "pose_change": "从抱书防御变成稍微转头看门口",
+        "relationship_shift": "从独自等待变成准备迎接鸡毛",
         "must_keep_props": [
           "粉色沙发",
           "粉色马克杯",
@@ -49,6 +53,13 @@
           "小白表情",
           "书本角度"
         ],
+        "must_change": [
+          "眼神必须从书上偏向门口"
+        ],
+        "must_not_keep": [
+          "不能把门口方向完全遮住"
+        ],
+        "state_transition_notes": "第一格重点是建立等待感，不要过早让鸡毛进入画面。",
         "target_path": "stories/pet_blanket_fort_story/scene_001.png"
       },
       {
@@ -61,6 +72,10 @@
         "resulting_state": "两只小狗进入同一空间，牛奶成为共享道具。",
         "dialogue": "牛奶来啦",
         "dialogue_intent": "温柔回应小白，推进两只角色靠近。",
+        "emotion_before": "嘴硬但期待",
+        "emotion_after": "被接住后的安心",
+        "pose_change": "从独坐抱书变成抬头看向鸡毛",
+        "relationship_shift": "从等待变成正式同框互动",
         "must_keep_props": [
           "粉色沙发",
           "粉色马克杯",
@@ -70,6 +85,14 @@
           "鸡毛进入画面",
           "新增一杯热牛奶"
         ],
+        "must_change": [
+          "鸡毛必须进入画面",
+          "小白视线必须转向鸡毛"
+        ],
+        "must_not_keep": [
+          "不能继续只有小白单独在画面里"
+        ],
+        "state_transition_notes": "重点是既保留同一客厅和沙发位置，又明确让关系往靠近推进。",
         "target_path": "stories/pet_blanket_fort_story/scene_002.png"
       },
       {
@@ -82,6 +105,10 @@
         "resulting_state": "两只小狗靠在一起，关系从等待转为贴近。",
         "dialogue": "靠近一点点",
         "dialogue_intent": "小白表达想靠近但仍然害羞。",
+        "emotion_before": "安心但还害羞",
+        "emotion_after": "愿意贴近的甜蜜",
+        "pose_change": "从分坐变成肩膀和尾巴都明显靠近",
+        "relationship_shift": "从同框互动推进到明确贴近",
         "must_keep_props": [
           "粉色沙发",
           "粉色马克杯",
@@ -92,6 +119,13 @@
           "两只小狗靠近",
           "尾巴动作"
         ],
+        "must_change": [
+          "两只小狗的身体距离必须缩短"
+        ],
+        "must_not_keep": [
+          "不能还保持明显分离的座位关系"
+        ],
+        "state_transition_notes": "第三格一定要让观众看出第二格的互动正在升级，而不是只重复同一姿势。",
         "target_path": "stories/pet_blanket_fort_story/scene_003.png"
       }
     ],

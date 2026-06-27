@@ -6,11 +6,11 @@
 
 Agent ImageFlow 是服务器托管的图片资产生产平台。外部 agent、脚本、Web、CLI 或 REST 可以创建图片任务；服务端负责 provider 调用、资产落盘、缩略图、metadata、审核状态、交付 URL 和基础治理。
 
-当前版本 `v0.1.0` 已作为 V1 baseline 推送。后续工作进入版本化维护：优先服务器部署演练、MCP-first 真实业务生产试用、Web/Settings 体验收敛和运维安全增强。
+当前版本已收口到 `v0.2.0`：MCP-first production hardening、Story Continuity MVC 第一轮、caption 派生交付语义和 final-delivery-oriented manifest 都已进入正式发布面。后续工作进入版本化维护：优先服务器部署演练、MCP-first 真实业务生产试用、final delivery / NAS 可读交付层和运维安全增强。
 
 下一阶段新增的产品方向是 Story Continuity：连续叙事、分镜和重试策略由额外 agent 承担，Agent ImageFlow 继续负责图片资产生产、参考图、派生关系、审图和交付事实源。真实萌宠账号生产试用入口见 `PET_STORY_PRODUCTION_WORKFLOW.md`，新 agent 接入见 `STORY_CONTINUITY_AGENT_GUIDE.md`。
 
-2026-06-26 后的下一版本执行入口收敛为 `V0_2_MCP_PRODUCTION_HARDENING.md`：重点不是继续增加 Web 创作界面，而是把 MCP-first 生产链路补稳，包括 agent 自助准备上下文、reference 诊断、caption 说话人/气泡锚点、panel 状态转场、caption 派生交付和 NAS 交付治理。
+`V0_2_MCP_PRODUCTION_HARDENING.md` 现作为 `v0.2.0` 的范围记录保留：这一轮重点不是继续增加 Web 创作界面，而是把 MCP-first 生产链路补稳，包括 agent 自助准备上下文、reference 诊断、caption 说话人/气泡锚点、panel 状态转场、caption 派生交付和 NAS 交付治理。
 
 ## 日常入口
 

@@ -1,5 +1,59 @@
 # Decisions
 
+## 2026-06-27: 交付层采用“双层视图”，不直接改 canonical storage
+
+- Decision: 为了解决人工复盘、再次查找和 NAS 浏览困难，后续新增的交付层能力采用“双层视图”路线：内部 canonical storage 继续保持 `workspace/project/campaign/originals|thumbnails|metadata/asset_id` 不变；面向人的 final delivery manifest、story/batch export 和 NAS readable mirror 作为第二层交付视图实现。
+- Reason: 当前真正的摩擦不是 agent 找不到结果，而是人按业务语义回看“一组图”时很难定位最终交付图、区分 base/caption 派生关系，也不容易在 NAS/Finder 中按故事或批次浏览。如果直接改内部正式存储结构，会同时牵动 cleanup、integrity、restore、audit 和旧资产兼容，风险远高于收益。
+- Impact: 后续 `issues/next-phase-p1-final-delivery-nas-readable-export.csv` 的执行边界是“增强交付视图，不重写事实源”。允许增加 final delivery contract、story/batch export pack、NAS readable mirror 和 project delivery defaults；不允许把文件系统重新提升为业务事实源，不把 mirror 目录的变动当成状态变更，不默认复制所有 generated/rejected 候选图。
+
+## 2026-06-27: Final delivery contract 第一轮复用 batch-manifest 的 view 扩展
+
+- Decision: `P1-DLV-001/002/003/008` 第一轮不新增独立导出接口、不新增表，也不改 asset/task 状态机；继续复用 `GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest`、CLI `vag batch manifest` 和 Web Production View manifest 导出动作，在现有 contract 上新增 `view=engineering|final_delivery`。默认 `engineering` 保持兼容，`view=final_delivery` 额外返回 `manifest_view=final_delivery` 和只读 `final_delivery` block。
+- Reason: 当前最紧迫的问题是“人工需要一眼看懂每个 scene 最终该交付哪张图”，不是“缺少另一套存储或导出系统”。在现有 manifest 上增量补出第二视图，可以最大化复用已有 `delivery_role`、`caption_lineage`、`continuity`、`visual_context`、delivery URLs 和 Web 导出入口，同时避免为第一轮交付层引入新路由、新表或迁移。
+- Impact: REST/CLI/Web 现在都可以在不翻深层 metadata 的前提下直接读 `final_delivery.counts/stories/scenes/final_assets`；caption 派生图会扁平暴露 `derived_from_asset_id` / `derivation_type`，`target_path` 采用 asset 优先、scene 兜底，响应继续不暴露 `local_path` 或任何 secret-like 字段。`P1-DLV-004/005/006/007` 的导出包、NAS readable mirror、project delivery defaults 和治理联动继续作为后续独立切片，不在本轮落代码。
+
+## 2026-06-26: Provider partial-success 与 asset_summary 先做只读 runtime 语义，不扩状态机或 Web 推理层
+
+- Decision: `V02-MCPH-007` 与 `V02-MCPH-009` 第一版都走只读 contract 路线：task、batch summary 和 batch manifest 统一补 `requested_count`、`delivered_count`、`partial_success_reason`、`provider_error_summary`；单资产 `asset` / `metadata` 响应补 `asset_summary`，收敛 story/scene/panel、dialogue/caption、derived_from、previous_panel、reference participation、provider/model、asset status 和 delivery role。Web 审图只消费这些只读字段，不再从深层 metadata 二次推理业务语义。
+- Reason: 真实业务试跑暴露的摩擦是“provider 少回候选时容易被误判为平台不稳定”和“单 asset metadata 太深，PM/运营看不懂”，而不是“缺少新的数据库状态机或 Web 创作界面”。当前 task/asset/manifest 事实模型足够承载 runtime 说明层，继续复用它能最快稳定生产口径。
+- Impact: 调用方现在可以稳定地区分 `completed`、`partially_completed` 和 `failed`，并在单资产详情中直接读到可交付摘要；`asset_summary` 和 partial 字段不会暴露 `local_path`、cookie、token、provider key、project key 或任何 secret-like 字段。后续若要扩更复杂的统计或导出视图，应继续优先复用这些只读 contract。
+
+## 2026-06-26: NAS 与本地审图封装先收敛为部署/运行文档，不新增导出子系统
+
+- Decision: `V02-MCPH-008` 与 `V02-MCPH-010` 第一版不新增 NAS 子系统、导出镜像器或 Web 登录自动化脚本，而是把边界固定到 `RUNBOOK.md`、`SERVER_DEPLOYMENT_GUIDE.md` 和 `MCP_SERVICE_GUIDE.md`：平台事实源仍是 DB/metadata/manifest，物理 storage root 继续按内部事实落盘；本地 packaged review 固定使用 `docker compose up -d postgres redis api worker` + `npm --prefix web run build` + `npm --prefix web run preview -- --host 127.0.0.1 --port 4173` 的标准路径。
+- Reason: 当前主要问题是“自托管/NAS 交付边界说不清”和“本地审图复放缺少统一路径”，不是“缺一套新的存储模型或 Web 主创作入口”。如果此时把 platform 内部目录改成 story folder、或在应用里内置 SMB/WebDAV，会把 v0.2 从 contract hardening 偏到基础设施重做。
+- Impact: 运维现在有明确的 bind mount、只读 SMB/WebDAV/Finder、Postgres dump + storage 快照、禁止手动移动/重命名平台目录的治理口径；本地新会话也有统一的 packaged review 命令链和 replay 步骤。后续若确实需要发布镜像目录或内置导出器，必须另开切片并先给出迁移/备份计划。
+
+## 2026-06-26: Panel state transition 先扩 story_context_v1.panel_plan，不新增独立状态表
+
+- Decision: `V02-MCPH-005` 第一版继续复用 `story_context_v1.panel_plan` 和 task metadata，不新增独立状态转场表；新增 `emotion_before`、`emotion_after`、`pose_change`、`relationship_shift`、`must_change`、`must_not_keep` 和 `state_transition_notes`，服务端只负责归一化、metadata 快照、summary/manifest 透传，以及追加 provider 可见的 prompt 约束。
+- Reason: 真实连续故事试跑暴露的是“上一格引用能保形，但不够会推进表演”，不是“缺少一套新的 story 数据库存储层”。当前 `story_context_v1` 已经是外部 Story Continuity Agent 的主 contract，继续在这里扩字段最符合 MCP-first 的低改动路线。
+- Impact: batch summary / manifest continuity、Web Production View 和 task metadata 现在都能同时表达“保留哪些事实”和“这一格必须变化什么”。平台仍不承担创作脑，不自动推断剧情，也不做 AI 自动表演评分。
+
+## 2026-06-26: Caption speaker / bubble anchor 先挂在 metadata_json.caption_lineage，不新增 MCP 工具或数据库表
+
+- Decision: `V02-MCPH-004` 第一版继续复用现有 `caption_lineage` 链路，不新增数据库表、MCP 新工具或 Web 排版器；新增的 `speaker_character_id`、`bubble_anchor`、`tail_direction`、`caption_intent` 和 `avoid_covering_subjects` 统一写入 `metadata_json.caption_lineage`，服务端归一化后落到 `structured_input_json.caption_lineage`，并展开成 provider 可见的 prompt 约束。
+- Reason: 真实业务试跑暴露的是“caption 气泡归属和位置语义不够清楚”，不是“缺少一套新的 caption 资产模型”。当前 metadata、structured input、provider parameters 和 manifest 已经足够承载第一版语义，如果此时额外引入数据库 schema 或 Web 排版能力，会让 v0.2 从 MCP Production Hardening 偏航。
+- Impact: MCP `create_image_task` schema 现在会显式提示 `metadata_json.caption_lineage` 的嵌套字段；provider parameters、batch summary / manifest asset 会继续透传完整 `caption_lineage`。第一版只承诺“agent 可表达 + 平台可追溯 + provider 可见约束”，不承诺 deterministic 气泡排版或 caption renderer。
+
+## 2026-06-26: Caption derivative delivery 第一版用只读 delivery_role + auto_select_derivative，不改 asset status 枚举
+
+- Decision: `V02-MCPH-006` 第一版不新增数据库表、不改 `asset.status` 枚举，也不把 caption 派生交付做成独立工具。`metadata_json.caption_lineage` 新增 `auto_select_derivative`，服务端继续把它归一化到 `structured_input_json.caption_lineage` 并透传到 provider parameters。scene 级 `batch summary` / `batch manifest` 额外输出只读 `delivery_role`，用 `base_original`、`caption_derivative`、`final_delivery` 表达派生交付语义；`selected_only` manifest 会优先保留 `final_delivery`，all-assets 视图继续保留 base + derivative 事实。
+- Reason: 真实业务试跑暴露出“caption derivative 生成成功，但如果不再次 select，selected manifest 仍然回 base 无字图”的摩擦。当前平台的事实状态和 lineage 足够支撑第一版交付语义，无需为了 delivery 语义扩状态机或迁移表结构。
+- Impact: 显式/自动 selected 的 caption derivative 可成为最终交付图，同时 base asset 事实状态不会被覆盖；agent 仍可保留 manual review，只要不打开 `auto_select_derivative`，selected-only manifest 就继续交付 base selected。后续如果要支持更复杂的 delivery lineage 或多派生物竞争，再另开切片。
+
+## 2026-06-26: Project Visual Context reference diagnostics 先走 metadata 摘要，不新增表
+
+- Decision: `V02-MCPH-003` 先复用现有 `project.metadata_json.visual_context`、task `metadata_json`、`structured_input_json`、batch summary 和 manifest，新增 `reference_diagnostics` / `project_visual_context_diagnostics` 摘要，不新增数据库表或迁移。诊断第一版输出 `image_backed`、`text_constrained`、`missing_environment_reference`、`weak_species_lock`、角色有图计数、缺图角色、species drift negative prompt 覆盖、identity signal 和 provider reference participation risk。
+- Reason: 真实业务试跑暴露的是“平台没有提前把 reference 风险讲清楚”，不是“缺少另一套 reference 状态存储层”。当前 project visual context、task metadata、manifest 和 Web Project Context 已经足够承载第一轮 readiness diagnostics，如果此时引入新表，会扩大 v0.2 范围。
+- Impact: GET project visual context 响应顶层会返回 `reference_diagnostics`；当任务使用 project visual context 时，metadata / structured input 会保留 `project_visual_context_diagnostics`，batch summary / manifest 通过 `visual_context.reference_diagnostics` 继续透传；Web `ProjectContextModal` 只增加只读诊断卡，不改变现有角色卡、reference binding、prompt recipe 的编辑流程。当前诊断是规则和配置层提示，不代表 AI 自动视觉质检结论。
+
+## 2026-06-26: Agent-friendly setup 采用独立 setup token，不新增 MCP setup/delete 工具
+
+- Decision: `V02-MCPH-002` 采用受控 `AGENT_SETUP_TOKEN` / `X-Agent-Setup-Token` 作为 agent/bootstrap 的第一版准备契约，只放开非 destructive REST 路由：`GET/POST /api/workspaces`、`GET/POST /api/workspaces/{workspace_id}/projects`、`GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/campaigns`、`GET/POST /api/workspaces/{workspace_id}/projects/{project_id}/visual-context`。MCP 工具集保持 6 个安全工具，不新增 setup/delete 工具。
+- Reason: 真实业务试跑暴露的第一个 P0 摩擦不是“生成不出来”，而是新 agent 准备 project/campaign/context 时仍依赖 Admin cookie/session 或本地 DB 操作。直接给 MCP 增加 setup/delete 工具会把 agent 入口和高风险管理入口混在一起，也会扩大误用面。
+- Impact: 新 agent 现在可以不用 Admin cookie/session、DB 直连或 provider key，就完成 workspace/project/campaign/context bootstrap；`cmd/vag` 通过 `AGENT_IMAGEFLOW_SETUP_TOKEN` 自动转发 setup header。setup token 明确不能用于 task create、asset lifecycle、archive/restore、cleanup 或 delete；删除和清理继续走 Admin Web/REST/CLI。
+
 ## 2026-06-26: V0.2 收敛为 MCP Production Hardening，NAS 适配定为 P1
 
 - Decision: 下一版本默认执行入口为 `docs/project/V0_2_MCP_PRODUCTION_HARDENING.md` 和 `issues/next-phase-v0-2-mcp-production-hardening.csv`。v0.2 不扩成 Web 漫画编辑器或运营后台，而是补 MCP-first 生产硬化：agent-friendly project/campaign/context setup、Project Visual Context reference diagnostics、caption speaker/bubble anchor、panel state transition、caption derivative delivery、provider partial success semantics、NAS storage/delivery governance 和单资产可读摘要。

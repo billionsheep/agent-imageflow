@@ -1,10 +1,10 @@
 # V0.2 MCP Production Hardening
 
-本文是 `v0.2.x` 下一阶段产品计划。它承接 2026-06-26 的真实萌宠业务试跑结论：Agent ImageFlow 的 MCP-first 图片资产生产链路已经可用，但要成为可长期复用的 agent 图片能力，还需要把上下文准备、参考图诊断、连续性语义、加字派生和 NAS 交付治理补稳。
+本文保留为 `v0.2.0` 的范围记录。它承接 2026-06-26 的真实萌宠业务试跑结论：Agent ImageFlow 的 MCP-first 图片资产生产链路已经可用，但要成为可长期复用的 agent 图片能力，还需要把上下文准备、参考图诊断、连续性语义、加字派生和 NAS 交付治理补稳。2026-06-27 已完成 `V02-MCPH-002` 到 `V02-MCPH-011`，本文件从“下一阶段计划”转为“已发布范围说明”。
 
 ## 结论
 
-`v0.2` 不应把平台扩成 Web 漫画编辑器、通用 DAM 或小红书运营后台。下一阶段重点是 **MCP Production Hardening**：
+`v0.2.0` 没有把平台扩成 Web 漫画编辑器、通用 DAM 或小红书运营后台，而是收口为 **MCP Production Hardening**：
 
 - 让新 agent 不需要 Admin Web session 或 DB 直连，也能安全准备 project/campaign/context。
 - 让平台在生成前后说明 reference 是否真的有图、是否参与 provider、是否存在物种/环境漂移风险。
