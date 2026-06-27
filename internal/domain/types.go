@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,6 +37,13 @@ const (
 
 	StoryGenerationModeSequentialPreviousPanel = "sequential_previous_panel"
 	StoryGenerationModeParallelMinimalProps    = "parallel_minimal_props"
+
+	DeliveryRoleBaseOriginal      = "base_original"
+	DeliveryRoleCaptionDerivative = "caption_derivative"
+	DeliveryRoleFinalDelivery     = "final_delivery"
+
+	BatchManifestViewEngineering   = "engineering"
+	BatchManifestViewFinalDelivery = "final_delivery"
 
 	BestOfStrategyLocalMetadata = "local_metadata_v1"
 	BestOfStrategyHTTPJudge     = "http_judge_v1"
@@ -85,29 +93,32 @@ type CreateTaskRequest struct {
 }
 
 type Task struct {
-	ID                  string          `json:"task_id"`
-	WorkspaceID         string          `json:"workspace_id"`
-	ProjectID           string          `json:"project_id"`
-	CampaignID          string          `json:"campaign_id"`
-	IdempotencyKey      string          `json:"idempotency_key,omitempty"`
-	Title               string          `json:"title"`
-	Purpose             string          `json:"purpose"`
-	Prompt              string          `json:"prompt"`
-	NegativePrompt      string          `json:"negative_prompt,omitempty"`
-	StylePreset         string          `json:"style_preset,omitempty"`
-	AspectRatio         string          `json:"aspect_ratio"`
-	OutputFormat        string          `json:"output_format"`
-	StructuredInputJSON json.RawMessage `json:"structured_input_json,omitempty"`
-	Provider            string          `json:"provider"`
-	SelectionMode       string          `json:"selection_mode,omitempty"`
-	Status              string          `json:"status"`
-	RequestedCount      int             `json:"requested_count"`
-	CreatedBy           string          `json:"created_by"`
-	TraceID             string          `json:"trace_id,omitempty"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
-	ErrorCode           *string         `json:"error_code"`
-	ErrorMessage        *string         `json:"error_message"`
+	ID                   string          `json:"task_id"`
+	WorkspaceID          string          `json:"workspace_id"`
+	ProjectID            string          `json:"project_id"`
+	CampaignID           string          `json:"campaign_id"`
+	IdempotencyKey       string          `json:"idempotency_key,omitempty"`
+	Title                string          `json:"title"`
+	Purpose              string          `json:"purpose"`
+	Prompt               string          `json:"prompt"`
+	NegativePrompt       string          `json:"negative_prompt,omitempty"`
+	StylePreset          string          `json:"style_preset,omitempty"`
+	AspectRatio          string          `json:"aspect_ratio"`
+	OutputFormat         string          `json:"output_format"`
+	StructuredInputJSON  json.RawMessage `json:"structured_input_json,omitempty"`
+	Provider             string          `json:"provider"`
+	SelectionMode        string          `json:"selection_mode,omitempty"`
+	Status               string          `json:"status"`
+	RequestedCount       int             `json:"requested_count"`
+	DeliveredCount       int             `json:"delivered_count,omitempty"`
+	PartialSuccessReason string          `json:"partial_success_reason,omitempty"`
+	ProviderErrorSummary string          `json:"provider_error_summary,omitempty"`
+	CreatedBy            string          `json:"created_by"`
+	TraceID              string          `json:"trace_id,omitempty"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
+	ErrorCode            *string         `json:"error_code"`
+	ErrorMessage         *string         `json:"error_message"`
 }
 
 type Asset struct {
@@ -211,21 +222,24 @@ type AssetListEntry struct {
 }
 
 type AssetResponse struct {
-	AssetID        string          `json:"asset_id"`
-	WorkspaceID    string          `json:"workspace_id"`
-	ProjectID      string          `json:"project_id"`
-	CampaignID     string          `json:"campaign_id"`
-	TaskID         string          `json:"task_id"`
-	CurrentVersion int             `json:"current_version"`
-	Status         string          `json:"status"`
-	Hash           string          `json:"hash"`
-	Provider       string          `json:"provider"`
-	Model          string          `json:"model"`
-	Prompt         string          `json:"prompt"`
-	ParametersJSON json.RawMessage `json:"parameters_json"`
-	MetadataJSON   json.RawMessage `json:"metadata_json"`
-	Delivery       DeliveryInfo    `json:"delivery"`
-	CreatedAt      time.Time       `json:"created_at"`
+	AssetID        string                 `json:"asset_id"`
+	WorkspaceID    string                 `json:"workspace_id"`
+	ProjectID      string                 `json:"project_id"`
+	CampaignID     string                 `json:"campaign_id"`
+	TaskID         string                 `json:"task_id"`
+	CurrentVersion int                    `json:"current_version"`
+	Status         string                 `json:"status"`
+	Hash           string                 `json:"hash"`
+	Provider       string                 `json:"provider"`
+	Model          string                 `json:"model"`
+	Prompt         string                 `json:"prompt"`
+	ParametersJSON json.RawMessage        `json:"parameters_json"`
+	MetadataJSON   json.RawMessage        `json:"metadata_json"`
+	DeliveryRole   string                 `json:"delivery_role,omitempty"`
+	CaptionLineage *CaptionLineageSummary `json:"caption_lineage,omitempty"`
+	AssetSummary   *AssetSummary          `json:"asset_summary,omitempty"`
+	Delivery       DeliveryInfo           `json:"delivery"`
+	CreatedAt      time.Time              `json:"created_at"`
 }
 
 type AssetListQuery struct {
@@ -338,18 +352,25 @@ type BatchStorySceneCounts struct {
 }
 
 type BatchStoryVisualContext struct {
-	CharacterIDs      []string `json:"character_ids,omitempty"`
-	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
-	PromptRecipeID    string   `json:"prompt_recipe_id,omitempty"`
+	CharacterIDs         []string                                  `json:"character_ids,omitempty"`
+	ReferenceAssetIDs    []string                                  `json:"reference_asset_ids,omitempty"`
+	PromptRecipeID       string                                    `json:"prompt_recipe_id,omitempty"`
+	ReferenceDiagnostics *ProjectVisualContextReferenceDiagnostics `json:"reference_diagnostics,omitempty"`
 }
 
 type CaptionLineageSummary struct {
-	DerivedFromAssetID string `json:"derived_from_asset_id,omitempty"`
-	DerivationType     string `json:"derivation_type,omitempty"`
-	CaptionText        string `json:"caption_text,omitempty"`
-	CaptionStyle       string `json:"caption_style,omitempty"`
-	SourceTaskID       string `json:"source_task_id,omitempty"`
-	SourceSceneID      string `json:"source_scene_id,omitempty"`
+	DerivedFromAssetID    string `json:"derived_from_asset_id,omitempty"`
+	DerivationType        string `json:"derivation_type,omitempty"`
+	CaptionText           string `json:"caption_text,omitempty"`
+	CaptionStyle          string `json:"caption_style,omitempty"`
+	SourceTaskID          string `json:"source_task_id,omitempty"`
+	SourceSceneID         string `json:"source_scene_id,omitempty"`
+	SpeakerCharacterID    string `json:"speaker_character_id,omitempty"`
+	BubbleAnchor          string `json:"bubble_anchor,omitempty"`
+	TailDirection         string `json:"tail_direction,omitempty"`
+	CaptionIntent         string `json:"caption_intent,omitempty"`
+	AutoSelectDerivative  *bool  `json:"auto_select_derivative,omitempty"`
+	AvoidCoveringSubjects *bool  `json:"avoid_covering_subjects,omitempty"`
 }
 
 func (c CaptionLineageSummary) Empty() bool {
@@ -358,7 +379,13 @@ func (c CaptionLineageSummary) Empty() bool {
 		strings.TrimSpace(c.CaptionText) == "" &&
 		strings.TrimSpace(c.CaptionStyle) == "" &&
 		strings.TrimSpace(c.SourceTaskID) == "" &&
-		strings.TrimSpace(c.SourceSceneID) == ""
+		strings.TrimSpace(c.SourceSceneID) == "" &&
+		strings.TrimSpace(c.SpeakerCharacterID) == "" &&
+		strings.TrimSpace(c.BubbleAnchor) == "" &&
+		strings.TrimSpace(c.TailDirection) == "" &&
+		strings.TrimSpace(c.CaptionIntent) == "" &&
+		c.AutoSelectDerivative == nil &&
+		c.AvoidCoveringSubjects == nil
 }
 
 func CaptionLineageFromMetadataJSON(raw json.RawMessage) *CaptionLineageSummary {
@@ -374,6 +401,10 @@ func CaptionLineageFromMetadataJSON(raw json.RawMessage) *CaptionLineageSummary 
 		if nestedMap, ok := nested.(map[string]any); ok {
 			nestedLineage := captionLineageFromMap(nestedMap)
 			lineage = mergeCaptionLineage(nestedLineage, lineage)
+			if nestedLineage.AutoSelectDerivative != nil {
+				value := *nestedLineage.AutoSelectDerivative
+				lineage.AutoSelectDerivative = &value
+			}
 		}
 	}
 	if lineage.Empty() {
@@ -401,12 +432,18 @@ func CaptionLineageFromStructuredInput(raw json.RawMessage) *CaptionLineageSumma
 
 func captionLineageFromMap(values map[string]any) CaptionLineageSummary {
 	return CaptionLineageSummary{
-		DerivedFromAssetID: strings.TrimSpace(stringFromAny(values["derived_from_asset_id"])),
-		DerivationType:     strings.TrimSpace(stringFromAny(values["derivation_type"])),
-		CaptionText:        strings.TrimSpace(stringFromAny(values["caption_text"])),
-		CaptionStyle:       strings.TrimSpace(stringFromAny(values["caption_style"])),
-		SourceTaskID:       strings.TrimSpace(stringFromAny(values["source_task_id"])),
-		SourceSceneID:      strings.TrimSpace(stringFromAny(values["source_scene_id"])),
+		DerivedFromAssetID:    strings.TrimSpace(stringFromAny(values["derived_from_asset_id"])),
+		DerivationType:        strings.TrimSpace(stringFromAny(values["derivation_type"])),
+		CaptionText:           strings.TrimSpace(stringFromAny(values["caption_text"])),
+		CaptionStyle:          strings.TrimSpace(stringFromAny(values["caption_style"])),
+		SourceTaskID:          strings.TrimSpace(stringFromAny(values["source_task_id"])),
+		SourceSceneID:         strings.TrimSpace(stringFromAny(values["source_scene_id"])),
+		SpeakerCharacterID:    strings.TrimSpace(stringFromAny(values["speaker_character_id"])),
+		BubbleAnchor:          strings.TrimSpace(stringFromAny(values["bubble_anchor"])),
+		TailDirection:         strings.TrimSpace(stringFromAny(values["tail_direction"])),
+		CaptionIntent:         strings.TrimSpace(stringFromAny(values["caption_intent"])),
+		AutoSelectDerivative:  boolPtrFromAny(values["auto_select_derivative"]),
+		AvoidCoveringSubjects: boolPtrFromAny(values["avoid_covering_subjects"]),
 	}
 }
 
@@ -429,6 +466,26 @@ func mergeCaptionLineage(base, override CaptionLineageSummary) CaptionLineageSum
 	if strings.TrimSpace(override.SourceSceneID) != "" {
 		base.SourceSceneID = override.SourceSceneID
 	}
+	if strings.TrimSpace(override.SpeakerCharacterID) != "" {
+		base.SpeakerCharacterID = override.SpeakerCharacterID
+	}
+	if strings.TrimSpace(override.BubbleAnchor) != "" {
+		base.BubbleAnchor = override.BubbleAnchor
+	}
+	if strings.TrimSpace(override.TailDirection) != "" {
+		base.TailDirection = override.TailDirection
+	}
+	if strings.TrimSpace(override.CaptionIntent) != "" {
+		base.CaptionIntent = override.CaptionIntent
+	}
+	if override.AutoSelectDerivative != nil {
+		value := *override.AutoSelectDerivative
+		base.AutoSelectDerivative = &value
+	}
+	if override.AvoidCoveringSubjects != nil {
+		value := *override.AvoidCoveringSubjects
+		base.AvoidCoveringSubjects = &value
+	}
 	return base
 }
 
@@ -442,23 +499,52 @@ func stringFromAny(value any) string {
 	return fmt.Sprint(value)
 }
 
+func boolPtrFromAny(value any) *bool {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case bool:
+		result := typed
+		return &result
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	default:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(value)))
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	}
+}
+
 type StoryReferenceBindings map[string][]string
 
 type StoryPanelPlanEntry struct {
-	PanelIndex     int                 `json:"panel_index,omitempty"`
-	SceneID        string              `json:"scene_id,omitempty"`
-	NarrativeRole  string              `json:"narrative_role,omitempty"`
-	PreviousState  string              `json:"previous_state,omitempty"`
-	TriggerEvent   string              `json:"trigger_event,omitempty"`
-	VisibleAction  string              `json:"visible_action,omitempty"`
-	ResultingState string              `json:"resulting_state,omitempty"`
-	Dialogue       string              `json:"dialogue,omitempty"`
-	DialogueIntent string              `json:"dialogue_intent,omitempty"`
-	Camera         string              `json:"camera,omitempty"`
-	MustKeepProps  []string            `json:"must_keep_props,omitempty"`
-	AllowedChanges []string            `json:"allowed_changes,omitempty"`
-	ReferenceRoles map[string][]string `json:"reference_roles,omitempty"`
-	TargetPath     string              `json:"target_path,omitempty"`
+	PanelIndex           int                 `json:"panel_index,omitempty"`
+	SceneID              string              `json:"scene_id,omitempty"`
+	NarrativeRole        string              `json:"narrative_role,omitempty"`
+	PreviousState        string              `json:"previous_state,omitempty"`
+	TriggerEvent         string              `json:"trigger_event,omitempty"`
+	VisibleAction        string              `json:"visible_action,omitempty"`
+	ResultingState       string              `json:"resulting_state,omitempty"`
+	Dialogue             string              `json:"dialogue,omitempty"`
+	DialogueIntent       string              `json:"dialogue_intent,omitempty"`
+	EmotionBefore        string              `json:"emotion_before,omitempty"`
+	EmotionAfter         string              `json:"emotion_after,omitempty"`
+	PoseChange           string              `json:"pose_change,omitempty"`
+	RelationshipShift    string              `json:"relationship_shift,omitempty"`
+	Camera               string              `json:"camera,omitempty"`
+	MustKeepProps        []string            `json:"must_keep_props,omitempty"`
+	AllowedChanges       []string            `json:"allowed_changes,omitempty"`
+	MustChange           []string            `json:"must_change,omitempty"`
+	MustNotKeep          []string            `json:"must_not_keep,omitempty"`
+	StateTransitionNotes string              `json:"state_transition_notes,omitempty"`
+	ReferenceRoles       map[string][]string `json:"reference_roles,omitempty"`
+	TargetPath           string              `json:"target_path,omitempty"`
 }
 
 type StoryResolvedReferenceAsset struct {
@@ -522,10 +608,17 @@ type BatchStoryContinuitySummary struct {
 	ResultingState                 string                             `json:"resulting_state,omitempty"`
 	Dialogue                       string                             `json:"dialogue,omitempty"`
 	DialogueIntent                 string                             `json:"dialogue_intent,omitempty"`
+	EmotionBefore                  string                             `json:"emotion_before,omitempty"`
+	EmotionAfter                   string                             `json:"emotion_after,omitempty"`
+	PoseChange                     string                             `json:"pose_change,omitempty"`
+	RelationshipShift              string                             `json:"relationship_shift,omitempty"`
 	PreviousPanelAssetID           string                             `json:"previous_panel_asset_id,omitempty"`
 	ProviderReferenceParticipation string                             `json:"provider_reference_participation,omitempty"`
 	MustKeepProps                  []string                           `json:"must_keep_props,omitempty"`
 	AllowedChanges                 []string                           `json:"allowed_changes,omitempty"`
+	MustChange                     []string                           `json:"must_change,omitempty"`
+	MustNotKeep                    []string                           `json:"must_not_keep,omitempty"`
+	StateTransitionNotes           string                             `json:"state_transition_notes,omitempty"`
 	ResolvedReferenceAssets        []BatchStoryResolvedReferenceAsset `json:"resolved_reference_assets,omitempty"`
 	ContinuityWarnings             []BatchStoryContinuityWarning      `json:"continuity_warnings,omitempty"`
 }
@@ -533,6 +626,10 @@ type BatchStoryContinuitySummary struct {
 type BatchStorySummaryTask struct {
 	TaskID                string    `json:"task_id"`
 	Status                string    `json:"status"`
+	RequestedCount        int       `json:"requested_count,omitempty"`
+	DeliveredCount        int       `json:"delivered_count,omitempty"`
+	PartialSuccessReason  string    `json:"partial_success_reason,omitempty"`
+	ProviderErrorSummary  string    `json:"provider_error_summary,omitempty"`
 	AssetCount            int       `json:"asset_count"`
 	AttemptCount          int       `json:"attempt_count"`
 	Retrying              bool      `json:"retrying"`
@@ -556,6 +653,7 @@ type BatchStorySummaryAsset struct {
 	ThumbnailURL   string                 `json:"thumbnail_url"`
 	MetadataURL    string                 `json:"metadata_url"`
 	TargetPath     string                 `json:"target_path,omitempty"`
+	DeliveryRole   string                 `json:"delivery_role,omitempty"`
 	CaptionLineage *CaptionLineageSummary `json:"caption_lineage,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 }
@@ -594,6 +692,7 @@ type BatchManifestQuery struct {
 	BatchStorySummaryQuery
 	SelectedOnly    bool
 	IncludeRejected bool
+	View            string
 }
 
 type BatchManifestCounts = BatchStorySummaryCounts
@@ -603,6 +702,10 @@ type BatchManifestTask struct {
 	StoryID               string    `json:"story_id,omitempty"`
 	SceneID               string    `json:"scene_id,omitempty"`
 	Status                string    `json:"status"`
+	RequestedCount        int       `json:"requested_count,omitempty"`
+	DeliveredCount        int       `json:"delivered_count,omitempty"`
+	PartialSuccessReason  string    `json:"partial_success_reason,omitempty"`
+	ProviderErrorSummary  string    `json:"provider_error_summary,omitempty"`
 	AssetCount            int       `json:"asset_count"`
 	AttemptCount          int       `json:"attempt_count"`
 	Retrying              bool      `json:"retrying"`
@@ -628,10 +731,62 @@ type BatchManifestAsset struct {
 	ThumbnailURL   string                      `json:"thumbnail_url,omitempty"`
 	MetadataURL    string                      `json:"metadata_url,omitempty"`
 	TargetPath     string                      `json:"target_path,omitempty"`
+	DeliveryRole   string                      `json:"delivery_role,omitempty"`
 	CaptionLineage *CaptionLineageSummary      `json:"caption_lineage,omitempty"`
 	CreatedAt      time.Time                   `json:"created_at"`
 	Continuity     BatchStoryContinuitySummary `json:"continuity,omitempty"`
 	VisualContext  BatchStoryVisualContext     `json:"visual_context,omitempty"`
+}
+
+type BatchFinalDeliveryCounts struct {
+	StoryCount                 int `json:"story_count"`
+	SceneCount                 int `json:"scene_count"`
+	SceneWithFinalAssetCount   int `json:"scene_with_final_asset_count"`
+	SceneMissingFinalAssetCount int `json:"scene_missing_final_asset_count"`
+	FinalAssetCount            int `json:"final_asset_count"`
+}
+
+type BatchFinalDeliveryAsset struct {
+	AssetID            string                 `json:"asset_id"`
+	TaskID             string                 `json:"task_id"`
+	StoryID            string                 `json:"story_id,omitempty"`
+	SceneID            string                 `json:"scene_id,omitempty"`
+	Status             string                 `json:"status"`
+	DeliveryRole       string                 `json:"delivery_role,omitempty"`
+	DerivedFromAssetID string                 `json:"derived_from_asset_id,omitempty"`
+	DerivationType     string                 `json:"derivation_type,omitempty"`
+	CaptionLineage     *CaptionLineageSummary `json:"caption_lineage,omitempty"`
+	DownloadURL        string                 `json:"download_url"`
+	ThumbnailURL       string                 `json:"thumbnail_url,omitempty"`
+	MetadataURL        string                 `json:"metadata_url,omitempty"`
+	TargetPath         string                 `json:"target_path,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+}
+
+type BatchFinalDeliveryScene struct {
+	StoryID                string                      `json:"story_id"`
+	SceneID                string                      `json:"scene_id"`
+	TargetPath             string                      `json:"target_path,omitempty"`
+	LatestTaskID           string                      `json:"latest_task_id,omitempty"`
+	PrimarySelectedAssetID string                      `json:"primary_selected_asset_id,omitempty"`
+	Continuity             BatchStoryContinuitySummary `json:"continuity,omitempty"`
+	VisualContext          BatchStoryVisualContext     `json:"visual_context,omitempty"`
+	FinalAssets            []BatchFinalDeliveryAsset   `json:"final_assets"`
+}
+
+type BatchFinalDeliveryStory struct {
+	StoryID         string                    `json:"story_id"`
+	SceneCount      int                       `json:"scene_count"`
+	FinalAssetCount int                       `json:"final_asset_count"`
+	Scenes          []BatchFinalDeliveryScene `json:"scenes"`
+	FinalAssets     []BatchFinalDeliveryAsset `json:"final_assets"`
+}
+
+type BatchFinalDeliveryManifest struct {
+	Counts      BatchFinalDeliveryCounts  `json:"counts"`
+	Stories     []BatchFinalDeliveryStory `json:"stories"`
+	Scenes      []BatchFinalDeliveryScene `json:"scenes"`
+	FinalAssets []BatchFinalDeliveryAsset `json:"final_assets"`
 }
 
 type BatchManifestScene struct {
@@ -657,6 +812,7 @@ type BatchManifestResponse struct {
 	BatchID         string                   `json:"batch_id,omitempty"`
 	Source          string                   `json:"source,omitempty"`
 	StoryID         string                   `json:"story_id,omitempty"`
+	ManifestView    string                   `json:"manifest_view"`
 	SelectedOnly    bool                     `json:"selected_only"`
 	IncludeRejected bool                     `json:"include_rejected"`
 	Counts          BatchManifestCounts      `json:"counts"`
@@ -664,6 +820,18 @@ type BatchManifestResponse struct {
 	Assets          []BatchManifestAsset     `json:"assets"`
 	Scenes          []BatchManifestScene     `json:"scenes"`
 	Stories         []BatchStorySummaryStory `json:"stories"`
+	FinalDelivery   *BatchFinalDeliveryManifest `json:"final_delivery,omitempty"`
+}
+
+func NormalizeBatchManifestView(value string) (string, bool) {
+	switch strings.TrimSpace(value) {
+	case "", BatchManifestViewEngineering:
+		return BatchManifestViewEngineering, true
+	case BatchManifestViewFinalDelivery:
+		return BatchManifestViewFinalDelivery, true
+	default:
+		return "", false
+	}
 }
 
 type SceneIdentity struct {
@@ -766,21 +934,40 @@ type PublicDeliveryInfo struct {
 }
 
 type AssetMetadataResponse struct {
-	AssetID        string             `json:"asset_id"`
-	WorkspaceID    string             `json:"workspace_id"`
-	ProjectID      string             `json:"project_id"`
-	CampaignID     string             `json:"campaign_id"`
-	TaskID         string             `json:"task_id"`
-	CurrentVersion int                `json:"current_version"`
-	Status         string             `json:"status"`
-	Hash           string             `json:"hash"`
-	Provider       string             `json:"provider"`
-	Model          string             `json:"model"`
-	Prompt         string             `json:"prompt"`
-	ParametersJSON json.RawMessage    `json:"parameters_json"`
-	MetadataJSON   json.RawMessage    `json:"metadata_json"`
-	Delivery       PublicDeliveryInfo `json:"delivery"`
-	CreatedAt      time.Time          `json:"created_at"`
+	AssetID        string                 `json:"asset_id"`
+	WorkspaceID    string                 `json:"workspace_id"`
+	ProjectID      string                 `json:"project_id"`
+	CampaignID     string                 `json:"campaign_id"`
+	TaskID         string                 `json:"task_id"`
+	CurrentVersion int                    `json:"current_version"`
+	Status         string                 `json:"status"`
+	Hash           string                 `json:"hash"`
+	Provider       string                 `json:"provider"`
+	Model          string                 `json:"model"`
+	Prompt         string                 `json:"prompt"`
+	ParametersJSON json.RawMessage        `json:"parameters_json"`
+	MetadataJSON   json.RawMessage        `json:"metadata_json"`
+	DeliveryRole   string                 `json:"delivery_role,omitempty"`
+	CaptionLineage *CaptionLineageSummary `json:"caption_lineage,omitempty"`
+	AssetSummary   *AssetSummary          `json:"asset_summary,omitempty"`
+	Delivery       PublicDeliveryInfo     `json:"delivery"`
+	CreatedAt      time.Time              `json:"created_at"`
+}
+
+type AssetSummary struct {
+	StoryID                        string `json:"story_id,omitempty"`
+	SceneID                        string `json:"scene_id,omitempty"`
+	PanelIndex                     int    `json:"panel_index,omitempty"`
+	Dialogue                       string `json:"dialogue,omitempty"`
+	CaptionText                    string `json:"caption_text,omitempty"`
+	DerivedFromAssetID             string `json:"derived_from_asset_id,omitempty"`
+	DerivationType                 string `json:"derivation_type,omitempty"`
+	PreviousPanelAssetID           string `json:"previous_panel_asset_id,omitempty"`
+	ProviderReferenceParticipation string `json:"provider_reference_participation,omitempty"`
+	Provider                       string `json:"provider,omitempty"`
+	Model                          string `json:"model,omitempty"`
+	AssetStatus                    string `json:"asset_status,omitempty"`
+	DeliveryRole                   string `json:"delivery_role,omitempty"`
 }
 
 type StorageUsageCategoryStat struct {
@@ -1066,20 +1253,38 @@ type ProjectVisualContext struct {
 	UpdatedAt     time.Time                 `json:"updated_at,omitempty"`
 }
 
+type ProjectVisualContextReferenceDiagnostics struct {
+	PrimaryReadiness                   string   `json:"primary_readiness,omitempty"`
+	Labels                             []string `json:"labels,omitempty"`
+	Summary                            string   `json:"summary,omitempty"`
+	ActiveCharacterCount               int      `json:"active_character_count"`
+	CharacterWithImageCount            int      `json:"character_with_image_count"`
+	MissingCharacterImageCount         int      `json:"missing_character_image_count"`
+	MissingCharacterIDs                []string `json:"missing_character_ids,omitempty"`
+	ActiveReferenceCount               int      `json:"active_reference_count"`
+	EnvironmentReferenceCount          int      `json:"environment_reference_count"`
+	ImageReferenceCount                int      `json:"image_reference_count"`
+	NegativePromptCoversSpeciesDrift   bool     `json:"negative_prompt_covers_species_drift"`
+	IdentitySignalPresent              bool     `json:"identity_signal_present"`
+	ProviderReferenceParticipationRisk string   `json:"provider_reference_participation_risk,omitempty"`
+}
+
 type ProjectVisualContextResponse struct {
-	WorkspaceID   string               `json:"workspace_id"`
-	ProjectID     string               `json:"project_id"`
-	VisualContext ProjectVisualContext `json:"visual_context"`
+	WorkspaceID          string                                   `json:"workspace_id"`
+	ProjectID            string                                   `json:"project_id"`
+	VisualContext        ProjectVisualContext                     `json:"visual_context"`
+	ReferenceDiagnostics ProjectVisualContextReferenceDiagnostics `json:"reference_diagnostics"`
 }
 
 type VisualContextSnapshot struct {
-	Source            string                    `json:"source"`
-	CharacterIDs      []string                  `json:"character_ids,omitempty"`
-	ReferenceAssetIDs []string                  `json:"reference_asset_ids,omitempty"`
-	PromptRecipeID    string                    `json:"prompt_recipe_id,omitempty"`
-	Characters        []CharacterProfile        `json:"characters,omitempty"`
-	References        []ProjectReferenceBinding `json:"references,omitempty"`
-	PromptRecipe      *PromptRecipe             `json:"prompt_recipe,omitempty"`
+	Source               string                                    `json:"source"`
+	CharacterIDs         []string                                  `json:"character_ids,omitempty"`
+	ReferenceAssetIDs    []string                                  `json:"reference_asset_ids,omitempty"`
+	PromptRecipeID       string                                    `json:"prompt_recipe_id,omitempty"`
+	Characters           []CharacterProfile                        `json:"characters,omitempty"`
+	References           []ProjectReferenceBinding                 `json:"references,omitempty"`
+	PromptRecipe         *PromptRecipe                             `json:"prompt_recipe,omitempty"`
+	ReferenceDiagnostics *ProjectVisualContextReferenceDiagnostics `json:"reference_diagnostics,omitempty"`
 }
 
 type ProjectQualityProfileResponse struct {

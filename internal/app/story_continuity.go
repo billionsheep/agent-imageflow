@@ -202,12 +202,19 @@ func prepareStoryContextV1ForTask(
 	setMetadataString(metadata, "resulting_state", panel.ResultingState)
 	setMetadataString(metadata, "dialogue", panel.Dialogue)
 	setMetadataString(metadata, "dialogue_intent", panel.DialogueIntent)
+	setMetadataString(metadata, "emotion_before", panel.EmotionBefore)
+	setMetadataString(metadata, "emotion_after", panel.EmotionAfter)
+	setMetadataString(metadata, "pose_change", panel.PoseChange)
+	setMetadataString(metadata, "relationship_shift", panel.RelationshipShift)
 	setMetadataString(metadata, "camera", panel.Camera)
+	setMetadataString(metadata, "state_transition_notes", panel.StateTransitionNotes)
 	setMetadataString(metadata, "target_path", panel.TargetPath)
 	setMetadataString(metadata, "provider_reference_participation", diagnostics.ProviderReferenceParticipation)
 	setMetadataString(metadata, "previous_panel_asset_id", previousPanelAssetID)
 	setMetadataStringSlice(metadata, "must_keep_props", panel.MustKeepProps)
 	setMetadataStringSlice(metadata, "allowed_changes", panel.AllowedChanges)
+	setMetadataStringSlice(metadata, "must_change", panel.MustChange)
+	setMetadataStringSlice(metadata, "must_not_keep", panel.MustNotKeep)
 	metadata[storyContextV1MetadataKey] = story
 
 	updatedMetadata, err := json.Marshal(metadata)
@@ -267,10 +274,17 @@ func normalizeStoryPanelPlan(items []domain.StoryPanelPlanEntry) []domain.StoryP
 		item.ResultingState = strings.TrimSpace(item.ResultingState)
 		item.Dialogue = strings.TrimSpace(item.Dialogue)
 		item.DialogueIntent = strings.TrimSpace(item.DialogueIntent)
+		item.EmotionBefore = strings.TrimSpace(item.EmotionBefore)
+		item.EmotionAfter = strings.TrimSpace(item.EmotionAfter)
+		item.PoseChange = strings.TrimSpace(item.PoseChange)
+		item.RelationshipShift = strings.TrimSpace(item.RelationshipShift)
 		item.Camera = strings.TrimSpace(item.Camera)
+		item.StateTransitionNotes = strings.TrimSpace(item.StateTransitionNotes)
 		item.TargetPath = strings.TrimSpace(item.TargetPath)
 		item.MustKeepProps = normalizeStringList(item.MustKeepProps)
 		item.AllowedChanges = normalizeStringList(item.AllowedChanges)
+		item.MustChange = normalizeStringList(item.MustChange)
+		item.MustNotKeep = normalizeStringList(item.MustNotKeep)
 		if len(item.ReferenceRoles) > 0 {
 			nextRoles := map[string][]string{}
 			for key, values := range item.ReferenceRoles {
@@ -491,6 +505,48 @@ func validatePreviousPanelStoryLink(story domain.StoryContextV1, panel domain.St
 		return fmt.Errorf("previous panel scene_id = %q, want %q", previousSceneID, expectedSceneID)
 	}
 	return nil
+}
+
+func appendStoryPanelTransitionPrompt(prompt string, story *domain.StoryContextV1, metadataRaw json.RawMessage) string {
+	prompt = strings.TrimSpace(prompt)
+	if story == nil || len(story.PanelPlan) == 0 {
+		return prompt
+	}
+	metadata, err := metadataMap(metadataRaw)
+	if err != nil {
+		return prompt
+	}
+	panel, err := selectStoryPanelPlanEntry(*story, metadata)
+	if err != nil {
+		return prompt
+	}
+
+	hints := make([]string, 0, 7)
+	if strings.TrimSpace(panel.EmotionBefore) != "" {
+		hints = append(hints, fmt.Sprintf("Emotion before: %s.", panel.EmotionBefore))
+	}
+	if strings.TrimSpace(panel.EmotionAfter) != "" {
+		hints = append(hints, fmt.Sprintf("Emotion after: %s.", panel.EmotionAfter))
+	}
+	if strings.TrimSpace(panel.PoseChange) != "" {
+		hints = append(hints, fmt.Sprintf("Pose change: %s.", panel.PoseChange))
+	}
+	if strings.TrimSpace(panel.RelationshipShift) != "" {
+		hints = append(hints, fmt.Sprintf("Relationship shift: %s.", panel.RelationshipShift))
+	}
+	if len(panel.MustChange) > 0 {
+		hints = append(hints, fmt.Sprintf("Must change: %s.", strings.Join(panel.MustChange, "; ")))
+	}
+	if len(panel.MustNotKeep) > 0 {
+		hints = append(hints, fmt.Sprintf("Must not keep: %s.", strings.Join(panel.MustNotKeep, "; ")))
+	}
+	if strings.TrimSpace(panel.StateTransitionNotes) != "" {
+		hints = append(hints, fmt.Sprintf("State transition notes: %s.", panel.StateTransitionNotes))
+	}
+	if len(hints) == 0 {
+		return prompt
+	}
+	return strings.TrimSpace(prompt + "\n\nState transition requirements:\n- " + strings.Join(hints, "\n- "))
 }
 
 func isSequentialStoryContext(story domain.StoryContextV1) bool {

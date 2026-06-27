@@ -81,12 +81,20 @@ func TestTaskProviderParametersIncludesAdvancedInputDescriptors(t *testing.T) {
 func TestTaskProviderParametersIncludesCaptionLineageSummary(t *testing.T) {
 	structured, err := json.Marshal(map[string]any{
 		"metadata_json": map[string]any{
-			"derived_from_asset_id": "asset_original",
-			"derivation_type":       "caption_edit",
-			"caption_text":          "今天也要可爱",
-			"caption_style":         "rounded speech bubble, handwritten",
-			"source_task_id":        "task_original",
-			"source_scene_id":       "scene_001",
+			"caption_lineage": map[string]any{
+				"derived_from_asset_id":   "asset_original",
+				"derivation_type":         "caption_edit",
+				"caption_text":            "今天也要可爱",
+				"caption_style":           "rounded speech bubble, handwritten",
+				"source_task_id":          "task_original",
+				"source_scene_id":         "scene_001",
+				"speaker_character_id":    "dog_jimao",
+				"bubble_anchor":           "top_right",
+				"tail_direction":          "toward_left",
+				"caption_intent":          "comfort",
+				"auto_select_derivative":  true,
+				"avoid_covering_subjects": true,
+			},
 		},
 	})
 	if err != nil {
@@ -105,7 +113,13 @@ func TestTaskProviderParametersIncludesCaptionLineageSummary(t *testing.T) {
 		lineage["caption_text"] != "今天也要可爱" ||
 		lineage["caption_style"] != "rounded speech bubble, handwritten" ||
 		lineage["source_task_id"] != "task_original" ||
-		lineage["source_scene_id"] != "scene_001" {
+		lineage["source_scene_id"] != "scene_001" ||
+		lineage["speaker_character_id"] != "dog_jimao" ||
+		lineage["bubble_anchor"] != "top_right" ||
+		lineage["tail_direction"] != "toward_left" ||
+		lineage["caption_intent"] != "comfort" ||
+		lineage["auto_select_derivative"] != true ||
+		lineage["avoid_covering_subjects"] != true {
 		t.Fatalf("caption lineage missing from provider parameters: %#v", parameters)
 	}
 }

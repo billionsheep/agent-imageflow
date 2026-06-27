@@ -27,6 +27,7 @@ type Defaults struct {
 	WorkspaceID string
 	ProjectID   string
 	CampaignID  string
+	Version     string
 }
 
 type Server struct {
@@ -133,11 +134,19 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 		"serverInfo": map[string]any{
 			"name":        "agent-imageflow",
 			"title":       "Agent ImageFlow",
-			"version":     "0.1.0",
+			"version":     serverVersion(s.defaults.Version),
 			"description": "MCP tools for creating and delivering traceable image assets.",
 		},
 		"instructions": "Create structured image tasks, poll task status, select or reject generated assets, and fetch delivery information.",
 	}
+}
+
+func serverVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return "0.2.0"
+	}
+	return version
 }
 
 func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rpcError) {
@@ -301,7 +310,32 @@ func (s *Server) tools() []toolDefinition {
 				"provider":                    stringProp("Provider id. Use mock or a configured provider such as openai-compatible."),
 				"selection_mode":              stringProp("Optional product-level selection mode such as manual_optional or auto."),
 				"review_required":             map[string]any{"type": "boolean", "description": "Compatibility flag; first MCP slice normally leaves this false."},
-				"metadata_json":               map[string]any{"type": "object", "description": "Arbitrary structured metadata for downstream workflows."},
+				"metadata_json": map[string]any{
+					"type":        "object",
+					"description": "Arbitrary structured metadata for downstream workflows. For caption edits, prefer metadata_json.caption_lineage for speaker/bubble semantics.",
+					"properties": map[string]any{
+						"caption_lineage": map[string]any{
+							"type":        "object",
+							"description": "Caption derivative semantics. The service canonicalizes this into structured_input_json.caption_lineage and provider parameters.",
+							"properties": map[string]any{
+								"derived_from_asset_id":   stringProp("Source asset id for the caption derivative."),
+								"derivation_type":         stringProp("Derivative type such as caption_edit."),
+								"caption_text":            stringProp("Readable caption text to place in the image."),
+								"caption_style":           stringProp("Bubble or text style hint such as rounded handwritten bubble."),
+								"source_task_id":          stringProp("Source task id that produced the original image."),
+								"source_scene_id":         stringProp("Source scene id; keep the original scene when this is a delivery variant."),
+								"speaker_character_id":    stringProp("Speaker character id from project visual context when the caption belongs to one character."),
+								"bubble_anchor":           stringProp("Approximate bubble anchor such as top_left, top_right, above_speaker, or lower_right."),
+								"tail_direction":          stringProp("Approximate bubble tail direction such as toward_left, toward_right, or toward_speaker."),
+								"caption_intent":          stringProp("Short semantic hint such as confession, comfort, tease, or apology."),
+								"auto_select_derivative":  map[string]any{"type": "boolean", "description": "When true, the service can mark a completed caption derivative as the final delivery without replacing the base asset facts."},
+								"avoid_covering_subjects": map[string]any{"type": "boolean", "description": "When true, ask the provider to avoid covering the main characters, faces, or key props."},
+							},
+							"additionalProperties": true,
+						},
+					},
+					"additionalProperties": true,
+				},
 			}, []string{"prompt"}),
 		},
 		{

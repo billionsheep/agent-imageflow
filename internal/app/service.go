@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,12 @@ type Service struct {
 	providers        map[string]provider.Adapter
 	providerLimiters map[string]chan struct{}
 	bestOfScorers    map[string]bestOfScorer
+}
+
+type automaticAssetSelectionDecision struct {
+	AssetID  string
+	Reviewer string
+	Note     string
 }
 
 func NewService(cfg config.Config, st *store.PostgresStore, q *queue.RedisQueue, fs storage.LocalStorage) *Service {
@@ -183,7 +190,11 @@ func (s *Service) GetBatchProgress(ctx context.Context, query domain.BatchProgre
 }
 
 func (s *Service) GetBatchStorySummary(ctx context.Context, query domain.BatchStorySummaryQuery) (domain.BatchStorySummaryResponse, error) {
-	return s.store.GetBatchStorySummary(ctx, query)
+	summary, err := s.store.GetBatchStorySummary(ctx, query)
+	if err != nil {
+		return domain.BatchStorySummaryResponse{}, err
+	}
+	return enrichBatchStorySummaryDeliverySemantics(summary), nil
 }
 
 func (s *Service) GetBatchManifest(ctx context.Context, query domain.BatchManifestQuery) (domain.BatchManifestResponse, error) {
@@ -195,6 +206,11 @@ func (s *Service) GetBatchManifest(ctx context.Context, query domain.BatchManife
 }
 
 func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.BatchManifestQuery) domain.BatchManifestResponse {
+	summary = enrichBatchStorySummaryDeliverySemantics(summary)
+	view, ok := domain.NormalizeBatchManifestView(query.View)
+	if !ok {
+		view = domain.BatchManifestViewEngineering
+	}
 	manifest := domain.BatchManifestResponse{
 		GeneratedAt:     time.Now().UTC(),
 		ProjectID:       summary.ProjectID,
@@ -203,6 +219,7 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 		BatchID:         summary.BatchID,
 		Source:          summary.Source,
 		StoryID:         summary.StoryID,
+		ManifestView:    view,
 		SelectedOnly:    query.SelectedOnly,
 		IncludeRejected: query.IncludeRejected,
 		Stories:         summary.Stories,
@@ -254,6 +271,10 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 				StoryID:               scene.StoryID,
 				SceneID:               scene.SceneID,
 				Status:                task.Status,
+				RequestedCount:        task.RequestedCount,
+				DeliveredCount:        task.DeliveredCount,
+				PartialSuccessReason:  task.PartialSuccessReason,
+				ProviderErrorSummary:  task.ProviderErrorSummary,
 				AssetCount:            task.AssetCount,
 				AttemptCount:          task.AttemptCount,
 				Retrying:              task.Retrying,
@@ -269,7 +290,7 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 			addBatchManifestTaskCounts(&manifest.Counts, task)
 		}
 		for _, asset := range scene.Assets {
-			if !batchManifestIncludesAsset(asset.Status, query.SelectedOnly, query.IncludeRejected) {
+			if !batchManifestIncludesAsset(asset, query.SelectedOnly, query.IncludeRejected) {
 				continue
 			}
 			manifestAsset := domain.BatchManifestAsset{
@@ -285,6 +306,7 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 				ThumbnailURL:   asset.ThumbnailURL,
 				MetadataURL:    asset.MetadataURL,
 				TargetPath:     firstNonEmpty(asset.TargetPath, scene.TargetPath),
+				DeliveryRole:   asset.DeliveryRole,
 				CaptionLineage: asset.CaptionLineage,
 				CreatedAt:      asset.CreatedAt,
 				Continuity:     scene.Continuity,
@@ -298,6 +320,9 @@ func buildBatchManifest(summary domain.BatchStorySummaryResponse, query domain.B
 			addBatchManifestAssetCounts(&manifest.Counts, asset.Status)
 		}
 		manifest.Scenes = append(manifest.Scenes, manifestScene)
+	}
+	if manifest.ManifestView == domain.BatchManifestViewFinalDelivery {
+		manifest.FinalDelivery = buildBatchFinalDelivery(summary)
 	}
 	return manifest
 }
@@ -322,14 +347,14 @@ func addBatchManifestTaskCounts(counts *domain.BatchManifestCounts, task domain.
 	}
 }
 
-func batchManifestIncludesAsset(status string, selectedOnly, includeRejected bool) bool {
+func batchManifestIncludesAsset(asset domain.BatchStorySummaryAsset, selectedOnly, includeRejected bool) bool {
 	switch {
 	case selectedOnly:
-		return status == "selected"
+		return asset.Status == "selected" && asset.DeliveryRole == domain.DeliveryRoleFinalDelivery
 	case includeRejected:
-		return status == "generated" || status == "selected" || status == domain.AssetRejected
+		return asset.Status == "generated" || asset.Status == "selected" || asset.Status == domain.AssetRejected
 	default:
-		return status == "generated" || status == "selected"
+		return asset.Status == "generated" || asset.Status == "selected"
 	}
 }
 
@@ -342,6 +367,192 @@ func addBatchManifestAssetCounts(counts *domain.BatchManifestCounts, status stri
 		counts.SelectedAssetCount++
 	case domain.AssetRejected:
 		counts.RejectedAssetCount++
+	}
+}
+
+func buildBatchFinalDelivery(summary domain.BatchStorySummaryResponse) *domain.BatchFinalDeliveryManifest {
+	finalDelivery := &domain.BatchFinalDeliveryManifest{
+		Counts: domain.BatchFinalDeliveryCounts{
+			StoryCount: len(summary.Stories),
+			SceneCount: len(summary.Scenes),
+		},
+		Stories:     []domain.BatchFinalDeliveryStory{},
+		Scenes:      []domain.BatchFinalDeliveryScene{},
+		FinalAssets: []domain.BatchFinalDeliveryAsset{},
+	}
+
+	storyIndex := map[string]int{}
+	for _, story := range summary.Stories {
+		storyIndex[story.StoryID] = len(finalDelivery.Stories)
+		finalDelivery.Stories = append(finalDelivery.Stories, domain.BatchFinalDeliveryStory{
+			StoryID:         story.StoryID,
+			SceneCount:      0,
+			FinalAssetCount: 0,
+			Scenes:          []domain.BatchFinalDeliveryScene{},
+			FinalAssets:     []domain.BatchFinalDeliveryAsset{},
+		})
+	}
+
+	for _, scene := range summary.Scenes {
+		finalScene := domain.BatchFinalDeliveryScene{
+			StoryID:                scene.StoryID,
+			SceneID:                scene.SceneID,
+			TargetPath:             scene.TargetPath,
+			LatestTaskID:           scene.LatestTaskID,
+			PrimarySelectedAssetID: scene.PrimarySelectedAssetID,
+			Continuity:             scene.Continuity,
+			VisualContext:          scene.VisualContext,
+			FinalAssets:            []domain.BatchFinalDeliveryAsset{},
+		}
+		for _, asset := range scene.Assets {
+			if asset.DeliveryRole != domain.DeliveryRoleFinalDelivery {
+				continue
+			}
+			finalAsset := buildBatchFinalDeliveryAsset(scene, asset)
+			finalScene.FinalAssets = append(finalScene.FinalAssets, finalAsset)
+			finalDelivery.FinalAssets = append(finalDelivery.FinalAssets, finalAsset)
+		}
+		if len(finalScene.FinalAssets) > 0 {
+			finalDelivery.Counts.SceneWithFinalAssetCount++
+		} else {
+			finalDelivery.Counts.SceneMissingFinalAssetCount++
+		}
+		finalDelivery.Counts.FinalAssetCount += len(finalScene.FinalAssets)
+		finalDelivery.Scenes = append(finalDelivery.Scenes, finalScene)
+
+		index, ok := storyIndex[scene.StoryID]
+		if !ok {
+			index = len(finalDelivery.Stories)
+			storyIndex[scene.StoryID] = index
+			finalDelivery.Stories = append(finalDelivery.Stories, domain.BatchFinalDeliveryStory{
+				StoryID:         scene.StoryID,
+				SceneCount:      0,
+				FinalAssetCount: 0,
+				Scenes:          []domain.BatchFinalDeliveryScene{},
+				FinalAssets:     []domain.BatchFinalDeliveryAsset{},
+			})
+			finalDelivery.Counts.StoryCount++
+		}
+		finalDelivery.Stories[index].SceneCount++
+		finalDelivery.Stories[index].Scenes = append(finalDelivery.Stories[index].Scenes, finalScene)
+		finalDelivery.Stories[index].FinalAssets = append(finalDelivery.Stories[index].FinalAssets, finalScene.FinalAssets...)
+		finalDelivery.Stories[index].FinalAssetCount = len(finalDelivery.Stories[index].FinalAssets)
+	}
+
+	if len(summary.Stories) == 0 {
+		finalDelivery.Counts.StoryCount = len(finalDelivery.Stories)
+	}
+	return finalDelivery
+}
+
+func buildBatchFinalDeliveryAsset(scene domain.BatchStorySummaryScene, asset domain.BatchStorySummaryAsset) domain.BatchFinalDeliveryAsset {
+	finalAsset := domain.BatchFinalDeliveryAsset{
+		AssetID:        asset.AssetID,
+		TaskID:         asset.TaskID,
+		StoryID:        scene.StoryID,
+		SceneID:        scene.SceneID,
+		Status:         asset.Status,
+		DeliveryRole:   asset.DeliveryRole,
+		CaptionLineage: asset.CaptionLineage,
+		DownloadURL:    asset.DownloadURL,
+		ThumbnailURL:   asset.ThumbnailURL,
+		MetadataURL:    asset.MetadataURL,
+		TargetPath:     firstNonEmpty(asset.TargetPath, scene.TargetPath),
+		CreatedAt:      asset.CreatedAt,
+	}
+	if asset.CaptionLineage != nil {
+		finalAsset.DerivedFromAssetID = strings.TrimSpace(asset.CaptionLineage.DerivedFromAssetID)
+		finalAsset.DerivationType = strings.TrimSpace(asset.CaptionLineage.DerivationType)
+	}
+	return finalAsset
+}
+
+func enrichBatchStorySummaryDeliverySemantics(summary domain.BatchStorySummaryResponse) domain.BatchStorySummaryResponse {
+	for index := range summary.Scenes {
+		for taskIndex := range summary.Scenes[index].Tasks {
+			enrichBatchStorySummaryTaskRuntimeSemantics(&summary.Scenes[index].Tasks[taskIndex])
+		}
+		enrichBatchStorySummarySceneDeliveryRoles(&summary.Scenes[index])
+	}
+	return summary
+}
+
+func enrichBatchStorySummaryTaskRuntimeSemantics(task *domain.BatchStorySummaryTask) {
+	if task == nil {
+		return
+	}
+	task.DeliveredCount = task.AssetCount
+	if task.Status == domain.TaskPartiallyCompleted && task.DeliveredCount > 0 && task.RequestedCount > 0 && task.DeliveredCount < task.RequestedCount {
+		task.PartialSuccessReason = "delivered_count_below_requested"
+		task.ProviderErrorSummary = providerErrorSummaryFromMessage(task.Status, task.RequestedCount, task.DeliveredCount, task.ErrorMessage)
+		return
+	}
+	task.PartialSuccessReason = ""
+	task.ProviderErrorSummary = providerErrorSummaryFromMessage(task.Status, task.RequestedCount, task.DeliveredCount, task.ErrorMessage)
+}
+
+func enrichBatchStorySummarySceneDeliveryRoles(scene *domain.BatchStorySummaryScene) {
+	if scene == nil || len(scene.Assets) == 0 {
+		return
+	}
+	selectedDerivativeBaseIDs := map[string]struct{}{}
+	for _, asset := range scene.Assets {
+		if !isSelectedDeliveryStatus(asset.Status) || !isCaptionDerivativeAsset(asset.CaptionLineage) {
+			continue
+		}
+		derivedFrom := strings.TrimSpace(asset.CaptionLineage.DerivedFromAssetID)
+		if derivedFrom == "" {
+			continue
+		}
+		selectedDerivativeBaseIDs[derivedFrom] = struct{}{}
+	}
+	for index := range scene.Assets {
+		scene.Assets[index].DeliveryRole = deliveryRoleForSceneAsset(scene.Assets[index], selectedDerivativeBaseIDs)
+	}
+}
+
+func deliveryRoleForSceneAsset(asset domain.BatchStorySummaryAsset, selectedDerivativeBaseIDs map[string]struct{}) string {
+	if isCaptionDerivativeAsset(asset.CaptionLineage) {
+		if isSelectedDeliveryStatus(asset.Status) {
+			return domain.DeliveryRoleFinalDelivery
+		}
+		return domain.DeliveryRoleCaptionDerivative
+	}
+	if isSelectedDeliveryStatus(asset.Status) {
+		if _, overridden := selectedDerivativeBaseIDs[asset.AssetID]; overridden {
+			return domain.DeliveryRoleBaseOriginal
+		}
+		return domain.DeliveryRoleFinalDelivery
+	}
+	return domain.DeliveryRoleBaseOriginal
+}
+
+func deliveryRoleForStandaloneAsset(status string, lineage *domain.CaptionLineageSummary, overriddenBySelectedDerivative bool) string {
+	if isCaptionDerivativeAsset(lineage) {
+		if isSelectedDeliveryStatus(status) {
+			return domain.DeliveryRoleFinalDelivery
+		}
+		return domain.DeliveryRoleCaptionDerivative
+	}
+	if isSelectedDeliveryStatus(status) && !overriddenBySelectedDerivative {
+		return domain.DeliveryRoleFinalDelivery
+	}
+	return domain.DeliveryRoleBaseOriginal
+}
+
+func isCaptionDerivativeAsset(lineage *domain.CaptionLineageSummary) bool {
+	if lineage == nil {
+		return false
+	}
+	return strings.TrimSpace(lineage.DerivedFromAssetID) != "" || strings.EqualFold(strings.TrimSpace(lineage.DerivationType), "caption_edit")
+}
+
+func isSelectedDeliveryStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "selected", domain.AssetApproved, domain.AssetPublished:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -697,7 +908,10 @@ func (s *Service) ProcessTask(ctx context.Context, taskID string) error {
 	if err := s.store.UpdateTaskStatus(ctx, task.ID, status, code, message); err != nil {
 		return err
 	}
-	return s.autoSelectBestAsset(ctx, task, registered)
+	if err := s.autoSelectBestAsset(ctx, task, registered); err != nil {
+		return err
+	}
+	return s.autoSelectCaptionDerivativeIfRequested(ctx, task, registered)
 }
 
 func (s *Service) generateWithProviderLimit(ctx context.Context, task domain.Task, adapter provider.Adapter) (provider.Result, error) {
@@ -832,6 +1046,44 @@ func combineProviderResults(combined provider.Result, next provider.Result, slot
 	return combined
 }
 
+func (s *Service) autoSelectCaptionDerivativeIfRequested(ctx context.Context, task domain.Task, assets []domain.AssetWithVersion) error {
+	decision := captionDerivativeAutomaticSelectionDecision(task, assets)
+	if decision == nil {
+		return nil
+	}
+	_, err := s.store.ReviewAsset(ctx, decision.AssetID, "approve", decision.Reviewer, decision.Note)
+	return err
+}
+
+func captionDerivativeAutomaticSelectionDecision(task domain.Task, assets []domain.AssetWithVersion) *automaticAssetSelectionDecision {
+	if domain.ShouldAutoSelect(task.SelectionMode) || len(assets) == 0 {
+		return nil
+	}
+	lineage := domain.CaptionLineageFromStructuredInput(task.StructuredInputJSON)
+	if lineage == nil || !isCaptionDerivativeAsset(lineage) || lineage.AutoSelectDerivative == nil || !*lineage.AutoSelectDerivative {
+		return nil
+	}
+	notePayload := map[string]any{
+		"selection_mode":         task.SelectionMode,
+		"candidate_count":        len(assets),
+		"auto_select_derivative": true,
+		"derived_from_asset_id":  strings.TrimSpace(lineage.DerivedFromAssetID),
+		"derivation_type":        strings.TrimSpace(lineage.DerivationType),
+	}
+	noteJSON, err := json.Marshal(notePayload)
+	if err != nil {
+		return &automaticAssetSelectionDecision{
+			AssetID:  assets[0].ID,
+			Reviewer: "caption-derivative-auto-select",
+		}
+	}
+	return &automaticAssetSelectionDecision{
+		AssetID:  assets[0].ID,
+		Reviewer: "caption-derivative-auto-select",
+		Note:     string(noteJSON),
+	}
+}
+
 func (s *Service) taskResponse(ctx context.Context, task domain.Task) (domain.TaskResponse, error) {
 	assets, err := s.store.ListAssetsByTask(ctx, task.ID)
 	if err != nil {
@@ -851,10 +1103,13 @@ func (s *Service) taskResponse(ctx context.Context, task domain.Task) (domain.Ta
 			MetadataURL:  s.assetURL(item.ID, "metadata"),
 		})
 	}
+	enrichTaskRuntimeSemantics(&response.Task, len(assets))
 	return response, nil
 }
 
 func (s *Service) assetResponse(item domain.AssetWithVersion) domain.AssetResponse {
+	lineage := domain.CaptionLineageFromStructuredInput(item.TaskStructuredInputJSON)
+	deliveryRole := deliveryRoleForStandaloneAsset(item.Status, lineage, false)
 	return domain.AssetResponse{
 		AssetID:        item.ID,
 		WorkspaceID:    item.WorkspaceID,
@@ -869,6 +1124,9 @@ func (s *Service) assetResponse(item domain.AssetWithVersion) domain.AssetRespon
 		Prompt:         item.Version.Prompt,
 		ParametersJSON: item.Version.ParametersJSON,
 		MetadataJSON:   domain.NormalizeMetadataJSON(metadataJSONFromStructuredInput(item.TaskStructuredInputJSON)),
+		DeliveryRole:   deliveryRole,
+		CaptionLineage: lineage,
+		AssetSummary:   buildAssetSummary(item, deliveryRole),
 		Delivery: domain.DeliveryInfo{
 			LocalPath:    item.Version.FilePath,
 			DownloadURL:  s.assetURL(item.ID, "original"),
@@ -880,6 +1138,8 @@ func (s *Service) assetResponse(item domain.AssetWithVersion) domain.AssetRespon
 }
 
 func (s *Service) assetMetadataResponse(item domain.AssetWithVersion) domain.AssetMetadataResponse {
+	lineage := domain.CaptionLineageFromStructuredInput(item.TaskStructuredInputJSON)
+	deliveryRole := deliveryRoleForStandaloneAsset(item.Status, lineage, false)
 	return domain.AssetMetadataResponse{
 		AssetID:        item.ID,
 		WorkspaceID:    item.WorkspaceID,
@@ -894,6 +1154,9 @@ func (s *Service) assetMetadataResponse(item domain.AssetWithVersion) domain.Ass
 		Prompt:         item.Version.Prompt,
 		ParametersJSON: item.Version.ParametersJSON,
 		MetadataJSON:   domain.NormalizeMetadataJSON(metadataJSONFromStructuredInput(item.TaskStructuredInputJSON)),
+		DeliveryRole:   deliveryRole,
+		CaptionLineage: lineage,
+		AssetSummary:   buildAssetSummary(item, deliveryRole),
 		Delivery: domain.PublicDeliveryInfo{
 			DownloadURL:  s.assetURL(item.ID, "original"),
 			ThumbnailURL: s.assetURL(item.ID, "thumbnail"),
@@ -915,6 +1178,51 @@ func metadataJSONFromStructuredInput(raw json.RawMessage) json.RawMessage {
 	return metadata
 }
 
+func enrichTaskRuntimeSemantics(task *domain.Task, deliveredCount int) {
+	if task == nil {
+		return
+	}
+	task.DeliveredCount = deliveredCount
+	task.PartialSuccessReason = partialSuccessReason(*task, deliveredCount)
+	task.ProviderErrorSummary = providerErrorSummary(*task, deliveredCount)
+}
+
+func partialSuccessReason(task domain.Task, deliveredCount int) string {
+	if task.Status != domain.TaskPartiallyCompleted {
+		return ""
+	}
+	if deliveredCount > 0 && task.RequestedCount > 0 && deliveredCount < task.RequestedCount {
+		return "delivered_count_below_requested"
+	}
+	return ""
+}
+
+func providerErrorSummary(task domain.Task, deliveredCount int) string {
+	return providerErrorSummaryFromMessage(task.Status, task.RequestedCount, deliveredCount, task.ErrorMessage)
+}
+
+func providerErrorSummaryFromMessage(status string, requestedCount, deliveredCount int, errorMessage *string) string {
+	if errorMessage == nil {
+		return ""
+	}
+	message := strings.TrimSpace(*errorMessage)
+	if message == "" {
+		return ""
+	}
+	if status == domain.TaskPartiallyCompleted {
+		if deliveredCount > 0 && requestedCount > 0 && deliveredCount < requestedCount {
+			if marker := strings.Index(message, ": "); marker >= 0 && marker+2 < len(message) {
+				return strings.TrimSpace(message[marker+2:])
+			}
+			return ""
+		}
+	}
+	if status == domain.TaskFailed || status == domain.TaskEnqueueFailed {
+		return message
+	}
+	return ""
+}
+
 func storyContextV1FromStructuredInput(raw json.RawMessage) json.RawMessage {
 	var structured map[string]json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &structured) != nil {
@@ -925,6 +1233,90 @@ func storyContextV1FromStructuredInput(raw json.RawMessage) json.RawMessage {
 		return nil
 	}
 	return story
+}
+
+func buildAssetSummary(item domain.AssetWithVersion, deliveryRole string) *domain.AssetSummary {
+	metadataRaw := metadataJSONFromStructuredInput(item.TaskStructuredInputJSON)
+	var metadata map[string]any
+	if len(metadataRaw) > 0 {
+		_ = json.Unmarshal(metadataRaw, &metadata)
+	}
+	lineage := domain.CaptionLineageFromStructuredInput(item.TaskStructuredInputJSON)
+	summary := &domain.AssetSummary{
+		StoryID:                        strings.TrimSpace(mapString(metadata, "story_id")),
+		SceneID:                        strings.TrimSpace(mapString(metadata, "scene_id")),
+		PanelIndex:                     intFromMetadataValue(metadata["panel_index"]),
+		Dialogue:                       strings.TrimSpace(mapString(metadata, "dialogue")),
+		PreviousPanelAssetID:           strings.TrimSpace(mapString(metadata, "previous_panel_asset_id")),
+		ProviderReferenceParticipation: firstNonEmpty(strings.TrimSpace(mapString(metadata, "provider_reference_participation")), structuredInputString(item.TaskStructuredInputJSON, "provider_reference_participation")),
+		Provider:                       strings.TrimSpace(item.Version.Provider),
+		Model:                          strings.TrimSpace(item.Version.Model),
+		AssetStatus:                    strings.TrimSpace(item.Status),
+		DeliveryRole:                   strings.TrimSpace(deliveryRole),
+	}
+	if lineage != nil {
+		summary.CaptionText = strings.TrimSpace(lineage.CaptionText)
+		summary.DerivedFromAssetID = strings.TrimSpace(lineage.DerivedFromAssetID)
+		summary.DerivationType = strings.TrimSpace(lineage.DerivationType)
+		if summary.Dialogue == "" {
+			summary.Dialogue = summary.CaptionText
+		}
+	}
+	if summary.StoryID == "" &&
+		summary.SceneID == "" &&
+		summary.PanelIndex == 0 &&
+		summary.Dialogue == "" &&
+		summary.CaptionText == "" &&
+		summary.DerivedFromAssetID == "" &&
+		summary.DerivationType == "" &&
+		summary.PreviousPanelAssetID == "" &&
+		summary.ProviderReferenceParticipation == "" &&
+		summary.Provider == "" &&
+		summary.Model == "" &&
+		summary.AssetStatus == "" &&
+		summary.DeliveryRole == "" {
+		return nil
+	}
+	return summary
+}
+
+func structuredInputString(raw json.RawMessage, key string) string {
+	var payload map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(payload[key]))
+}
+
+func intFromMetadataValue(value any) int {
+	switch typed := value.(type) {
+	case nil:
+		return 0
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(parsed)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		parsed, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(value)))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	}
 }
 
 func (s *Service) storyContinuityAssetSnapshot(ctx context.Context, assetID string) (storyContinuityAssetSnapshot, error) {
@@ -1166,6 +1558,11 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	req.SelectionMode = strings.TrimSpace(req.SelectionMode)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.MetadataJSON = domain.NormalizeMetadataJSON(req.MetadataJSON)
+	normalizedMetadata, captionLineage, err := normalizeCaptionLineageMetadata(req.MetadataJSON)
+	if err != nil {
+		return req, nil, "", err
+	}
+	req.MetadataJSON = normalizedMetadata
 	if req.Title == "" {
 		req.Title = "Untitled image task"
 	}
@@ -1264,26 +1661,38 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 			storyContext = updatedStory
 		}
 		req.MetadataJSON = domain.NormalizeMetadataJSON(updatedMetadata)
+		req.MetadataJSON, captionLineage, err = normalizeCaptionLineageMetadata(req.MetadataJSON)
+		if err != nil {
+			return req, nil, "", err
+		}
 	}
+	req.Prompt = appendStoryPanelTransitionPrompt(req.Prompt, storyContext, req.MetadataJSON)
+	req.Prompt = appendCaptionSemanticsPrompt(req.Prompt, captionLineage)
 
 	structuredPayload := map[string]any{
-		"workspace_id":                     scope.WorkspaceID,
-		"project_id":                       scope.ProjectID,
-		"campaign_id":                      scope.CampaignID,
-		"idempotency_key":                  req.IdempotencyKey,
-		"title":                            req.Title,
-		"purpose":                          req.Purpose,
-		"prompt":                           req.Prompt,
-		"negative_prompt":                  req.NegativePrompt,
-		"style_preset":                     req.StylePreset,
-		"prompt_template":                  req.PromptTemplate,
-		"template_variables":               req.TemplateVariables,
-		"reference_images":                 req.ReferenceImages,
-		"character_ids":                    req.CharacterIDs,
-		"reference_asset_ids":              req.ReferenceAssetIDs,
-		"prompt_recipe_id":                 req.PromptRecipeID,
-		"use_project_visual_context":       req.UseProjectVisualContext,
-		"visual_context_snapshot":          visualContext.Snapshot,
+		"workspace_id":               scope.WorkspaceID,
+		"project_id":                 scope.ProjectID,
+		"campaign_id":                scope.CampaignID,
+		"idempotency_key":            req.IdempotencyKey,
+		"title":                      req.Title,
+		"purpose":                    req.Purpose,
+		"prompt":                     req.Prompt,
+		"negative_prompt":            req.NegativePrompt,
+		"style_preset":               req.StylePreset,
+		"prompt_template":            req.PromptTemplate,
+		"template_variables":         req.TemplateVariables,
+		"reference_images":           req.ReferenceImages,
+		"character_ids":              req.CharacterIDs,
+		"reference_asset_ids":        req.ReferenceAssetIDs,
+		"prompt_recipe_id":           req.PromptRecipeID,
+		"use_project_visual_context": req.UseProjectVisualContext,
+		"visual_context_snapshot":    visualContext.Snapshot,
+		"project_visual_context_diagnostics": func() any {
+			if visualContext.Snapshot == nil {
+				return nil
+			}
+			return visualContext.Snapshot.ReferenceDiagnostics
+		}(),
 		"mask_image":                       req.MaskImage,
 		"best_of_config":                   req.BestOfConfig,
 		"resolved_input_files":             resolvedInputFiles,
@@ -1304,7 +1713,7 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 		"story_context_v1":                 storyContext,
 		"metadata_json":                    json.RawMessage(req.MetadataJSON),
 	}
-	if captionLineage := domain.CaptionLineageFromMetadataJSON(req.MetadataJSON); captionLineage != nil {
+	if captionLineage != nil {
 		structuredPayload["caption_lineage"] = captionLineage
 	}
 	structured, err := json.Marshal(structuredPayload)
@@ -1313,6 +1722,56 @@ func (s *Service) normalizeTaskRequest(ctx context.Context, scope domain.Scope, 
 	}
 	hash := sha256.Sum256(structured)
 	return req, structured, hex.EncodeToString(hash[:]), nil
+}
+
+func normalizeCaptionLineageMetadata(raw json.RawMessage) (json.RawMessage, *domain.CaptionLineageSummary, error) {
+	normalized := domain.NormalizeMetadataJSON(raw)
+	lineage := domain.CaptionLineageFromMetadataJSON(normalized)
+	if lineage == nil {
+		return normalized, nil, nil
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal(normalized, &metadata); err != nil {
+		return nil, nil, err
+	}
+	metadata["caption_lineage"] = lineage
+	updated, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, nil, err
+	}
+	return domain.NormalizeMetadataJSON(updated), lineage, nil
+}
+
+func appendCaptionSemanticsPrompt(prompt string, lineage *domain.CaptionLineageSummary) string {
+	prompt = strings.TrimSpace(prompt)
+	if lineage == nil || lineage.Empty() {
+		return prompt
+	}
+
+	hints := make([]string, 0, 6)
+	if strings.TrimSpace(lineage.CaptionText) != "" {
+		hints = append(hints, fmt.Sprintf("Add exactly one readable caption text block: %q.", lineage.CaptionText))
+	}
+	if strings.TrimSpace(lineage.SpeakerCharacterID) != "" {
+		hints = append(hints, fmt.Sprintf("Speaker character id: %s.", lineage.SpeakerCharacterID))
+	}
+	if strings.TrimSpace(lineage.BubbleAnchor) != "" {
+		hints = append(hints, fmt.Sprintf("Bubble anchor: %s.", lineage.BubbleAnchor))
+	}
+	if strings.TrimSpace(lineage.TailDirection) != "" {
+		hints = append(hints, fmt.Sprintf("Bubble tail direction: %s.", lineage.TailDirection))
+	}
+	if strings.TrimSpace(lineage.CaptionIntent) != "" {
+		hints = append(hints, fmt.Sprintf("Caption intent: %s.", lineage.CaptionIntent))
+	}
+	if lineage.AvoidCoveringSubjects != nil && *lineage.AvoidCoveringSubjects {
+		hints = append(hints, "Do not cover the main characters, their faces, or key props.")
+	}
+	if len(hints) == 0 {
+		return prompt
+	}
+	return strings.TrimSpace(prompt + "\n\nCaption semantics:\n- " + strings.Join(hints, "\n- "))
 }
 
 type sceneRegenerationBuildResult struct {

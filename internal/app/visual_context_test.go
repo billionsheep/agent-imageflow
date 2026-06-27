@@ -115,6 +115,49 @@ func TestBuildReferenceParticipationDiagnosticsCountsAssetsAndInputFiles(t *test
 	}
 }
 
+func TestBuildProjectVisualContextReferenceDiagnosticsFlagsTextConstrainedAndWeakSpeciesLock(t *testing.T) {
+	diagnostics := buildProjectVisualContextReferenceDiagnostics(domain.ProjectVisualContext{
+		Characters: []domain.CharacterProfile{
+			{
+				ID:         "dog_jimao",
+				Name:       "鸡毛",
+				Status:     "active",
+				Role:       "mascot",
+				Appearance: "warm beige mascot with rounded ears",
+			},
+		},
+		PromptRecipes: []domain.PromptRecipe{
+			{
+				ID:             "pet_card",
+				Name:           "Pet card",
+				Status:         "active",
+				NegativePrompt: "watermark, unreadable text",
+			},
+		},
+	})
+
+	if diagnostics.PrimaryReadiness != "text_constrained" {
+		t.Fatalf("primary readiness = %q, want text_constrained; value=%#v", diagnostics.PrimaryReadiness, diagnostics)
+	}
+	for _, want := range []string{"text_constrained", "missing_environment_reference", "weak_species_lock"} {
+		if !containsString(diagnostics.Labels, want) {
+			t.Fatalf("expected diagnostics labels to contain %q: %#v", want, diagnostics)
+		}
+	}
+	if diagnostics.ProviderReferenceParticipationRisk != "descriptor_only_risk" {
+		t.Fatalf("provider reference participation risk = %q, want descriptor_only_risk; value=%#v", diagnostics.ProviderReferenceParticipationRisk, diagnostics)
+	}
+	if diagnostics.MissingCharacterImageCount != 1 || !containsString(diagnostics.MissingCharacterIDs, "dog_jimao") {
+		t.Fatalf("missing character image diagnostics incorrect: %#v", diagnostics)
+	}
+	if diagnostics.NegativePromptCoversSpeciesDrift {
+		t.Fatalf("negative prompt should not look species-safe: %#v", diagnostics)
+	}
+	if diagnostics.IdentitySignalPresent {
+		t.Fatalf("identity signal should stay weak for mascot-only wording: %#v", diagnostics)
+	}
+}
+
 func TestApplyProjectVisualContextExpandsRecipeReferencesAndSnapshot(t *testing.T) {
 	req := domain.CreateTaskRequest{
 		Title:                   "Scene 1",
@@ -187,12 +230,30 @@ func TestApplyProjectVisualContextExpandsRecipeReferencesAndSnapshot(t *testing.
 	if snapshot == nil || snapshot.PromptRecipe == nil || snapshot.PromptRecipe.ID != "pet_story" {
 		t.Fatalf("snapshot missing recipe: %#v", snapshot)
 	}
+	if snapshot == nil || snapshot.ReferenceDiagnostics == nil {
+		t.Fatalf("snapshot missing reference diagnostics: %#v", snapshot)
+	}
+	if snapshot.ReferenceDiagnostics.PrimaryReadiness != "image_backed" {
+		t.Fatalf("snapshot primary readiness = %q, want image_backed; value=%#v", snapshot.ReferenceDiagnostics.PrimaryReadiness, snapshot.ReferenceDiagnostics)
+	}
+	for _, want := range []string{"image_backed", "missing_environment_reference", "weak_species_lock"} {
+		if !containsString(snapshot.ReferenceDiagnostics.Labels, want) {
+			t.Fatalf("expected snapshot diagnostics label %q in %#v", want, snapshot.ReferenceDiagnostics)
+		}
+	}
 	var metadata map[string]any
 	if err := json.Unmarshal(expanded.MetadataJSON, &metadata); err != nil {
 		t.Fatalf("metadata invalid: %v", err)
 	}
 	if _, ok := metadata[visualContextSnapshotKey]; !ok {
 		t.Fatalf("visual context snapshot missing from metadata: %#v", metadata)
+	}
+	diagnostics, ok := metadata[projectVisualContextDiagnosticsKey].(map[string]any)
+	if !ok {
+		t.Fatalf("project visual context diagnostics missing from metadata: %#v", metadata)
+	}
+	if diagnostics["primary_readiness"] != "image_backed" {
+		t.Fatalf("unexpected metadata diagnostics primary readiness: %#v", diagnostics)
 	}
 }
 

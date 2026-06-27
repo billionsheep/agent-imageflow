@@ -108,6 +108,109 @@ func TestAuthorizeRequestAllowsAdminSessionForRecentAssets(t *testing.T) {
 	}
 }
 
+func TestRouteAllowsAgentSetupTokenOnlyForNonDestructiveSetupRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		parts  []string
+		want   bool
+	}{
+		{
+			name:   "list workspaces",
+			method: http.MethodGet,
+			parts:  []string{"api", "workspaces"},
+			want:   true,
+		},
+		{
+			name:   "create project",
+			method: http.MethodPost,
+			parts:  []string{"api", "workspaces", "ws_default", "projects"},
+			want:   true,
+		},
+		{
+			name:   "list campaigns",
+			method: http.MethodGet,
+			parts:  []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "campaigns"},
+			want:   true,
+		},
+		{
+			name:   "update visual context",
+			method: http.MethodPost,
+			parts:  []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "visual-context"},
+			want:   true,
+		},
+		{
+			name:   "task create stays blocked",
+			method: http.MethodPost,
+			parts:  []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "campaigns", "cmp_demo", "tasks"},
+			want:   false,
+		},
+		{
+			name:   "asset approve stays blocked",
+			method: http.MethodPost,
+			parts:  []string{"api", "assets", "asset_demo", "approve"},
+			want:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		if got := routeAllowsAgentSetupToken(tc.parts, tc.method); got != tc.want {
+			t.Fatalf("%s: routeAllowsAgentSetupToken() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestAuthorizeRequestAllowsAgentSetupTokenForVisualContext(t *testing.T) {
+	server := &Server{
+		options: Options{
+			BasicAuthUsername: "basic",
+			BasicAuthPassword: "secret",
+			AgentSetupToken:   "setup-secret",
+		},
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws_default/projects/prj_demo/visual-context", nil)
+	request.Header.Set("X-Agent-Setup-Token", "setup-secret")
+
+	authorized, scope, actor, err := server.authorizeRequest(recorder, request, []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "visual-context"})
+	if err != nil {
+		t.Fatalf("authorizeRequest returned error: %v", err)
+	}
+	if !authorized {
+		t.Fatalf("expected setup token request to be authorized, status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if scope.WorkspaceID != "ws_default" || scope.ProjectID != "prj_demo" {
+		t.Fatalf("unexpected scope: %#v", scope)
+	}
+	if actor.AuthMode != "agent_setup_token" || actor.Actor != "agent_setup_token" {
+		t.Fatalf("unexpected audit actor: %#v", actor)
+	}
+}
+
+func TestAuthorizeRequestDoesNotAllowAgentSetupTokenForTaskCreate(t *testing.T) {
+	server := &Server{
+		options: Options{
+			BasicAuthUsername: "basic",
+			BasicAuthPassword: "secret",
+			AgentSetupToken:   "setup-secret",
+		},
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws_default/projects/prj_demo/campaigns/cmp_demo/tasks", nil)
+	request.Header.Set("X-Agent-Setup-Token", "setup-secret")
+
+	authorized, _, _, err := server.authorizeRequest(recorder, request, []string{"api", "workspaces", "ws_default", "projects", "prj_demo", "campaigns", "cmp_demo", "tasks"})
+	if err != nil {
+		t.Fatalf("authorizeRequest returned error: %v", err)
+	}
+	if authorized {
+		t.Fatal("expected setup token to be rejected for task creation")
+	}
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestPromoteInputFileAssetRouteAllowsAdminAndAuditsAction(t *testing.T) {
 	parts := []string{"api", "workspaces", "ws_demo", "projects", "prj_demo", "campaigns", "cmp_demo", "input-files", "inp_demo", "promote-asset"}
 	if !routeAllowsAdminSession(parts, http.MethodPost) {
@@ -376,6 +479,9 @@ func TestSetCORSEchoesOriginWhenCredentialsAreAllowed(t *testing.T) {
 	}
 	if got := recorder.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
 		t.Fatalf("expected credentials CORS header, got %q", got)
+	}
+	if headers := recorder.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(headers, "X-Agent-Setup-Token") {
+		t.Fatalf("expected X-Agent-Setup-Token in CORS headers, got %q", headers)
 	}
 	if methods := recorder.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(methods, "PATCH") || !strings.Contains(methods, "DELETE") {
 		t.Fatalf("expected PATCH/DELETE in CORS methods, got %q", methods)
@@ -862,7 +968,7 @@ func TestParseBatchStorySummaryQuery(t *testing.T) {
 }
 
 func TestParseBatchManifestQuery(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest?session_id=s1&batch_id=b1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=999&selected_only=false&include_rejected=true", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/prj_demo/campaigns/cmp_demo/batch-manifest?session_id=s1&batch_id=b1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=999&selected_only=false&include_rejected=true&view=final_delivery", nil)
 
 	query, err := parseBatchManifestQuery(request, "prj_demo", "cmp_demo")
 	if err != nil {
@@ -876,6 +982,9 @@ func TestParseBatchManifestQuery(t *testing.T) {
 	}
 	if query.SelectedOnly || !query.IncludeRejected {
 		t.Fatalf("manifest options were not parsed: %#v", query)
+	}
+	if query.View != domain.BatchManifestViewFinalDelivery {
+		t.Fatalf("manifest view was not parsed: %#v", query)
 	}
 	if query.Limit != domain.MaxBatchProgressLimit {
 		t.Fatalf("limit = %d, want cap %d", query.Limit, domain.MaxBatchProgressLimit)
@@ -891,6 +1000,9 @@ func TestParseBatchManifestQueryDefaultsSelectedOnly(t *testing.T) {
 	}
 	if !query.SelectedOnly || query.IncludeRejected {
 		t.Fatalf("unexpected manifest defaults: %#v", query)
+	}
+	if query.View != domain.BatchManifestViewEngineering {
+		t.Fatalf("expected default engineering view, got %#v", query)
 	}
 }
 

@@ -27,6 +27,18 @@ function getMetadataString(asset: AgentImageflowAssetResponse, key: string): str
   return getStringValue(asset.metadata_json?.[key])
 }
 
+function getAssetSummaryString(asset: AgentImageflowAssetResponse, key: keyof NonNullable<AgentImageflowAssetResponse['asset_summary']>): string {
+  return getStringValue(asset.asset_summary?.[key])
+}
+
+function getPreferredAssetString(
+  asset: AgentImageflowAssetResponse,
+  summaryKey: keyof NonNullable<AgentImageflowAssetResponse['asset_summary']>,
+  metadataKey: string,
+): string {
+  return getAssetSummaryString(asset, summaryKey) || getMetadataString(asset, metadataKey)
+}
+
 function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
@@ -123,6 +135,12 @@ export function getAssetReviewTitle(asset: AgentImageflowAssetResponse): string 
   ].map((key) => getMetadataString(asset, key)).find(Boolean)
   if (metadataSummary) return truncateText(metadataSummary, 140)
 
+  const summaryText = [
+    getAssetSummaryString(asset, 'dialogue'),
+    getAssetSummaryString(asset, 'caption_text'),
+  ].find(Boolean)
+  if (summaryText) return truncateText(summaryText, 140)
+
   const prompt = asset.prompt || ''
   const firstBlock = prompt
     .split(/\n\s*\n/)
@@ -135,8 +153,10 @@ export function getAssetReviewTitle(asset: AgentImageflowAssetResponse): string 
 export function getAssetReviewSummary(asset: AgentImageflowAssetResponse): OperatorReviewField[] {
   const fields: OperatorReviewField[] = []
   pushField(fields, 'prompt', 'Prompt', getAssetReviewTitle(asset))
-  pushField(fields, 'story', 'Story', getMetadataString(asset, 'story_id'))
-  pushField(fields, 'scene', 'Scene', getMetadataString(asset, 'scene_id'))
+  pushField(fields, 'story', 'Story', getPreferredAssetString(asset, 'story_id', 'story_id'))
+  pushField(fields, 'scene', 'Scene', getPreferredAssetString(asset, 'scene_id', 'scene_id'))
+  pushField(fields, 'dialogue', 'Dialogue', getAssetSummaryString(asset, 'dialogue') || getAssetSummaryString(asset, 'caption_text'))
+  pushField(fields, 'delivery', 'Delivery', asset.delivery_role || getAssetSummaryString(asset, 'delivery_role'))
   pushField(fields, 'source', 'Source', getMetadataString(asset, 'source'))
   pushField(fields, 'created', 'Created', asset.created_at)
   pushField(fields, 'target', 'Target', getMetadataString(asset, 'target_path'))
@@ -154,12 +174,21 @@ export function getAssetTechnicalFields(asset: AgentImageflowAssetResponse): Ope
   pushField(fields, 'provider', 'Provider', asset.provider)
   pushField(fields, 'model', 'Model', asset.model)
   pushField(fields, 'hash', 'Hash', asset.hash)
+  pushField(fields, 'delivery', 'Delivery Role', asset.delivery_role || getAssetSummaryString(asset, 'delivery_role'))
   pushField(fields, 'source', 'Source', getMetadataString(asset, 'source'))
   pushField(fields, 'session', 'Session', getMetadataString(asset, 'session_id'))
   pushField(fields, 'batch', 'Batch', getMetadataString(asset, 'batch_id'))
-  pushField(fields, 'story', 'Story', getMetadataString(asset, 'story_id'))
-  pushField(fields, 'scene', 'Scene', getMetadataString(asset, 'scene_id'))
+  pushField(fields, 'story', 'Story', getPreferredAssetString(asset, 'story_id', 'story_id'))
+  pushField(fields, 'scene', 'Scene', getPreferredAssetString(asset, 'scene_id', 'scene_id'))
+  pushField(fields, 'panel', 'Panel', asset.asset_summary?.panel_index)
+  pushField(fields, 'dialogue', 'Dialogue', getAssetSummaryString(asset, 'dialogue'))
+  pushField(fields, 'caption', 'Caption', getAssetSummaryString(asset, 'caption_text'))
+  pushField(fields, 'derived', 'Derived From', getAssetSummaryString(asset, 'derived_from_asset_id'))
+  pushField(fields, 'previous', 'Previous Panel', getAssetSummaryString(asset, 'previous_panel_asset_id'))
+  pushField(fields, 'reference', 'Reference Participation', getAssetSummaryString(asset, 'provider_reference_participation'))
   pushField(fields, 'target', 'Target', getMetadataString(asset, 'target_path'))
+  pushField(fields, 'summary', 'Summary', stringifySanitizedJSON(asset.asset_summary as Record<string, unknown> | undefined))
+  pushField(fields, 'caption_lineage', 'Caption Lineage', stringifySanitizedJSON(asset.caption_lineage as Record<string, unknown> | undefined))
   pushField(fields, 'metadata', 'Metadata', stringifySanitizedJSON(asset.metadata_json))
   pushField(fields, 'parameters', 'Parameters', stringifySanitizedJSON(asset.parameters_json))
   return fields
@@ -183,7 +212,7 @@ export function getProductionFiltersFromAsset(asset: AgentImageflowAssetResponse
   return {
     sessionId,
     batchId,
-    storyId: getMetadataString(asset, 'story_id'),
+    storyId: getPreferredAssetString(asset, 'story_id', 'story_id'),
     source: getMetadataString(asset, 'source'),
     status: '',
     includeSetup: false,

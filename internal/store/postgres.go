@@ -1235,7 +1235,7 @@ func buildBatchStorySummaryTasksQuery(query domain.BatchStorySummaryQuery) batch
 			ORDER BY gt.created_at ASC, gt.id ASC
 			LIMIT $%d
 		)
-		SELECT gt.id, gt.status, gt.created_at, gt.updated_at, gt.error_code, gt.error_message,
+		SELECT gt.id, gt.status, gt.requested_count, gt.created_at, gt.updated_at, gt.error_code, gt.error_message,
 			gt.structured_input_json,
 			COALESCE(gt.structured_input_json->'metadata_json'->>'source', '') AS source,
 			COALESCE(gt.structured_input_json->'metadata_json'->>'session_id', '') AS session_id,
@@ -1407,14 +1407,15 @@ func (s *PostgresStore) GetBatchStorySummary(ctx context.Context, query domain.B
 			taskSeen[row.TaskID] = true
 			previousLatestUpdatedAt := latestTaskUpdatedAt(scene.Tasks)
 			task := domain.BatchStorySummaryTask{
-				TaskID:       row.TaskID,
-				Status:       row.Status,
-				AssetCount:   row.TaskAssetCount,
-				AttemptCount: row.AttemptCount,
-				Retrying:     row.Retrying,
-				ErrorStage:   strings.TrimSpace(row.ErrorStage),
-				CreatedAt:    row.CreatedAt,
-				UpdatedAt:    row.UpdatedAt,
+				TaskID:         row.TaskID,
+				Status:         row.Status,
+				RequestedCount: row.RequestedCount,
+				AssetCount:     row.TaskAssetCount,
+				AttemptCount:   row.AttemptCount,
+				Retrying:       row.Retrying,
+				ErrorStage:     strings.TrimSpace(row.ErrorStage),
+				CreatedAt:      row.CreatedAt,
+				UpdatedAt:      row.UpdatedAt,
 			}
 			if row.ErrorCode.Valid {
 				task.ErrorCode = &row.ErrorCode.String
@@ -1501,6 +1502,7 @@ func (s *PostgresStore) GetBatchStorySummary(ctx context.Context, query domain.B
 type batchStorySummaryRow struct {
 	TaskID                string
 	Status                string
+	RequestedCount        int
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	ErrorCode             sql.NullString
@@ -1529,6 +1531,7 @@ func scanBatchStorySummaryRow(rows *sql.Rows) (batchStorySummaryRow, error) {
 	err := rows.Scan(
 		&row.TaskID,
 		&row.Status,
+		&row.RequestedCount,
 		&row.CreatedAt,
 		&row.UpdatedAt,
 		&row.ErrorCode,
@@ -1727,17 +1730,29 @@ func deriveSceneOrder(sceneID, rawOrder string) int {
 
 func extractBatchStoryVisualContext(raw json.RawMessage) domain.BatchStoryVisualContext {
 	var payload struct {
-		CharacterIDs      []string `json:"character_ids"`
-		ReferenceAssetIDs []string `json:"reference_asset_ids"`
-		PromptRecipeID    string   `json:"prompt_recipe_id"`
+		CharacterIDs                    []string                                         `json:"character_ids"`
+		ReferenceAssetIDs               []string                                         `json:"reference_asset_ids"`
+		PromptRecipeID                  string                                           `json:"prompt_recipe_id"`
+		ProjectVisualContextDiagnostics *domain.ProjectVisualContextReferenceDiagnostics `json:"project_visual_context_diagnostics"`
+		MetadataJSON                    json.RawMessage                                  `json:"metadata_json"`
 	}
 	if len(raw) == 0 || json.Unmarshal(raw, &payload) != nil {
 		return domain.BatchStoryVisualContext{}
 	}
+	diagnostics := payload.ProjectVisualContextDiagnostics
+	if diagnostics == nil && len(payload.MetadataJSON) > 0 {
+		var metadata struct {
+			ProjectVisualContextDiagnostics *domain.ProjectVisualContextReferenceDiagnostics `json:"project_visual_context_diagnostics"`
+		}
+		if json.Unmarshal(payload.MetadataJSON, &metadata) == nil {
+			diagnostics = metadata.ProjectVisualContextDiagnostics
+		}
+	}
 	return domain.BatchStoryVisualContext{
-		CharacterIDs:      trimStringSlice(payload.CharacterIDs),
-		ReferenceAssetIDs: trimStringSlice(payload.ReferenceAssetIDs),
-		PromptRecipeID:    strings.TrimSpace(payload.PromptRecipeID),
+		CharacterIDs:         trimStringSlice(payload.CharacterIDs),
+		ReferenceAssetIDs:    trimStringSlice(payload.ReferenceAssetIDs),
+		PromptRecipeID:       strings.TrimSpace(payload.PromptRecipeID),
+		ReferenceDiagnostics: diagnostics,
 	}
 }
 
@@ -1781,10 +1796,17 @@ func extractBatchStoryContinuitySummary(raw json.RawMessage) domain.BatchStoryCo
 		ResultingState:                 firstNonEmpty(strings.TrimSpace(panel.ResultingState), mapStringValue(metadata["resulting_state"])),
 		Dialogue:                       firstNonEmpty(strings.TrimSpace(panel.Dialogue), mapStringValue(metadata["dialogue"])),
 		DialogueIntent:                 firstNonEmpty(strings.TrimSpace(panel.DialogueIntent), mapStringValue(metadata["dialogue_intent"])),
+		EmotionBefore:                  firstNonEmpty(strings.TrimSpace(panel.EmotionBefore), mapStringValue(metadata["emotion_before"])),
+		EmotionAfter:                   firstNonEmpty(strings.TrimSpace(panel.EmotionAfter), mapStringValue(metadata["emotion_after"])),
+		PoseChange:                     firstNonEmpty(strings.TrimSpace(panel.PoseChange), mapStringValue(metadata["pose_change"])),
+		RelationshipShift:              firstNonEmpty(strings.TrimSpace(panel.RelationshipShift), mapStringValue(metadata["relationship_shift"])),
 		PreviousPanelAssetID:           mapStringValue(metadata["previous_panel_asset_id"]),
 		ProviderReferenceParticipation: firstNonEmpty(strings.TrimSpace(payload.ProviderReferenceParticipation), mapStringValue(metadata["provider_reference_participation"])),
 		MustKeepProps:                  batchStoryStringSlice(panel.MustKeepProps),
 		AllowedChanges:                 batchStoryStringSlice(panel.AllowedChanges),
+		MustChange:                     firstNonEmptyStringSlice(batchStoryStringSlice(panel.MustChange), mapStringSlice(metadata["must_change"])),
+		MustNotKeep:                    firstNonEmptyStringSlice(batchStoryStringSlice(panel.MustNotKeep), mapStringSlice(metadata["must_not_keep"])),
+		StateTransitionNotes:           firstNonEmpty(strings.TrimSpace(panel.StateTransitionNotes), mapStringValue(metadata["state_transition_notes"])),
 		ResolvedReferenceAssets:        batchStoryResolvedReferenceAssets(story.ResolvedReferenceAssets),
 		ContinuityWarnings:             batchStoryContinuityWarnings(story.ContinuityWarnings),
 	}
@@ -1870,6 +1892,23 @@ func batchStoryStringSlice(values []string) []string {
 	return cleaned
 }
 
+func mapStringSlice(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := strings.TrimSpace(mapStringValue(item)); text != "" {
+			result = append(result, text)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func mapStringValue(value any) string {
 	if value == nil {
 		return ""
@@ -1899,7 +1938,14 @@ func isBatchStoryContinuitySummaryEmpty(value domain.BatchStoryContinuitySummary
 	return value.PanelIndex == 0 &&
 		strings.TrimSpace(value.NarrativeRole) == "" &&
 		strings.TrimSpace(value.Dialogue) == "" &&
+		strings.TrimSpace(value.EmotionBefore) == "" &&
+		strings.TrimSpace(value.EmotionAfter) == "" &&
+		strings.TrimSpace(value.PoseChange) == "" &&
+		strings.TrimSpace(value.RelationshipShift) == "" &&
 		strings.TrimSpace(value.PreviousPanelAssetID) == "" &&
+		strings.TrimSpace(value.StateTransitionNotes) == "" &&
+		len(value.MustChange) == 0 &&
+		len(value.MustNotKeep) == 0 &&
 		len(value.ResolvedReferenceAssets) == 0 &&
 		len(value.ContinuityWarnings) == 0
 }
@@ -1915,7 +1961,10 @@ func trimStringSlice(values []string) []string {
 }
 
 func isBatchStoryVisualContextEmpty(value domain.BatchStoryVisualContext) bool {
-	return len(value.CharacterIDs) == 0 && len(value.ReferenceAssetIDs) == 0 && strings.TrimSpace(value.PromptRecipeID) == ""
+	return len(value.CharacterIDs) == 0 &&
+		len(value.ReferenceAssetIDs) == 0 &&
+		strings.TrimSpace(value.PromptRecipeID) == "" &&
+		value.ReferenceDiagnostics == nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1925,6 +1974,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstNonEmptyStringSlice(values ...[]string) []string {
+	for _, value := range values {
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return nil
 }
 
 func latestTaskUpdatedAt(tasks []domain.BatchStorySummaryTask) time.Time {

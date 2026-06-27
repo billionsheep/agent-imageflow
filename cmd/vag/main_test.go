@@ -63,6 +63,22 @@ func TestBatchManifestPathBuildsExpectedQuery(t *testing.T) {
 	}
 }
 
+func TestBatchManifestPathBuildsFinalDeliveryViewQuery(t *testing.T) {
+	path := buildBatchManifestPath("prj_demo", "cmp_demo", batchManifestOptions{
+		SessionID:    "session_1",
+		SelectedOnly: true,
+		View:         domain.BatchManifestViewFinalDelivery,
+	})
+
+	parsed, err := url.Parse(path)
+	if err != nil {
+		t.Fatalf("parse path: %v", err)
+	}
+	if got := parsed.Query().Get("view"); got != domain.BatchManifestViewFinalDelivery {
+		t.Fatalf("query view = %q, want %q", got, domain.BatchManifestViewFinalDelivery)
+	}
+}
+
 func TestBenchmarkPercentileAndAverage(t *testing.T) {
 	values := []int64{100, 20, 300, 40}
 	if got := avgInt64(values); got != 115 {

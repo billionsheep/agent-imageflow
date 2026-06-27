@@ -91,8 +91,57 @@ describe('operator review helpers', () => {
     expect(text).not.toContain('/Users/moon')
   })
 
+  it('prefers asset_summary semantics when available', () => {
+    const summary = getAssetReviewSummary(assetFixture({
+      delivery_role: 'final_delivery',
+      asset_summary: {
+        story_id: 'pet_confession',
+        scene_id: 'scene_002',
+        panel_index: 2,
+        dialogue: '因为喜欢你',
+        caption_text: '因为喜欢你',
+        derived_from_asset_id: 'asset_base_001',
+        previous_panel_asset_id: 'asset_panel_001',
+        provider_reference_participation: 'resolved_input_files',
+        delivery_role: 'final_delivery',
+        asset_status: 'selected',
+      },
+    }))
+    const keys = summary.map((field) => field.key)
+    const text = summary.map((field) => `${field.label}:${field.value}`).join('\n')
+
+    expect(keys).toEqual(['prompt', 'story', 'scene', 'dialogue', 'delivery', 'source', 'created', 'target'])
+    expect(getAssetReviewTitle(assetFixture({
+      asset_summary: {
+        dialogue: '因为喜欢你',
+      },
+    }))).toBe('因为喜欢你')
+    expect(text).toContain('Story:pet_confession')
+    expect(text).toContain('Scene:scene_002')
+    expect(text).toContain('Dialogue:因为喜欢你')
+    expect(text).toContain('Delivery:final_delivery')
+  })
+
   it('keeps technical fields behind a scrubbed helper', () => {
     const fields = getAssetTechnicalFields(assetFixture({
+      delivery_role: 'final_delivery',
+      caption_lineage: {
+        derived_from_asset_id: 'asset_base_001',
+        derivation_type: 'caption_edit',
+        caption_text: '因为喜欢你',
+        bubble_anchor: 'top_right',
+      },
+      asset_summary: {
+        story_id: 'pet_confession',
+        scene_id: 'scene_002',
+        panel_index: 2,
+        dialogue: '因为喜欢你',
+        caption_text: '因为喜欢你',
+        derived_from_asset_id: 'asset_base_001',
+        previous_panel_asset_id: 'asset_panel_001',
+        provider_reference_participation: 'resolved_input_files',
+        delivery_role: 'final_delivery',
+      },
       metadata_json: {
         source: 'codex',
         session_id: 'pet_story_session_2026_06_22',
@@ -131,19 +180,36 @@ describe('operator review helpers', () => {
       'provider',
       'model',
       'hash',
+      'delivery',
       'source',
       'session',
       'batch',
       'story',
       'scene',
+      'panel',
+      'dialogue',
+      'caption',
+      'derived',
+      'previous',
+      'reference',
       'target',
+      'summary',
+      'caption_lineage',
       'metadata',
       'parameters',
     ])
     expect(text).toContain('Asset ID:asset_pet_scene_001')
     expect(text).toContain('Task ID:task_scene_001')
+    expect(text).toContain('Delivery Role:final_delivery')
+    expect(text).toContain('Panel:2')
+    expect(text).toContain('Dialogue:因为喜欢你')
+    expect(text).toContain('Caption:因为喜欢你')
+    expect(text).toContain('Derived From:asset_base_001')
+    expect(text).toContain('Previous Panel:asset_panel_001')
+    expect(text).toContain('Reference Participation:resolved_input_files')
     expect(text).toContain('"safe_note": "keep me"')
     expect(text).toContain('"seed": 42')
+    expect(text).toContain('"caption_text": "因为喜欢你"')
     expect(text).not.toContain('/Users/moon')
     expect(text).not.toContain('C:\\Users\\moon')
     expect(text).not.toContain('/app/storage')

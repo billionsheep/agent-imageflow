@@ -124,3 +124,12 @@ func TestLoadRuntimeBuildMetadata(t *testing.T) {
 		t.Fatalf("runtime build metadata was not loaded: %#v", cfg)
 	}
 }
+
+func TestLoadAgentSetupToken(t *testing.T) {
+	t.Setenv("AGENT_SETUP_TOKEN", "setup-secret")
+
+	cfg := Load()
+	if cfg.AgentSetupToken != "setup-secret" {
+		t.Fatalf("agent setup token was not loaded: %#v", cfg)
+	}
+}

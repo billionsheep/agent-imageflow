@@ -309,10 +309,27 @@ export interface AgentImageflowProjectVisualContext {
   updated_at?: string
 }
 
+export interface AgentImageflowReferenceDiagnostics {
+  primary_readiness: string
+  labels: string[]
+  summary: string
+  active_character_count: number
+  character_with_image_count: number
+  missing_character_image_count: number
+  missing_character_ids: string[]
+  active_reference_count: number
+  environment_reference_count: number
+  image_reference_count: number
+  negative_prompt_covers_species_drift: boolean
+  identity_signal_present: boolean
+  provider_reference_participation_risk: string
+}
+
 export interface AgentImageflowProjectVisualContextResponse {
   workspace_id: string
   project_id: string
   visual_context: AgentImageflowProjectVisualContext
+  reference_diagnostics?: AgentImageflowReferenceDiagnostics
 }
 
 export interface AgentImageflowAssetListQuery {
@@ -506,6 +523,10 @@ export interface AgentImageflowTaskResponse {
   status: string
   asset_ids: string[]
   assets?: AgentImageflowAssetListEntry[]
+  requested_count?: number
+  delivered_count?: number
+  partial_success_reason?: string
+  provider_error_summary?: string
   selection_mode?: string
   error_code?: string | null
   error_message?: string | null
@@ -563,6 +584,7 @@ export interface AgentImageflowBatchStorySummaryQuery {
 export interface AgentImageflowBatchManifestQuery extends AgentImageflowBatchStorySummaryQuery {
   selectedOnly?: boolean
   includeRejected?: boolean
+  view?: 'engineering' | 'final_delivery'
 }
 
 export interface AgentImageflowBatchProgressTask {
@@ -638,6 +660,10 @@ export interface AgentImageflowBatchStorySummarySceneCounts {
 export interface AgentImageflowBatchStorySummaryTask {
   task_id: string
   status: string
+  requested_count?: number
+  delivered_count?: number
+  partial_success_reason?: string
+  provider_error_summary?: string
   asset_count: number
   attempt_count: number
   retrying: boolean
@@ -659,13 +685,30 @@ export interface AgentImageflowBatchStorySummaryAsset {
   thumbnail_url: string
   metadata_url: string
   target_path?: string
+  delivery_role?: string
   created_at?: string
+  caption_lineage?: AgentImageflowCaptionLineageSummary
 }
 
 export interface AgentImageflowBatchStoryResolvedReferenceAsset {
   role?: string
   asset_id?: string
   source?: string
+}
+
+export interface AgentImageflowCaptionLineageSummary {
+  derived_from_asset_id?: string
+  derivation_type?: string
+  caption_text?: string
+  caption_style?: string
+  source_task_id?: string
+  source_scene_id?: string
+  speaker_character_id?: string
+  bubble_anchor?: string
+  tail_direction?: string
+  caption_intent?: string
+  auto_select_derivative?: boolean
+  avoid_covering_subjects?: boolean
 }
 
 export interface AgentImageflowBatchStoryContinuityWarning {
@@ -685,10 +728,17 @@ export interface AgentImageflowBatchStoryContinuitySummary {
   resulting_state?: string
   dialogue?: string
   dialogue_intent?: string
+  emotion_before?: string
+  emotion_after?: string
+  pose_change?: string
+  relationship_shift?: string
   previous_panel_asset_id?: string
   provider_reference_participation?: string
   must_keep_props?: string[]
   allowed_changes?: string[]
+  must_change?: string[]
+  must_not_keep?: string[]
+  state_transition_notes?: string
   resolved_reference_assets?: AgentImageflowBatchStoryResolvedReferenceAsset[]
   continuity_warnings?: AgentImageflowBatchStoryContinuityWarning[]
 }
@@ -736,6 +786,10 @@ export interface AgentImageflowBatchManifestTask {
   status?: string
   story_id?: string
   scene_id?: string
+  requested_count?: number
+  delivered_count?: number
+  partial_success_reason?: string
+  provider_error_summary?: string
   target_path?: string
   visual_context?: Record<string, unknown>
   [key: string]: unknown
@@ -751,8 +805,10 @@ export interface AgentImageflowBatchManifestAsset {
   thumbnail_url?: string
   metadata_url?: string
   target_path?: string
+  delivery_role?: string
   continuity?: AgentImageflowBatchStoryContinuitySummary
   visual_context?: Record<string, unknown>
+  caption_lineage?: AgentImageflowCaptionLineageSummary
   [key: string]: unknown
 }
 
@@ -774,6 +830,58 @@ export interface AgentImageflowBatchManifestStory {
   [key: string]: unknown
 }
 
+export interface AgentImageflowBatchFinalDeliveryCounts {
+  story_count: number
+  scene_count: number
+  scene_with_final_asset_count: number
+  scene_missing_final_asset_count: number
+  final_asset_count: number
+}
+
+export interface AgentImageflowBatchFinalDeliveryAsset {
+  asset_id: string
+  task_id?: string
+  story_id?: string
+  scene_id?: string
+  status?: string
+  delivery_role?: string
+  derived_from_asset_id?: string
+  derivation_type?: string
+  caption_lineage?: AgentImageflowCaptionLineageSummary
+  download_url?: string
+  thumbnail_url?: string
+  metadata_url?: string
+  target_path?: string
+  created_at?: string
+  [key: string]: unknown
+}
+
+export interface AgentImageflowBatchFinalDeliveryScene {
+  story_id: string
+  scene_id: string
+  target_path?: string
+  latest_task_id?: string
+  primary_selected_asset_id?: string
+  continuity?: AgentImageflowBatchStoryContinuitySummary
+  visual_context?: Record<string, unknown>
+  final_assets: AgentImageflowBatchFinalDeliveryAsset[]
+}
+
+export interface AgentImageflowBatchFinalDeliveryStory {
+  story_id: string
+  scene_count: number
+  final_asset_count: number
+  scenes: AgentImageflowBatchFinalDeliveryScene[]
+  final_assets: AgentImageflowBatchFinalDeliveryAsset[]
+}
+
+export interface AgentImageflowBatchFinalDeliveryManifest {
+  counts: AgentImageflowBatchFinalDeliveryCounts
+  stories: AgentImageflowBatchFinalDeliveryStory[]
+  scenes: AgentImageflowBatchFinalDeliveryScene[]
+  final_assets: AgentImageflowBatchFinalDeliveryAsset[]
+}
+
 export interface AgentImageflowBatchManifestResponse {
   generated_at: string
   project_id: string
@@ -782,6 +890,7 @@ export interface AgentImageflowBatchManifestResponse {
   batch_id?: string
   source?: string
   story_id?: string
+  manifest_view?: 'engineering' | 'final_delivery' | string
   selected_only: boolean
   include_rejected: boolean
   counts: AgentImageflowBatchManifestCounts
@@ -789,6 +898,7 @@ export interface AgentImageflowBatchManifestResponse {
   assets: AgentImageflowBatchManifestAsset[]
   scenes: AgentImageflowBatchManifestScene[]
   stories: AgentImageflowBatchManifestStory[]
+  final_delivery?: AgentImageflowBatchFinalDeliveryManifest
 }
 
 export interface AgentImageflowSceneRegenerationInput {
@@ -849,6 +959,9 @@ export interface AgentImageflowAssetResponse {
   prompt?: string
   parameters_json?: Record<string, unknown>
   metadata_json?: Record<string, unknown>
+  delivery_role?: string
+  caption_lineage?: AgentImageflowCaptionLineageSummary
+  asset_summary?: AgentImageflowAssetSummary
   delivery: {
     local_path: string
     download_url: string
@@ -856,6 +969,22 @@ export interface AgentImageflowAssetResponse {
     metadata_url: string
   }
   created_at?: string
+}
+
+export interface AgentImageflowAssetSummary {
+  story_id?: string
+  scene_id?: string
+  panel_index?: number
+  dialogue?: string
+  caption_text?: string
+  derived_from_asset_id?: string
+  derivation_type?: string
+  previous_panel_asset_id?: string
+  provider_reference_participation?: string
+  provider?: string
+  model?: string
+  asset_status?: string
+  delivery_role?: string
 }
 
 export class AgentImageflowApiError extends Error {
@@ -1127,6 +1256,7 @@ export function buildAgentImageflowBatchManifestUrl(
   if (query?.limit && Number.isFinite(query.limit)) params.set('limit', String(Math.max(1, Math.trunc(query.limit))))
   if (typeof query?.selectedOnly === 'boolean') params.set('selected_only', String(query.selectedOnly))
   if (typeof query?.includeRejected === 'boolean') params.set('include_rejected', String(query.includeRejected))
+  if (query?.view && query.view !== 'engineering') params.set('view', query.view)
   const text = params.toString()
   return text ? `${url}?${text}` : url
 }
@@ -1220,6 +1350,12 @@ export function normalizeAgentImageflowAssetResponse(response: AgentImageflowAss
   return {
     ...response,
     status: normalizeAgentImageflowAssetStatus(response.status),
+    asset_summary: response.asset_summary ? {
+      ...response.asset_summary,
+      asset_status: response.asset_summary.asset_status
+        ? normalizeAgentImageflowAssetStatus(response.asset_summary.asset_status)
+        : response.asset_summary.asset_status,
+    } : response.asset_summary,
   }
 }
 
@@ -1243,6 +1379,10 @@ export function normalizeAgentImageflowBatchStorySummaryResponse(response: Agent
 }
 
 export function normalizeAgentImageflowBatchManifestResponse(response: AgentImageflowBatchManifestResponse): AgentImageflowBatchManifestResponse {
+  const normalizeFinalDeliveryAsset = (asset: AgentImageflowBatchFinalDeliveryAsset): AgentImageflowBatchFinalDeliveryAsset => ({
+    ...asset,
+    status: asset.status ? normalizeAgentImageflowAssetStatus(asset.status) : asset.status,
+  })
   return {
     ...response,
     assets: response.assets?.map((asset) => ({
@@ -1258,6 +1398,22 @@ export function normalizeAgentImageflowBatchManifestResponse(response: AgentImag
     })) ?? [],
     tasks: response.tasks ?? [],
     stories: response.stories ?? [],
+    final_delivery: response.final_delivery ? {
+      ...response.final_delivery,
+      final_assets: response.final_delivery.final_assets?.map(normalizeFinalDeliveryAsset) ?? [],
+      scenes: response.final_delivery.scenes?.map((scene) => ({
+        ...scene,
+        final_assets: scene.final_assets?.map(normalizeFinalDeliveryAsset) ?? [],
+      })) ?? [],
+      stories: response.final_delivery.stories?.map((story) => ({
+        ...story,
+        scenes: story.scenes?.map((scene) => ({
+          ...scene,
+          final_assets: scene.final_assets?.map(normalizeFinalDeliveryAsset) ?? [],
+        })) ?? [],
+        final_assets: story.final_assets?.map(normalizeFinalDeliveryAsset) ?? [],
+      })) ?? [],
+    } : response.final_delivery,
   }
 }
 

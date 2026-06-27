@@ -57,6 +57,7 @@ func main() {
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.New(service, httpapi.Options{
+			AgentSetupToken:    cfg.AgentSetupToken,
 			BasicAuthUsername:  cfg.BasicAuthUsername,
 			BasicAuthPassword:  cfg.BasicAuthPassword,
 			AdminUsername:      cfg.AdminUsername,

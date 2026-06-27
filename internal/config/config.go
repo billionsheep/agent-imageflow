@@ -19,6 +19,7 @@ type Config struct {
 	DefaultProject                 string
 	DefaultCampaign                string
 	DefaultProvider                string
+	AgentSetupToken                string
 	BasicAuthUsername              string
 	BasicAuthPassword              string
 	AdminUsername                  string
@@ -68,6 +69,7 @@ func Load() Config {
 		DefaultProject:                 env("DEFAULT_PROJECT_ID", "prj_xhs_anime"),
 		DefaultCampaign:                env("DEFAULT_CAMPAIGN_ID", "cmp_7day_cover"),
 		DefaultProvider:                env("DEFAULT_PROVIDER", "mock"),
+		AgentSetupToken:                env("AGENT_SETUP_TOKEN", ""),
 		BasicAuthUsername:              env("BASIC_AUTH_USERNAME", ""),
 		BasicAuthPassword:              env("BASIC_AUTH_PASSWORD", ""),
 		AdminUsername:                  env("ADMIN_USERNAME", env("BASIC_AUTH_USERNAME", "")),

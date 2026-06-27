@@ -101,7 +101,7 @@ jobs:
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
           build-args: |
-            AGENT_IMAGEFLOW_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
+            AGENT_IMAGEFLOW_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '0.2.0' }}
             AGENT_IMAGEFLOW_COMMIT=${{ github.sha }}
             AGENT_IMAGEFLOW_BUILD_TIME=${{ env.BUILD_TIME }}
             AGENT_IMAGEFLOW_IMAGE_TAG=${{ github.ref_type == 'tag' && github.ref_name || format('sha-{0}', github.sha) }}
@@ -115,7 +115,7 @@ jobs:
           tags: ${{ steps.meta-web.outputs.tags }}
           labels: ${{ steps.meta-web.outputs.labels }}
           build-args: |
-            AGENT_IMAGEFLOW_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
+            AGENT_IMAGEFLOW_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '0.2.0' }}
             AGENT_IMAGEFLOW_COMMIT=${{ github.sha }}
             AGENT_IMAGEFLOW_BUILD_TIME=${{ env.BUILD_TIME }}
             AGENT_IMAGEFLOW_IMAGE_TAG=${{ github.ref_type == 'tag' && github.ref_name || format('sha-{0}', github.sha) }}

@@ -70,18 +70,25 @@ func TestPrepareStoryContextV1ForTaskPopulatesResolvedReferencesAndPanelMetadata
 				Dialogue:      "才没有等你",
 			},
 			{
-				PanelIndex:     2,
-				SceneID:        "scene_002",
-				NarrativeRole:  "arrival",
-				PreviousState:  "小白坐在沙发左侧。",
-				TriggerEvent:   "鸡毛端着牛奶出现。",
-				VisibleAction:  "鸡毛从右侧出现。",
-				ResultingState: "两只小狗进入同一空间。",
-				Dialogue:       "牛奶来啦",
-				DialogueIntent: "温柔回应小白。",
-				MustKeepProps:  []string{"粉色沙发", "热牛奶"},
-				AllowedChanges: []string{"鸡毛进入画面"},
-				TargetPath:     "stories/pet_story/scene_002.png",
+				PanelIndex:           2,
+				SceneID:              "scene_002",
+				NarrativeRole:        "arrival",
+				PreviousState:        "小白坐在沙发左侧。",
+				TriggerEvent:         "鸡毛端着牛奶出现。",
+				VisibleAction:        "鸡毛从右侧出现。",
+				ResultingState:       "两只小狗进入同一空间。",
+				Dialogue:             "牛奶来啦",
+				DialogueIntent:       "温柔回应小白。",
+				EmotionBefore:        "嘴硬但期待",
+				EmotionAfter:         "安心并开始靠近",
+				PoseChange:           "从独坐抱书变成抬头看向鸡毛",
+				RelationshipShift:    "从等待变成正式同框互动",
+				MustKeepProps:        []string{"粉色沙发", "热牛奶"},
+				AllowedChanges:       []string{"鸡毛进入画面"},
+				MustChange:           []string{"鸡毛必须进入画面", "小白视线转向鸡毛"},
+				MustNotKeep:          []string{"不能继续只有小白单独在画面里"},
+				StateTransitionNotes: "重点是既保留同一客厅和沙发位置，又明确让关系往靠近推进。",
+				TargetPath:           "stories/pet_story/scene_002.png",
 			},
 		},
 		ReferenceBindings: domain.StoryReferenceBindings{
@@ -169,6 +176,11 @@ func TestPrepareStoryContextV1ForTaskPopulatesResolvedReferencesAndPanelMetadata
 		"previous_panel_asset_id": "asset_panel_001_selected",
 		"dialogue":                "牛奶来啦",
 		"dialogue_intent":         "温柔回应小白。",
+		"emotion_before":          "嘴硬但期待",
+		"emotion_after":           "安心并开始靠近",
+		"pose_change":             "从独坐抱书变成抬头看向鸡毛",
+		"relationship_shift":      "从等待变成正式同框互动",
+		"state_transition_notes":  "重点是既保留同一客厅和沙发位置，又明确让关系往靠近推进。",
 		"target_path":             "stories/pet_story/scene_002.png",
 	} {
 		if got := strings.TrimSpace(updatedMetadata[key].(string)); got != want {
@@ -177,6 +189,12 @@ func TestPrepareStoryContextV1ForTaskPopulatesResolvedReferencesAndPanelMetadata
 	}
 	if got := strings.TrimSpace(updatedMetadata["provider_reference_participation"].(string)); got != "resolved_input_files" {
 		t.Fatalf("provider_reference_participation = %q, want resolved_input_files", got)
+	}
+	if got := updatedMetadata["must_change"].([]any); len(got) != 2 {
+		t.Fatalf("must_change length = %d, want 2; metadata=%#v", len(got), updatedMetadata)
+	}
+	if got := updatedMetadata["must_not_keep"].([]any); len(got) != 1 {
+		t.Fatalf("must_not_keep length = %d, want 1; metadata=%#v", len(got), updatedMetadata)
 	}
 }
 
@@ -238,5 +256,38 @@ func TestPrepareStoryContextV1ForTaskRejectsNonSelectedPreviousPanelAsset(t *tes
 	}
 	if !strings.Contains(err.Error(), "previous panel selected asset") && !strings.Contains(err.Error(), "manual_optional") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAppendStoryPanelTransitionPromptAddsProgressionHints(t *testing.T) {
+	story := &domain.StoryContextV1{
+		PanelPlan: []domain.StoryPanelPlanEntry{{
+			PanelIndex:           2,
+			SceneID:              "scene_002",
+			EmotionBefore:        "嘴硬但期待",
+			EmotionAfter:         "安心并开始靠近",
+			PoseChange:           "从独坐抱书变成抬头看向鸡毛",
+			RelationshipShift:    "从等待变成正式同框互动",
+			MustChange:           []string{"鸡毛必须进入画面", "小白视线转向鸡毛"},
+			MustNotKeep:          []string{"不能继续只有小白单独在画面里"},
+			StateTransitionNotes: "必须看得出上一格导致这一格。",
+		}},
+	}
+	metadata := json.RawMessage(`{"scene_id":"scene_002","panel_index":2}`)
+
+	prompt := appendStoryPanelTransitionPrompt("Keep the same pink living room.", story, metadata)
+	for _, expected := range []string{
+		"State transition requirements:",
+		"Emotion before: 嘴硬但期待.",
+		"Emotion after: 安心并开始靠近.",
+		"Pose change: 从独坐抱书变成抬头看向鸡毛.",
+		"Relationship shift: 从等待变成正式同框互动.",
+		"Must change: 鸡毛必须进入画面; 小白视线转向鸡毛.",
+		"Must not keep: 不能继续只有小白单独在画面里.",
+		"State transition notes: 必须看得出上一格导致这一格。.",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("expected prompt to contain %q, got %q", expected, prompt)
+		}
 	}
 }

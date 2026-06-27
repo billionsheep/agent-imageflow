@@ -48,6 +48,7 @@ func main() {
 		WorkspaceID: cfg.DefaultWorkspace,
 		ProjectID:   cfg.DefaultProject,
 		CampaignID:  cfg.DefaultCampaign,
+		Version:     cfg.BuildVersion,
 	})
 	if err := server.Serve(ctx, os.Stdin, os.Stdout); err != nil && ctx.Err() == nil {
 		log.Fatalf("serve mcp: %v", err)

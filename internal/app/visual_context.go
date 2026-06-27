@@ -10,7 +10,10 @@ import (
 	"github.com/billionsheep/agent-imageflow/internal/domain"
 )
 
-const visualContextSnapshotKey = "visual_context_snapshot"
+const (
+	visualContextSnapshotKey           = "visual_context_snapshot"
+	projectVisualContextDiagnosticsKey = "project_visual_context_diagnostics"
+)
 
 type assetScopeResolver func(context.Context, string) (domain.Scope, error)
 
@@ -29,9 +32,10 @@ func (s *Service) GetProjectVisualContext(ctx context.Context, workspaceID, proj
 		return domain.ProjectVisualContextResponse{}, err
 	}
 	return domain.ProjectVisualContextResponse{
-		WorkspaceID:   workspaceID,
-		ProjectID:     projectID,
-		VisualContext: normalized,
+		WorkspaceID:          workspaceID,
+		ProjectID:            projectID,
+		VisualContext:        normalized,
+		ReferenceDiagnostics: buildProjectVisualContextReferenceDiagnostics(normalized),
 	}, nil
 }
 
@@ -53,9 +57,10 @@ func (s *Service) UpdateProjectVisualContext(ctx context.Context, workspaceID, p
 		return domain.ProjectVisualContextResponse{}, err
 	}
 	return domain.ProjectVisualContextResponse{
-		WorkspaceID:   workspaceID,
-		ProjectID:     projectID,
-		VisualContext: saved,
+		WorkspaceID:          workspaceID,
+		ProjectID:            projectID,
+		VisualContext:        saved,
+		ReferenceDiagnostics: buildProjectVisualContextReferenceDiagnostics(saved),
 	}, nil
 }
 
@@ -263,6 +268,196 @@ func normalizeStringList(items []string) []string {
 	return normalized
 }
 
+type visualContextReferenceDiagnosticInput struct {
+	Characters        []domain.CharacterProfile
+	References        []domain.ProjectReferenceBinding
+	ReferenceAssetIDs []string
+	PromptRecipe      *domain.PromptRecipe
+}
+
+func buildProjectVisualContextReferenceDiagnostics(visualContext domain.ProjectVisualContext) domain.ProjectVisualContextReferenceDiagnostics {
+	activeCharacters := make([]domain.CharacterProfile, 0, len(visualContext.Characters))
+	for _, character := range visualContext.Characters {
+		if strings.TrimSpace(character.Status) == "archived" {
+			continue
+		}
+		activeCharacters = append(activeCharacters, character)
+	}
+	activeReferences := make([]domain.ProjectReferenceBinding, 0, len(visualContext.References))
+	for _, reference := range visualContext.References {
+		if strings.TrimSpace(reference.Status) == "archived" {
+			continue
+		}
+		activeReferences = append(activeReferences, reference)
+	}
+	var promptRecipe *domain.PromptRecipe
+	for _, recipe := range visualContext.PromptRecipes {
+		if strings.TrimSpace(recipe.Status) == "archived" {
+			continue
+		}
+		recipe := recipe
+		promptRecipe = &recipe
+		break
+	}
+	return buildVisualContextReferenceDiagnostics(visualContextReferenceDiagnosticInput{
+		Characters:        activeCharacters,
+		References:        activeReferences,
+		ReferenceAssetIDs: collectProjectVisualContextAssetIDs(domain.ProjectVisualContext{Characters: activeCharacters, References: activeReferences}),
+		PromptRecipe:      promptRecipe,
+	})
+}
+
+func buildVisualContextSnapshotReferenceDiagnostics(snapshot domain.VisualContextSnapshot) domain.ProjectVisualContextReferenceDiagnostics {
+	return buildVisualContextReferenceDiagnostics(visualContextReferenceDiagnosticInput{
+		Characters:        snapshot.Characters,
+		References:        snapshot.References,
+		ReferenceAssetIDs: snapshot.ReferenceAssetIDs,
+		PromptRecipe:      snapshot.PromptRecipe,
+	})
+}
+
+func buildVisualContextReferenceDiagnostics(input visualContextReferenceDiagnosticInput) domain.ProjectVisualContextReferenceDiagnostics {
+	activeCharacters := make([]domain.CharacterProfile, 0, len(input.Characters))
+	missingCharacterIDs := make([]string, 0, len(input.Characters))
+	for _, character := range input.Characters {
+		if strings.TrimSpace(character.Status) == "archived" {
+			continue
+		}
+		activeCharacters = append(activeCharacters, character)
+		if strings.TrimSpace(character.PrimaryAssetID) == "" && len(normalizeStringList(character.ReferenceAssetIDs)) == 0 {
+			missingCharacterIDs = append(missingCharacterIDs, strings.TrimSpace(character.ID))
+		}
+	}
+	activeReferences := make([]domain.ProjectReferenceBinding, 0, len(input.References))
+	environmentReferenceCount := 0
+	for _, reference := range input.References {
+		if strings.TrimSpace(reference.Status) == "archived" {
+			continue
+		}
+		activeReferences = append(activeReferences, reference)
+		if strings.TrimSpace(reference.Purpose) == "scene" {
+			environmentReferenceCount++
+		}
+	}
+	imageReferenceCount := len(normalizeStringList(input.ReferenceAssetIDs))
+	characterWithImageCount := len(activeCharacters) - len(missingCharacterIDs)
+	identitySignalPresent := hasCharacterIdentitySignal(activeCharacters)
+	negativePromptCoversSpeciesDrift := hasSpeciesDriftCoverage("")
+	if input.PromptRecipe != nil {
+		negativePromptCoversSpeciesDrift = hasSpeciesDriftCoverage(input.PromptRecipe.NegativePrompt)
+	}
+
+	primaryReadiness := "text_constrained"
+	if imageReferenceCount > 0 || characterWithImageCount > 0 {
+		primaryReadiness = "image_backed"
+	}
+	labels := []string{primaryReadiness}
+	if environmentReferenceCount == 0 {
+		labels = append(labels, "missing_environment_reference")
+	}
+	if !identitySignalPresent || !negativePromptCoversSpeciesDrift {
+		labels = append(labels, "weak_species_lock")
+	}
+
+	risk := "descriptor_only_risk"
+	if imageReferenceCount > 0 {
+		risk = "likely_resolved_input_files"
+	}
+	labels = normalizeStringList(labels)
+	return domain.ProjectVisualContextReferenceDiagnostics{
+		PrimaryReadiness:                   primaryReadiness,
+		Labels:                             labels,
+		Summary:                            strings.Join(labels, ", "),
+		ActiveCharacterCount:               len(activeCharacters),
+		CharacterWithImageCount:            maxInt(characterWithImageCount, 0),
+		MissingCharacterImageCount:         len(missingCharacterIDs),
+		MissingCharacterIDs:                normalizeStringList(missingCharacterIDs),
+		ActiveReferenceCount:               len(activeReferences),
+		EnvironmentReferenceCount:          environmentReferenceCount,
+		ImageReferenceCount:                imageReferenceCount,
+		NegativePromptCoversSpeciesDrift:   negativePromptCoversSpeciesDrift,
+		IdentitySignalPresent:              identitySignalPresent,
+		ProviderReferenceParticipationRisk: risk,
+	}
+}
+
+func hasCharacterIdentitySignal(characters []domain.CharacterProfile) bool {
+	for _, character := range characters {
+		if textHasIdentitySignal(
+			character.Role,
+			character.Appearance,
+			character.AppearanceLockNotes,
+			strings.Join(character.Forbidden, " "),
+		) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSpeciesDriftCoverage(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	for _, token := range []string{
+		"not bear",
+		"not cat",
+		"bear-like",
+		"cat mouth",
+		"wrong species",
+		"species drift",
+		"deformed animals",
+		"不是熊",
+		"不是猫",
+		"像熊",
+		"像猫",
+		"熊",
+		"猫",
+	} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func textHasIdentitySignal(texts ...string) bool {
+	joined := strings.ToLower(strings.TrimSpace(strings.Join(texts, " ")))
+	if joined == "" {
+		return false
+	}
+	for _, token := range []string{
+		"dog",
+		"puppy",
+		"corgi",
+		"cat",
+		"kitten",
+		"bear",
+		"bunny",
+		"rabbit",
+		"犬",
+		"小狗",
+		"狗狗",
+		"猫",
+		"小猫",
+		"熊",
+		"兔",
+	} {
+		if strings.Contains(joined, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func maxInt(value, minimum int) int {
+	if value < minimum {
+		return minimum
+	}
+	return value
+}
+
 func validateProjectVisualContextAssetScopes(ctx context.Context, scope domain.Scope, visualContext domain.ProjectVisualContext, resolve assetScopeResolver) error {
 	for _, assetID := range collectProjectVisualContextAssetIDs(visualContext) {
 		assetScope, err := resolve(ctx, assetID)
@@ -377,11 +572,14 @@ func applyProjectVisualContext(req domain.CreateTaskRequest, visualContext domai
 		References:        selectedReferences,
 		PromptRecipe:      recipe,
 	}
+	diagnostics := buildVisualContextSnapshotReferenceDiagnostics(*snapshot)
+	snapshot.ReferenceDiagnostics = &diagnostics
 	metadata, err := metadataMap(req.MetadataJSON)
 	if err != nil {
 		return req, nil, err
 	}
 	metadata[visualContextSnapshotKey] = snapshot
+	metadata[projectVisualContextDiagnosticsKey] = diagnostics
 	raw, err := json.Marshal(metadata)
 	if err != nil {
 		return req, nil, err

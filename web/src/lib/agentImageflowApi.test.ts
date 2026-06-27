@@ -192,6 +192,15 @@ describe('agentImageflowApi', () => {
       selectedOnly: false,
       includeRejected: true,
     })).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-manifest?session_id=session_1&batch_id=batch_1&story_id=story_1&source=codex&status=completed&include_setup=true&limit=100&selected_only=false&include_rejected=true')
+    expect(buildAgentImageflowBatchManifestUrl('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      sessionId: 'session_1',
+      selectedOnly: true,
+      includeRejected: false,
+      view: 'final_delivery',
+    } as unknown as Parameters<typeof buildAgentImageflowBatchManifestUrl>[2])).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-manifest?session_id=session_1&selected_only=true&include_rejected=false&view=final_delivery')
     expect(buildAgentImageflowBatchStorySummaryUrl('http://localhost:8081/', {
       projectId: 'prj_xhs_anime',
       campaignId: 'cmp_7day_cover',
@@ -294,6 +303,13 @@ describe('agentImageflowApi', () => {
           panel_index: 1,
           narrative_role: 'setup',
           dialogue: '才没有等你',
+          emotion_before: '嘴硬但期待',
+          emotion_after: '偷偷开心',
+          pose_change: '从抱书防御变成稍微转头看门口',
+          relationship_shift: '从独自等待变成准备迎接鸡毛',
+          must_change: ['眼神从书上转向门口'],
+          must_not_keep: ['不能把门口空间完全挡住'],
+          state_transition_notes: '第一格先建立等待感，不要过早同框。',
           previous_panel_asset_id: '',
           provider_reference_participation: 'resolved_input_files',
           resolved_reference_assets: [
@@ -314,6 +330,8 @@ describe('agentImageflowApi', () => {
 
     expect(response.scenes[0].assets[0].status).toBe('selected')
     expect(response.scenes[0].continuity?.panel_index).toBe(1)
+    expect(response.scenes[0].continuity?.emotion_before).toBe('嘴硬但期待')
+    expect(response.scenes[0].continuity?.must_change?.[0]).toBe('眼神从书上转向门口')
     expect(response.scenes[0].continuity?.resolved_reference_assets?.[0]?.asset_id).toBe('asset_milo_primary')
   })
 
@@ -336,14 +354,21 @@ describe('agentImageflowApi', () => {
   })
 
   it('normalizes task and asset response statuses', () => {
-    expect(normalizeAgentImageflowTaskResponse({
+    const taskResponse = normalizeAgentImageflowTaskResponse({
       task_id: 'task_1',
       status: 'completed',
       asset_ids: ['asset_1'],
+      requested_count: 2,
+      delivered_count: 1,
+      partial_success_reason: 'delivered_count_below_requested',
+      provider_error_summary: 'provider returned only one candidate',
       assets: [{ asset_id: 'asset_1', status: 'approved', thumbnail_url: '/thumb', metadata_url: '/meta' }],
-    }).assets?.[0]?.status).toBe('selected')
+    })
+    expect(taskResponse.assets?.[0]?.status).toBe('selected')
+    expect(taskResponse.delivered_count).toBe(1)
+    expect(taskResponse.partial_success_reason).toBe('delivered_count_below_requested')
 
-    expect(normalizeAgentImageflowAssetResponse({
+    const assetResponse = normalizeAgentImageflowAssetResponse({
       asset_id: 'asset_1',
       workspace_id: 'ws_default',
       project_id: 'prj_xhs_anime',
@@ -357,6 +382,15 @@ describe('agentImageflowApi', () => {
         source: 'mcp',
         session_id: 'session_1',
       },
+      delivery_role: 'final_delivery',
+      asset_summary: {
+        story_id: 'story_1',
+        scene_id: 'scene_001',
+        panel_index: 1,
+        dialogue: '因为喜欢你',
+        asset_status: 'approved',
+        delivery_role: 'final_delivery',
+      },
       delivery: {
         local_path: '/tmp/a.png',
         download_url: '/original',
@@ -364,7 +398,10 @@ describe('agentImageflowApi', () => {
         metadata_url: '/metadata',
       },
       created_at: '2026-06-19T00:00:00Z',
-    }).status).toBe('generated')
+    })
+    expect(assetResponse.status).toBe('generated')
+    expect(assetResponse.asset_summary?.asset_status).toBe('selected')
+    expect(assetResponse.asset_summary?.delivery_role).toBe('final_delivery')
 
     expect(normalizeAgentImageflowAssetListResponse([{
       asset_id: 'asset_2',
@@ -377,7 +414,7 @@ describe('agentImageflowApi', () => {
       },
     }])[0].status).toBe('selected')
 
-    expect(normalizeAgentImageflowBatchStorySummaryResponse({
+    const summaryResponse = normalizeAgentImageflowBatchStorySummaryResponse({
       generated_at: '2026-06-22T00:00:00Z',
       project_id: 'prj_xhs_anime',
       campaign_id: 'cmp_7day_cover',
@@ -414,7 +451,17 @@ describe('agentImageflowApi', () => {
           rejected_asset_count: 0,
           attempt_count: 1,
         },
-        tasks: [],
+        tasks: [{
+          task_id: 'task_1',
+          status: 'partially_completed',
+          requested_count: 2,
+          delivered_count: 1,
+          partial_success_reason: 'delivered_count_below_requested',
+          provider_error_summary: 'provider returned only one candidate',
+          asset_count: 1,
+          attempt_count: 1,
+          retrying: false,
+        }],
         assets: [{
           asset_id: 'asset_3',
           task_id: 'task_1',
@@ -424,7 +471,11 @@ describe('agentImageflowApi', () => {
           metadata_url: '/metadata',
         }],
       }],
-    }).scenes[0].assets[0].status).toBe('selected')
+    })
+    expect(summaryResponse.scenes[0].assets[0].status).toBe('selected')
+    expect(summaryResponse.scenes[0].tasks[0].requested_count).toBe(2)
+    expect(summaryResponse.scenes[0].tasks[0].delivered_count).toBe(1)
+    expect(summaryResponse.scenes[0].tasks[0].provider_error_summary).toBe('provider returned only one candidate')
   })
 
   it('posts a scene regeneration payload to the project campaign action URL', async () => {
@@ -507,7 +558,19 @@ describe('agentImageflowApi', () => {
         thumbnail_url: '/api/assets/asset_1/thumbnail',
         metadata_url: '/api/assets/asset_1/metadata',
         target_path: 'stories/story_1/scene_001.png',
+        delivery_role: 'final_delivery',
         created_at: '2026-06-22T00:00:00Z',
+        caption_lineage: {
+          derived_from_asset_id: 'asset_original',
+          derivation_type: 'caption_edit',
+          caption_text: '因为喜欢你',
+          speaker_character_id: 'dog_xiaobai',
+          bubble_anchor: 'top_right',
+          tail_direction: 'toward_left',
+          caption_intent: 'confession',
+          auto_select_derivative: true,
+          avoid_covering_subjects: true,
+        },
         visual_context: {
           character_ids: ['dog_mochi'],
         },
@@ -529,6 +592,10 @@ describe('agentImageflowApi', () => {
     })
 
     expect(response.assets[0].status).toBe('selected')
+    expect(response.assets[0].delivery_role).toBe('final_delivery')
+    expect(response.assets[0].caption_lineage?.speaker_character_id).toBe('dog_xiaobai')
+    expect(response.assets[0].caption_lineage?.bubble_anchor).toBe('top_right')
+    expect(response.assets[0].caption_lineage?.auto_select_derivative).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-manifest?session_id=session_1&selected_only=true&include_rejected=false')
@@ -539,6 +606,132 @@ describe('agentImageflowApi', () => {
         'X-API-Key': 'project-secret',
       },
     })
+  })
+
+  it('normalizes final-delivery manifest blocks and requests the final_delivery view', async () => {
+    const manifest = {
+      generated_at: '2026-06-27T00:00:00Z',
+      project_id: 'prj_xhs_anime',
+      campaign_id: 'cmp_7day_cover',
+      session_id: 'session_1',
+      batch_id: 'batch_1',
+      manifest_view: 'final_delivery',
+      selected_only: true,
+      include_rejected: false,
+      counts: {},
+      tasks: [],
+      assets: [],
+      scenes: [],
+      stories: [],
+      final_delivery: {
+        counts: {
+          story_count: 1,
+          scene_count: 1,
+          scene_with_final_asset_count: 1,
+          scene_missing_final_asset_count: 0,
+          final_asset_count: 1,
+        },
+        stories: [{
+          story_id: 'story_1',
+          scene_count: 1,
+          final_asset_count: 1,
+          scenes: [{
+            story_id: 'story_1',
+            scene_id: 'scene_001',
+            target_path: 'stories/story_1/scene_001-caption.png',
+            latest_task_id: 'task_1',
+            primary_selected_asset_id: 'asset_final',
+            final_assets: [{
+              asset_id: 'asset_final',
+              task_id: 'task_1',
+              story_id: 'story_1',
+              scene_id: 'scene_001',
+              status: 'approved',
+              delivery_role: 'final_delivery',
+              derived_from_asset_id: 'asset_base',
+              derivation_type: 'caption_edit',
+              download_url: '/api/assets/asset_final/original',
+              thumbnail_url: '/api/assets/asset_final/thumbnail',
+              metadata_url: '/api/assets/asset_final/metadata',
+              target_path: 'stories/story_1/scene_001-caption.png',
+              created_at: '2026-06-27T00:00:00Z',
+            }],
+          }],
+          final_assets: [{
+            asset_id: 'asset_final',
+            task_id: 'task_1',
+            story_id: 'story_1',
+            scene_id: 'scene_001',
+            status: 'approved',
+            delivery_role: 'final_delivery',
+            derived_from_asset_id: 'asset_base',
+            derivation_type: 'caption_edit',
+            download_url: '/api/assets/asset_final/original',
+            thumbnail_url: '/api/assets/asset_final/thumbnail',
+            metadata_url: '/api/assets/asset_final/metadata',
+            target_path: 'stories/story_1/scene_001-caption.png',
+            created_at: '2026-06-27T00:00:00Z',
+          }],
+        }],
+        scenes: [{
+          story_id: 'story_1',
+          scene_id: 'scene_001',
+          target_path: 'stories/story_1/scene_001-caption.png',
+          latest_task_id: 'task_1',
+          primary_selected_asset_id: 'asset_final',
+          final_assets: [{
+            asset_id: 'asset_final',
+            task_id: 'task_1',
+            story_id: 'story_1',
+            scene_id: 'scene_001',
+            status: 'approved',
+            delivery_role: 'final_delivery',
+            derived_from_asset_id: 'asset_base',
+            derivation_type: 'caption_edit',
+            download_url: '/api/assets/asset_final/original',
+            thumbnail_url: '/api/assets/asset_final/thumbnail',
+            metadata_url: '/api/assets/asset_final/metadata',
+            target_path: 'stories/story_1/scene_001-caption.png',
+            created_at: '2026-06-27T00:00:00Z',
+          }],
+        }],
+        final_assets: [{
+          asset_id: 'asset_final',
+          task_id: 'task_1',
+          story_id: 'story_1',
+          scene_id: 'scene_001',
+          status: 'approved',
+          delivery_role: 'final_delivery',
+          derived_from_asset_id: 'asset_base',
+          derivation_type: 'caption_edit',
+          download_url: '/api/assets/asset_final/original',
+          thumbnail_url: '/api/assets/asset_final/thumbnail',
+          metadata_url: '/api/assets/asset_final/metadata',
+          target_path: 'stories/story_1/scene_001-caption.png',
+          created_at: '2026-06-27T00:00:00Z',
+        }],
+      },
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(manifest), { status: 200 }))
+
+    const response = await getAgentImageflowBatchManifest('http://localhost:8081/', {
+      projectId: 'prj_xhs_anime',
+      campaignId: 'cmp_7day_cover',
+    }, {
+      apiKey: 'project-secret',
+    }, {
+      sessionId: 'session_1',
+      selectedOnly: true,
+      includeRejected: false,
+      view: 'final_delivery',
+    } as unknown as Parameters<typeof getAgentImageflowBatchManifest>[3])
+
+    expect(response.manifest_view).toBe('final_delivery')
+    expect(response.final_delivery?.final_assets[0].status).toBe('selected')
+    expect(response.final_delivery?.scenes[0].final_assets[0].status).toBe('selected')
+    expect(response.final_delivery?.stories[0].final_assets[0].status).toBe('selected')
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8081/api/projects/prj_xhs_anime/campaigns/cmp_7day_cover/batch-manifest?session_id=session_1&selected_only=true&include_rejected=false&view=final_delivery')
   })
 
   it('posts cleanup preview and execute payloads to the admin-only cleanup endpoints', async () => {

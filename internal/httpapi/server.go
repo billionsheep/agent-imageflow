@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 )
 
 type Options struct {
+	AgentSetupToken              string
 	BasicAuthUsername            string
 	BasicAuthPassword            string
 	AdminUsername                string
@@ -248,6 +250,17 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, parts 
 		writeUnauthorized(w, "admin_session_required", "admin session is required", false)
 		return false, preScope, actor, nil
 	}
+	if routeAllowsAgentSetupToken(parts, r.Method) {
+		scope, _, err := s.resolveRequestAuthScope(r, parts)
+		if err != nil {
+			return false, requestAuthScope{}, actor, err
+		}
+		if s.authorizeAgentSetupToken(r) {
+			actor.AuthMode = "agent_setup_token"
+			actor.Actor = "agent_setup_token"
+			return true, scope, actor, nil
+		}
+	}
 	if !s.authorizeBasicAuth(w, r, shouldSendBasicChallenge(parts, r.Method)) {
 		return false, requestAuthScope{}, actor, nil
 	}
@@ -343,11 +356,39 @@ func (s *Server) authorizeBasicAuth(w http.ResponseWriter, r *http.Request, basi
 	return true
 }
 
+func (s *Server) authorizeAgentSetupToken(r *http.Request) bool {
+	expected := strings.TrimSpace(s.options.AgentSetupToken)
+	if expected == "" {
+		return false
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-Agent-Setup-Token"))
+	if provided == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
 func shouldSendBasicChallenge(parts []string, method string) bool {
 	if isAssetDeliveryRoute(parts, method) {
 		return false
 	}
 	return true
+}
+
+func routeAllowsAgentSetupToken(parts []string, method string) bool {
+	isRead := method == http.MethodGet || method == http.MethodHead
+	switch {
+	case (isRead || method == http.MethodPost) && match(parts, "api", "workspaces"):
+		return true
+	case (isRead || method == http.MethodPost) && match(parts, "api", "workspaces", "*", "projects"):
+		return true
+	case (isRead || method == http.MethodPost) && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns"):
+		return true
+	case (isRead || method == http.MethodPost) && match(parts, "api", "workspaces", "*", "projects", "*", "visual-context"):
+		return true
+	default:
+		return false
+	}
 }
 
 func routeRequiresAdminSession(parts []string, method string) bool {
@@ -1272,10 +1313,15 @@ func parseBatchManifestQuery(r *http.Request, projectID, campaignID string) (dom
 		}
 		includeRejected = parsed
 	}
+	view, ok := domain.NormalizeBatchManifestView(values.Get("view"))
+	if !ok {
+		return domain.BatchManifestQuery{}, fmt.Errorf("unsupported batch manifest view %q", strings.TrimSpace(values.Get("view")))
+	}
 	return domain.BatchManifestQuery{
 		BatchStorySummaryQuery: summaryQuery,
 		SelectedOnly:           selectedOnly,
 		IncludeRejected:        includeRejected,
+		View:                   view,
 	}, nil
 }
 
@@ -1346,7 +1392,7 @@ func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-API-Key")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-API-Key,X-Agent-Setup-Token")
 }
 
 func splitPath(path string) []string {

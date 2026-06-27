@@ -98,8 +98,13 @@ func batchCmd(args []string) error {
 		limit := fs.Int("limit", 100, "maximum tasks to summarize")
 		selectedOnly := fs.Bool("selected-only", true, "include only selected assets")
 		includeRejected := fs.Bool("include-rejected", false, "include rejected assets when selected-only=false")
+		view := fs.String("view", domain.BatchManifestViewEngineering, "manifest view: engineering or final_delivery")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
+		}
+		normalizedView, ok := domain.NormalizeBatchManifestView(*view)
+		if !ok {
+			return fmt.Errorf("unsupported --view %q", strings.TrimSpace(*view))
 		}
 		path := buildBatchManifestPath(*projectID, *campaignID, batchManifestOptions{
 			SessionID:       *sessionID,
@@ -111,6 +116,7 @@ func batchCmd(args []string) error {
 			Limit:           *limit,
 			SelectedOnly:    *selectedOnly,
 			IncludeRejected: *includeRejected,
+			View:            normalizedView,
 		})
 		return request("GET", *apiURL, path, nil)
 	default:
@@ -128,6 +134,7 @@ type batchManifestOptions struct {
 	Limit           int
 	SelectedOnly    bool
 	IncludeRejected bool
+	View            string
 }
 
 func buildBatchManifestPath(projectID, campaignID string, options batchManifestOptions) string {
@@ -156,6 +163,9 @@ func buildBatchManifestPath(projectID, campaignID string, options batchManifestO
 	values.Set("selected_only", strconv.FormatBool(options.SelectedOnly))
 	if options.IncludeRejected {
 		values.Set("include_rejected", "true")
+	}
+	if normalizedView, ok := domain.NormalizeBatchManifestView(options.View); ok && normalizedView != domain.BatchManifestViewEngineering {
+		values.Set("view", normalizedView)
 	}
 	path := fmt.Sprintf("/api/projects/%s/campaigns/%s/batch-manifest", projectID, campaignID)
 	if encoded := values.Encode(); encoded != "" {
@@ -1800,6 +1810,9 @@ func request(method, apiURL, path string, body []byte) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if setupToken := strings.TrimSpace(os.Getenv("AGENT_IMAGEFLOW_SETUP_TOKEN")); setupToken != "" {
+		req.Header.Set("X-Agent-Setup-Token", setupToken)
 	}
 	if apiKey := strings.TrimSpace(os.Getenv("AGENT_IMAGEFLOW_API_KEY")); apiKey != "" {
 		req.Header.Set("X-API-Key", apiKey)

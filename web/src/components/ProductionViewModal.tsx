@@ -35,7 +35,7 @@ interface ProductionViewFilters {
 }
 
 type AssetReviewAction = 'select' | 'reject'
-type ManifestMode = 'selected' | 'all' | 'includeRejected'
+export type ManifestMode = 'selected' | 'all' | 'includeRejected' | 'finalDelivery'
 
 const DEFAULT_FILTERS: ProductionViewFilters = {
   sessionId: '',
@@ -101,10 +101,29 @@ function getTaskErrorSummary(tasks: AgentImageflowBatchStorySummaryTask[]): stri
   return [errorTask.error_stage, errorTask.error_code, errorTask.error_message].filter(Boolean).join(' · ')
 }
 
-function getManifestModeLabel(mode: ManifestMode): string {
+export function getManifestModeLabel(mode: ManifestMode): string {
+  if (mode === 'finalDelivery') return 'Final delivery manifest'
   if (mode === 'selected') return '已选 manifest'
   if (mode === 'includeRejected') return '全部含拒绝'
   return '全部 manifest'
+}
+
+export function buildManifestRequestOptions(mode: ManifestMode): {
+  selectedOnly: boolean
+  includeRejected: boolean
+  view?: 'final_delivery'
+} {
+  if (mode === 'finalDelivery') {
+    return {
+      selectedOnly: true,
+      includeRejected: false,
+      view: 'final_delivery',
+    }
+  }
+  return {
+    selectedOnly: mode === 'selected',
+    includeRejected: mode === 'includeRejected',
+  }
 }
 
 function toSafeManifestFilePart(value: string): string {
@@ -275,11 +294,23 @@ function SceneCard({
               <Field label="Panel" value={continuity.panel_index} />
               <Field label="Role" value={continuity.narrative_role} />
               <Field label="对白" value={continuity.dialogue} />
+              <Field label="前情绪" value={continuity.emotion_before} />
+              <Field label="后情绪" value={continuity.emotion_after} />
+              <Field label="姿态变化" value={continuity.pose_change} />
+              <Field label="关系推进" value={continuity.relationship_shift} />
               <Field label="上一格资产" value={continuity.previous_panel_asset_id} />
               <Field label="参考参与" value={continuity.provider_reference_participation} />
+              <Field label="必须变化" value={continuity.must_change?.join(' / ')} />
+              <Field label="必须去掉" value={continuity.must_not_keep?.join(' / ')} />
               <Field label="已解析参考" value={continuityResolvedCount} />
               <Field label="Story Rev" value={continuity.story_revision} />
               <Field label="Plan Hash" value={continuity.story_plan_hash} />
+            </div>
+          )}
+
+          {continuity?.state_transition_notes && (
+            <div className="break-words rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-100">
+              {continuity.state_transition_notes}
             </div>
           )}
 
@@ -560,8 +591,7 @@ export default function ProductionViewModal() {
       return
     }
     const limit = Number.parseInt(filters.limit, 10)
-    const selectedOnly = mode === 'selected'
-    const includeRejected = mode === 'includeRejected'
+    const { selectedOnly, includeRejected, view } = buildManifestRequestOptions(mode)
     setPendingManifestModes((current) => ({ ...current, [mode]: true }))
     try {
       const manifest = await getAgentImageflowBatchManifest(baseUrl, {
@@ -577,9 +607,10 @@ export default function ProductionViewModal() {
         limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
         selectedOnly,
         includeRejected,
+        view,
       })
       const scopePart = toSafeManifestFilePart(filters.batchId || filters.sessionId)
-      const modePart = mode === 'includeRejected' ? 'include-rejected' : mode
+      const modePart = mode === 'includeRejected' ? 'include-rejected' : mode === 'finalDelivery' ? 'final-delivery' : mode
       downloadManifestJson(manifest, `agent-imageflow-manifest-${scopePart}-${modePart}.json`)
       showToast(`${getManifestModeLabel(mode)} 已导出`, 'success')
     } catch (nextError) {
@@ -752,7 +783,7 @@ export default function ProductionViewModal() {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-                  {(['selected', 'all', 'includeRejected'] as ManifestMode[]).map((mode) => (
+                  {(['selected', 'all', 'includeRejected', 'finalDelivery'] as ManifestMode[]).map((mode) => (
                     <button
                       key={mode}
                       type="button"

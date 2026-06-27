@@ -69,6 +69,66 @@ func TestInitializeAndToolsList(t *testing.T) {
 	t.Fatalf("list_image_assets schema was not found")
 }
 
+func TestInitializeUsesConfiguredServerVersion(t *testing.T) {
+	server := New(&fakeService{}, Defaults{
+		WorkspaceID: "ws_default",
+		ProjectID:   "prj_xhs_anime",
+		CampaignID:  "cmp_7day_cover",
+		Version:     "0.2.0",
+	})
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test"}}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	responses := decodeResponses(t, out.String())
+	if len(responses) != 1 {
+		t.Fatalf("got %d responses, want 1: %s", len(responses), out.String())
+	}
+	initialize := responses[0]["result"].(map[string]any)
+	serverInfo := initialize["serverInfo"].(map[string]any)
+	if serverInfo["version"] != "0.2.0" {
+		t.Fatalf("unexpected server version: %#v", serverInfo["version"])
+	}
+}
+
+func TestCreateImageTaskSchemaDocumentsCaptionLineageSemantics(t *testing.T) {
+	server := New(&fakeService{}, Defaults{})
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		"",
+	}, "\n")
+
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+	tools := decodeResponses(t, out.String())[1]["result"].(map[string]any)["tools"].([]any)
+	for _, item := range tools {
+		tool := item.(map[string]any)
+		if tool["name"] != "create_image_task" {
+			continue
+		}
+		properties := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+		metadata := properties["metadata_json"].(map[string]any)
+		metadataProps := metadata["properties"].(map[string]any)
+		lineage := metadataProps["caption_lineage"].(map[string]any)
+		lineageProps := lineage["properties"].(map[string]any)
+		for _, key := range []string{"speaker_character_id", "caption_text", "bubble_anchor", "tail_direction", "caption_intent", "auto_select_derivative", "avoid_covering_subjects"} {
+			if _, ok := lineageProps[key]; !ok {
+				t.Fatalf("caption_lineage schema missing %s: %#v", key, lineageProps)
+			}
+		}
+		return
+	}
+	t.Fatal("create_image_task schema was not found")
+}
+
 func TestToolCallUsesDefaultsAndStructuredContent(t *testing.T) {
 	service := &fakeService{}
 	server := New(service, Defaults{WorkspaceID: "ws_default", ProjectID: "prj_xhs_anime", CampaignID: "cmp_7day_cover"})

@@ -27,18 +27,25 @@ func TestExtractBatchStoryContinuitySummaryReadsStoryContextV1(t *testing.T) {
 				"panel_plan": []map[string]any{
 					{"panel_index": 1, "scene_id": "scene_001", "dialogue": "才没有等你"},
 					{
-						"panel_index":     2,
-						"scene_id":        "scene_002",
-						"narrative_role":  "arrival",
-						"dialogue":        "牛奶来啦",
-						"dialogue_intent": "温柔回应小白。",
-						"previous_state":  "小白坐在沙发左侧。",
-						"trigger_event":   "鸡毛端着牛奶出现。",
-						"visible_action":  "鸡毛从右侧出现。",
-						"resulting_state": "两只小狗进入同一空间。",
-						"must_keep_props": []string{"粉色沙发", "热牛奶"},
-						"allowed_changes": []string{"鸡毛进入画面"},
-						"target_path":     "stories/pet_story/scene_002.png",
+						"panel_index":            2,
+						"scene_id":               "scene_002",
+						"narrative_role":         "arrival",
+						"dialogue":               "牛奶来啦",
+						"dialogue_intent":        "温柔回应小白。",
+						"previous_state":         "小白坐在沙发左侧。",
+						"trigger_event":          "鸡毛端着牛奶出现。",
+						"visible_action":         "鸡毛从右侧出现。",
+						"resulting_state":        "两只小狗进入同一空间。",
+						"emotion_before":         "嘴硬但期待",
+						"emotion_after":          "安心并开始靠近",
+						"pose_change":            "从独坐抱书变成抬头看向鸡毛",
+						"relationship_shift":     "从等待变成正式同框互动",
+						"must_keep_props":        []string{"粉色沙发", "热牛奶"},
+						"allowed_changes":        []string{"鸡毛进入画面"},
+						"must_change":            []string{"鸡毛必须进入画面"},
+						"must_not_keep":          []string{"不能继续只有小白单独在画面里"},
+						"state_transition_notes": "必须看得出上一格导致这一格。",
+						"target_path":            "stories/pet_story/scene_002.png",
 					},
 				},
 			},
@@ -66,5 +73,57 @@ func TestExtractBatchStoryContinuitySummaryReadsStoryContextV1(t *testing.T) {
 	}
 	if len(summary.MustKeepProps) != 2 || len(summary.AllowedChanges) != 1 {
 		t.Fatalf("panel causality arrays missing: %#v", summary)
+	}
+	if summary.EmotionBefore != "嘴硬但期待" ||
+		summary.EmotionAfter != "安心并开始靠近" ||
+		summary.PoseChange != "从独坐抱书变成抬头看向鸡毛" ||
+		summary.RelationshipShift != "从等待变成正式同框互动" ||
+		len(summary.MustChange) != 1 ||
+		len(summary.MustNotKeep) != 1 ||
+		summary.StateTransitionNotes != "必须看得出上一格导致这一格。" {
+		t.Fatalf("state transition semantics missing: %#v", summary)
+	}
+}
+
+func TestExtractBatchStoryVisualContextReadsReferenceDiagnostics(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"character_ids":       []string{"dog_jimao", "dog_xiaobai"},
+		"reference_asset_ids": []string{"asset_jimao_primary"},
+		"prompt_recipe_id":    "pet_dialogue_card",
+		"project_visual_context_diagnostics": map[string]any{
+			"primary_readiness":                     "image_backed",
+			"labels":                                []string{"image_backed", "missing_environment_reference"},
+			"summary":                               "image-backed, missing environment reference",
+			"active_character_count":                2,
+			"character_with_image_count":            2,
+			"missing_character_image_count":         0,
+			"missing_character_ids":                 []string{},
+			"active_reference_count":                1,
+			"environment_reference_count":           0,
+			"image_reference_count":                 1,
+			"negative_prompt_covers_species_drift":  true,
+			"identity_signal_present":               true,
+			"provider_reference_participation_risk": "likely_resolved_input_files",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal structured input: %v", err)
+	}
+
+	visualContext := extractBatchStoryVisualContext(raw)
+	if visualContext.PromptRecipeID != "pet_dialogue_card" {
+		t.Fatalf("prompt recipe id missing: %#v", visualContext)
+	}
+	if visualContext.ReferenceDiagnostics == nil {
+		t.Fatalf("reference diagnostics missing: %#v", visualContext)
+	}
+	if visualContext.ReferenceDiagnostics.PrimaryReadiness != "image_backed" {
+		t.Fatalf("primary readiness = %q, want image_backed; value=%#v", visualContext.ReferenceDiagnostics.PrimaryReadiness, visualContext.ReferenceDiagnostics)
+	}
+	if !visualContext.ReferenceDiagnostics.NegativePromptCoversSpeciesDrift {
+		t.Fatalf("negative prompt coverage should be preserved: %#v", visualContext.ReferenceDiagnostics)
+	}
+	if visualContext.ReferenceDiagnostics.ProviderReferenceParticipationRisk != "likely_resolved_input_files" {
+		t.Fatalf("provider risk missing: %#v", visualContext.ReferenceDiagnostics)
 	}
 }
