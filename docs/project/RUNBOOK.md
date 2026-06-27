@@ -981,12 +981,15 @@ Batch manifest 使用注意：
 - `target_path` 采用 asset 优先、scene 兜底；manifest 继续只输出公开 delivery URL、thumbnail URL、metadata URL 和逻辑交付路径，不输出 `local_path`、宿主机绝对路径、provider key、project API key、cookie 或 session token。
 - Manifest 只包含公开 delivery URL、metadata URL、target_path、scene/story/task id 和 visual context 摘要；不得加入 `local_path`、provider key、project API key、cookie 或 session token。
 - ZIP、多文件下载和服务端打包能力已在 P1-BSE-010 决定后置；未另行确认前不实现。
+- 已新增 batch-first NAS readable mirror：运维可把 final/selected originals、thumbnails 和 `manifest.final.json` materialize 到 `workspaces/<workspace>/projects/<project>/batches/<batch>`，方便人工通过 Finder/NAS 按一组图复盘，而无需翻 `asset_id` 目录。
 
 常用查询方式：
 
 - REST 工程视图：`GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest?session_id=<session_id>&batch_id=<batch_id>&selected_only=true`
 - REST final delivery 视图：`GET /api/projects/{project_id}/campaigns/{campaign_id}/batch-manifest?session_id=<session_id>&batch_id=<batch_id>&selected_only=true&view=final_delivery`
 - CLI final delivery 视图：`vag batch manifest --project-id <project_id> --campaign-id <campaign_id> --session-id <session_id> --batch-id <batch_id> --selected-only --view final_delivery`
+- 本地 readable mirror：`vag storage mirror-final --workspace <workspace_id> --project <project_id> --campaign <campaign_id> --session-id <session_id> --batch-id <batch_id>`
+- Admin 受控 REST readable mirror：`POST /api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/final-delivery-mirror`
 
 ### NAS / Docker / WebDAV / SMB access guide
 
@@ -1045,8 +1048,16 @@ Manifest -> NAS 复制交付最小流程：
 
 1. 人工复盘/NAS 复制时优先取 `selected_only=true&view=final_delivery` 的 batch manifest，确认最终交付使用的是哪组 asset、`delivery_role` 是什么、每个 scene/story 对应哪个 `target_path`；如果需要更完整工程事实，再补看默认 `engineering` 视图。
 2. 如果只需要平台交付链接，直接把 `delivery_url` / `thumbnail_url` / `metadata_url` 交给下游，不必翻物理目录。
-3. 如果需要人工从 NAS/共享目录复制交付件，先在只读共享里按 manifest 的 `target_path` 组织目标副本目录，再把实际文件复制到共享外的新目录或外部交付目录。
-4. 不要试图通过改平台内部 `asset_id` 目录名来表达 story、scene 或发布分组；这类业务语义只由 manifest / metadata 表达。
+3. 如果希望平台直接生成给人看的批次目录，先执行一次 readable mirror materialize；平台会在 mirror root 下写出 `manifest.final.json`、`final/<target_path>` 和 `thumbnails/<target_path>.webp`。
+4. 如果还需要人工从 NAS/共享目录复制交付件，再从 readable mirror 或只读共享复制到共享外的新目录或外部交付目录。
+5. 不要试图通过改平台内部 `asset_id` 目录名来表达 story、scene 或发布分组；这类业务语义只由 manifest / metadata 表达。
+
+Readable mirror 约束：
+
+- mirror 默认根目录是 `STORAGE_ROOT/final-delivery-mirror`；可通过 `FINAL_DELIVERY_MIRROR_ROOT` 覆盖。
+- mirror 只复制 `delivery_role=final_delivery` 的 originals 和现有 thumbnails，不复制所有 generated/rejected 候选图。
+- 目录优先复用 final asset 的 `target_path`；如果缺失，则回退为 `stories/<story_id>/<scene_id>`。
+- mirror 是派生视图，不是事实源。删除、清空或重建 mirror 不会改变 DB、canonical storage、audit、cleanup 或 integrity 语义。
 
 NAS 只读共享 checklist：
 

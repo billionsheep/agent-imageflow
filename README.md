@@ -179,6 +179,8 @@ ghcr.io/billionsheep/agent-imageflow-web:${IMAGE_TAG}
 docker login ghcr.io
 cp .env.example.prod .env.prod
 # 编辑 .env.prod，设置 PUBLIC_BASE_URL、DATABASE_URL、Admin、Basic、provider 和 storage 变量
+# 如需给 Finder/NAS 一份批次可读目录，可额外设置 FINAL_DELIVERY_MIRROR_ROOT；
+# 留空时默认写到 STORAGE_ROOT/final-delivery-mirror
 docker compose -f docker-compose.prod.yml --env-file .env.prod pull
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps

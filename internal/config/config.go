@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -10,6 +11,7 @@ type Config struct {
 	DatabaseURL                    string
 	RedisURL                       string
 	StorageRoot                    string
+	FinalDeliveryMirrorRoot        string
 	PublicBaseURL                  string
 	HTTPAddr                       string
 	RateLimitWindowSeconds         int
@@ -56,10 +58,12 @@ type Config struct {
 
 func Load() Config {
 	providerTimeout := envInt("PROVIDER_TIMEOUT_SECONDS", 300)
+	storageRoot := env("STORAGE_ROOT", "./storage")
 	return Config{
 		DatabaseURL:                    env("DATABASE_URL", "postgres://agent:agent@localhost:5432/agent_imageflow?sslmode=disable"),
 		RedisURL:                       env("REDIS_URL", "redis://localhost:6379/0"),
-		StorageRoot:                    env("STORAGE_ROOT", "./storage"),
+		StorageRoot:                    storageRoot,
+		FinalDeliveryMirrorRoot:        env("FINAL_DELIVERY_MIRROR_ROOT", filepath.Join(storageRoot, "final-delivery-mirror")),
 		PublicBaseURL:                  strings.TrimRight(env("PUBLIC_BASE_URL", "http://localhost:8081"), "/"),
 		HTTPAddr:                       env("HTTP_ADDR", ":8081"),
 		RateLimitWindowSeconds:         envInt("RATE_LIMIT_WINDOW_SECONDS", 60),

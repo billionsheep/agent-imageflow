@@ -242,6 +242,7 @@ func TestStorageCleanupRoutesUseProjectScopeAuthAndAudit(t *testing.T) {
 	}{
 		{name: "preview", leaf: "storage-cleanup-preview", method: http.MethodPost, wantAction: "preview_storage_cleanup"},
 		{name: "execute", leaf: "storage-cleanup-execute", method: http.MethodPost, wantAction: "execute_storage_cleanup"},
+		{name: "mirror", leaf: "final-delivery-mirror", method: http.MethodPost, wantAction: "materialize_final_delivery_mirror"},
 	}
 
 	for _, tc := range tests {

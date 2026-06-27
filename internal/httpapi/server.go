@@ -167,6 +167,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleStorageCleanupPreview(w, r, parts[2], parts[4], parts[6])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
 		s.handleStorageCleanupExecute(w, r, parts[2], parts[4], parts[6])
+	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "final-delivery-mirror"):
+		s.handleMaterializeBatchFinalDeliveryMirror(w, r, parts[2], parts[4], parts[6])
 	case r.Method == http.MethodPost && match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "tasks"):
 		s.handleCreateTask(w, r, parts[2], parts[4], parts[6])
 	case isRead && match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
@@ -394,6 +396,7 @@ func routeAllowsAgentSetupToken(parts []string, method string) bool {
 func routeRequiresAdminSession(parts []string, method string) bool {
 	return method == http.MethodPost && (match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute") ||
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "final-delivery-mirror") ||
 		match(parts, "api", "assets", "*", "archive") ||
 		match(parts, "api", "assets", "*", "restore"))
 }
@@ -480,16 +483,19 @@ func (s *Server) resolveRequestAuthScope(r *http.Request, parts []string) (reque
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-integrity"),
 		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview"),
-		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"):
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
+		match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "final-delivery-mirror"):
 		return requestAuthScope{
 			WorkspaceID: parts[2],
 			ProjectID:   parts[4],
 			CampaignID:  parts[6],
 			AllowAdmin:  true,
 			RequireAdmin: match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
-				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute") ||
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "final-delivery-mirror"),
 			RequireAdminSession: match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-preview") ||
-				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute"),
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "storage-cleanup-execute") ||
+				match(parts, "api", "workspaces", "*", "projects", "*", "campaigns", "*", "final-delivery-mirror"),
 		}, true, nil
 	case match(parts, "api", "workspaces", "*", "projects", "*", "quality-profile"):
 		return requestAuthScope{WorkspaceID: parts[2], ProjectID: parts[4]}, true, nil
@@ -1145,6 +1151,26 @@ func (s *Server) handleGetBatchManifest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	response, err := s.service.GetBatchManifest(r.Context(), query)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleMaterializeBatchFinalDeliveryMirror(w http.ResponseWriter, r *http.Request, workspaceID, projectID, campaignID string) {
+	defer r.Body.Close()
+	var req domain.BatchFinalDeliveryMirrorRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	response, err := s.service.MaterializeBatchFinalDeliveryMirror(r.Context(), domain.Scope{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		CampaignID:  campaignID,
+	}, req)
 	if err != nil {
 		writeServiceError(w, err)
 		return

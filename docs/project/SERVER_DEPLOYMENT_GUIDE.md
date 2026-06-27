@@ -70,6 +70,7 @@ chmod 600 .env.prod
 - `OPENAI_COMPATIBLE_MODEL`
 - `FAL_API_KEY`
 - `AGENT_IMAGEFLOW_STORAGE_ROOT`
+- `FINAL_DELIVERY_MIRROR_ROOT`
 - `AGENT_IMAGEFLOW_POSTGRES_DATA`
 - `AGENT_IMAGEFLOW_REDIS_DATA`
 
@@ -81,12 +82,19 @@ AGENT_IMAGEFLOW_POSTGRES_DATA=/volume1/agent-imageflow/postgres
 AGENT_IMAGEFLOW_REDIS_DATA=/volume1/agent-imageflow/redis
 ```
 
+如果你希望 readable mirror 和 canonical storage 一起落在同一个 NAS 根目录，`FINAL_DELIVERY_MIRROR_ROOT` 可以留空，服务会默认写到 `STORAGE_ROOT/final-delivery-mirror`。如果要覆盖成容器内其他路径，再额外配置：
+
+```dotenv
+FINAL_DELIVERY_MIRROR_ROOT=/data/agent-imageflow/final-delivery-mirror
+```
+
 第一版 NAS 治理边界：
 
 - DB / metadata / manifest 是事实源；不要把物理目录名当成 project、campaign、story、scene 或 asset 状态。
 - 人工/NAS 浏览建议只读；复制交付件时从共享目录复制出去，不在平台管理目录内移动、重命名或删除文件。
 - 如果 NAS 提供 SMB/WebDAV/Finder，只把它当成浏览/复制/备份入口，不在 Agent ImageFlow 应用内实现 WebDAV/SMB server。
 - 服务容器账号需要对 storage root 可写；人工浏览账号默认只读；恢复演练完成后再重新开放共享给人工浏览。
+- 如果需要给人工一个按批次可读的目录，而不是 canonical `asset_id` 目录，使用 final-delivery readable mirror：平台会把 `manifest.final.json`、final originals 和 thumbnails materialize 到 `workspaces/<workspace>/projects/<project>/batches/<batch>`。
 
 ## 登录 GHCR
 
@@ -214,7 +222,7 @@ Web 验收：
 
 - 服务器类型：NAS / Linux VM / 内网 Docker 主机。
 - 部署目录，例如 `/opt/agent-imageflow`。
-- `IMAGE_TAG`，例如 `main`、`v0.2.0` 或 `sha-xxxxxxx`。
+- `IMAGE_TAG`，例如 `main`、`v0.2.1` 或 `sha-xxxxxxx`。
 - `PUBLIC_BASE_URL` 的域名，不包含任何账号、密码或 token。
 - GHCR pull 结果：成功/失败和非敏感错误摘要。
 - `docker compose ... ps` 的服务状态摘要。

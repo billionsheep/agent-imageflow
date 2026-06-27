@@ -1656,9 +1656,39 @@ func repairCmd(args []string) error {
 
 func storageCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: vag storage cleanup-preview|cleanup-execute")
+		return fmt.Errorf("usage: vag storage cleanup-preview|cleanup-execute|mirror-final")
 	}
 	switch args[0] {
+	case "mirror-final":
+		fs := flag.NewFlagSet("vag storage mirror-final", flag.ExitOnError)
+		workspaceID := fs.String("workspace", env("DEFAULT_WORKSPACE_ID", "ws_default"), "workspace id")
+		projectID := fs.String("project", env("DEFAULT_PROJECT_ID", "prj_xhs_anime"), "project id")
+		campaignID := fs.String("campaign", env("DEFAULT_CAMPAIGN_ID", "cmp_7day_cover"), "campaign id")
+		sessionID := fs.String("session-id", "", "limit the mirror to one session metadata value")
+		batchID := fs.String("batch-id", "", "batch id to materialize into the readable mirror")
+		limit := fs.Int("limit", 1000, "maximum tasks/scenes to read while building the mirror")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		service, cleanup, err := newRepairService(ctx)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		result, err := service.MaterializeBatchFinalDeliveryMirror(ctx, domain.Scope{
+			WorkspaceID: strings.TrimSpace(*workspaceID),
+			ProjectID:   strings.TrimSpace(*projectID),
+			CampaignID:  strings.TrimSpace(*campaignID),
+		}, domain.BatchFinalDeliveryMirrorRequest{
+			SessionID: strings.TrimSpace(*sessionID),
+			BatchID:   strings.TrimSpace(*batchID),
+			Limit:     *limit,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSON(result)
 	case "cleanup-preview":
 		fs := flag.NewFlagSet("vag storage cleanup-preview", flag.ExitOnError)
 		workspaceID := fs.String("workspace", env("DEFAULT_WORKSPACE_ID", "ws_default"), "workspace id")
@@ -1873,6 +1903,7 @@ func usage() {
   vag benchmark image-generation --provider mock --tasks 32 --requested-count 1 --concurrency-label worker-4
   vag batch progress --session-id <session_id> --batch-id <batch_id>
   vag batch manifest --session-id <session_id> --batch-id <batch_id> [--selected-only=false --include-rejected]
+  vag storage mirror-final --workspace ws_default --project prj_xxx --campaign cmp_xxx --batch-id batch_xxx [--session-id session_xxx]
   vag storage cleanup-preview [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx] [--session-id s] [--batch-id b] [--asset-id asset_x]
   vag storage cleanup-execute --execute --dry-run-token <token> [--workspace ws_default] [--project prj_xxx] [--campaign cmp_xxx] [--session-id s] [--batch-id b] [--asset-id asset_x]
   vag project access get

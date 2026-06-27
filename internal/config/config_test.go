@@ -133,3 +133,19 @@ func TestLoadAgentSetupToken(t *testing.T) {
 		t.Fatalf("agent setup token was not loaded: %#v", cfg)
 	}
 }
+
+func TestLoadFinalDeliveryMirrorRoot(t *testing.T) {
+	t.Setenv("STORAGE_ROOT", "/tmp/agent-imageflow-storage")
+	t.Setenv("FINAL_DELIVERY_MIRROR_ROOT", "")
+
+	cfg := Load()
+	if cfg.FinalDeliveryMirrorRoot != "/tmp/agent-imageflow-storage/final-delivery-mirror" {
+		t.Fatalf("default final delivery mirror root = %q", cfg.FinalDeliveryMirrorRoot)
+	}
+
+	t.Setenv("FINAL_DELIVERY_MIRROR_ROOT", "/mirror-root")
+	cfg = Load()
+	if cfg.FinalDeliveryMirrorRoot != "/mirror-root" {
+		t.Fatalf("override FINAL_DELIVERY_MIRROR_ROOT = %q, want /mirror-root", cfg.FinalDeliveryMirrorRoot)
+	}
+}

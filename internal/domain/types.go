@@ -789,6 +789,29 @@ type BatchFinalDeliveryManifest struct {
 	FinalAssets []BatchFinalDeliveryAsset `json:"final_assets"`
 }
 
+type BatchFinalDeliveryMirrorRequest struct {
+	SessionID string `json:"session_id,omitempty"`
+	BatchID   string `json:"batch_id"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+type BatchFinalDeliveryMirrorResponse struct {
+	GeneratedAt        time.Time `json:"generated_at"`
+	WorkspaceID        string    `json:"workspace_id"`
+	ProjectID          string    `json:"project_id"`
+	CampaignID         string    `json:"campaign_id"`
+	SessionID          string    `json:"session_id,omitempty"`
+	BatchID            string    `json:"batch_id"`
+	ManifestView       string    `json:"manifest_view"`
+	SelectedOnly       bool      `json:"selected_only"`
+	MirrorRelativePath string    `json:"mirror_relative_path"`
+	ManifestFile       string    `json:"manifest_file"`
+	FinalDir           string    `json:"final_dir"`
+	ThumbnailDir       string    `json:"thumbnail_dir"`
+	SceneCount         int       `json:"scene_count"`
+	FinalAssetCount    int       `json:"final_asset_count"`
+}
+
 type BatchManifestScene struct {
 	StoryID                string                      `json:"story_id"`
 	SceneID                string                      `json:"scene_id"`

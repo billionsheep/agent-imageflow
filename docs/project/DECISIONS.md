@@ -12,6 +12,12 @@
 - Reason: 当前最紧迫的问题是“人工需要一眼看懂每个 scene 最终该交付哪张图”，不是“缺少另一套存储或导出系统”。在现有 manifest 上增量补出第二视图，可以最大化复用已有 `delivery_role`、`caption_lineage`、`continuity`、`visual_context`、delivery URLs 和 Web 导出入口，同时避免为第一轮交付层引入新路由、新表或迁移。
 - Impact: REST/CLI/Web 现在都可以在不翻深层 metadata 的前提下直接读 `final_delivery.counts/stories/scenes/final_assets`；caption 派生图会扁平暴露 `derived_from_asset_id` / `derivation_type`，`target_path` 采用 asset 优先、scene 兜底，响应继续不暴露 `local_path` 或任何 secret-like 字段。`P1-DLV-004/005/006/007` 的导出包、NAS readable mirror、project delivery defaults 和治理联动继续作为后续独立切片，不在本轮落代码。
 
+## 2026-06-27: NAS readable mirror 第一轮采用 batch-first materialize，不改事实源也不做后台自动同步
+
+- Decision: `P1-DLV-005` 第一轮采用显式 materialize 的 batch-first readable mirror：默认 mirror root 为 `STORAGE_ROOT/final-delivery-mirror`，可通过 `FINAL_DELIVERY_MIRROR_ROOT` 覆盖；运维通过本地命令 `vag storage mirror-final` 或 Admin 受控 REST `POST /api/workspaces/{workspace_id}/projects/{project_id}/campaigns/{campaign_id}/final-delivery-mirror`，把 final/selected originals、thumbnails 和 `manifest.final.json` 写到 `workspaces/<workspace>/projects/<project>/batches/<batch>`。mirror 优先复用 final asset 的 `target_path`，缺省回退到 `stories/<story_id>/<scene_id>`；path traversal 直接拒绝。
+- Reason: 用户当前最需要的是“能在 NAS/Finder 里按一组图复盘”，而不是把 canonical storage 改成第二套事实源，也不是再造一个大导出系统。显式 materialize 比后台自动同步更可控：不会把每次 select/reject 都扩成写盘副作用，也不会把 mirror 目录误当成状态机一部分。
+- Impact: 现在 human-readable 物理目录层已经落地，但仍保持“派生视图而非事实源”的边界：mirror 丢失可重建，删除/清空 mirror 不影响 DB、canonical originals/thumbnails/metadata、audit 或 cleanup/integrity。后续若要做 zero-touch 自动刷新、story/batch ZIP 或 project delivery defaults，继续归到 `P1-DLV-004/006/007` 单独推进。
+
 ## 2026-06-26: Provider partial-success 与 asset_summary 先做只读 runtime 语义，不扩状态机或 Web 推理层
 
 - Decision: `V02-MCPH-007` 与 `V02-MCPH-009` 第一版都走只读 contract 路线：task、batch summary 和 batch manifest 统一补 `requested_count`、`delivered_count`、`partial_success_reason`、`provider_error_summary`；单资产 `asset` / `metadata` 响应补 `asset_summary`，收敛 story/scene/panel、dialogue/caption、derived_from、previous_panel、reference participation、provider/model、asset status 和 delivery role。Web 审图只消费这些只读字段，不再从深层 metadata 二次推理业务语义。
